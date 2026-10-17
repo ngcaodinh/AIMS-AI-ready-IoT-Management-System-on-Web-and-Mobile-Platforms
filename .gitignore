@@ -1,0 +1,26 @@
+# Dependencies and build outputs
+node_modules/
+target/
+dist/
+build/
+.next/
+.dart_tool/
+.gradle/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Tooling caches and generated IDE state
+.idea/
+.vscode/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+docs
+
+/.agents
+AGENTS.md

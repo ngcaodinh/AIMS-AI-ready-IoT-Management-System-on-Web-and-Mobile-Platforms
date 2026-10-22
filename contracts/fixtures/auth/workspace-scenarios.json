@@ -1,0 +1,159 @@
+{
+  "contractVersion": "0.1.0",
+  "fixtureKind": "synthetic-contract-example",
+  "note": "Các scenario mô tả contract; không là bản ghi người dùng hoặc provider evidence.",
+  "scenarios": [
+    {
+      "id": "CT-BOOTSTRAP-EMPTY",
+      "operationId": "listAvailableWorkspaces",
+      "request": {"authState": "valid-full-no-active-membership", "query": {}},
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"items": [], "nextCursor": null}
+      },
+      "assertions": ["empty-copy-khong-co-workspace-kha-dung", "no-workspace-resource"]
+    },
+    {
+      "id": "CT-BOOTSTRAP-TWO-WORKSPACES",
+      "operationId": "listAvailableWorkspaces",
+      "request": {"authState": "valid-full-A-admin-B-user-C-suspended-D-removed", "query": {"limit": 20}},
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "items": [
+            {"id": "33333333-3333-4333-8333-333333333333", "name": "Workspace A", "status": "ACTIVE", "role": "ADMIN", "revision": 1},
+            {"id": "44444444-4444-4444-8444-444444444444", "name": "Workspace B", "status": "ACTIVE", "role": "USER", "revision": 2}
+          ],
+          "nextCursor": null
+        }
+      },
+      "assertions": ["suspended-and-removed-absent", "no-auto-selection", "no-device-or-dashboard-data"]
+    },
+    {
+      "id": "CT-BOOTSTRAP-CURSOR-PAGE",
+      "operationId": "listAvailableWorkspaces",
+      "request": {"authState": "valid-full", "query": {"limit": 1}},
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "items": [{"id": "33333333-3333-4333-8333-333333333333", "name": "Workspace A", "status": "ACTIVE", "role": "ADMIN", "revision": 1}],
+          "nextCursor": "<nonfunctional-cursor>"
+        }
+      },
+      "assertions": ["non-null-cursor-is-not-empty"]
+    },
+    {
+      "id": "CT-BOOTSTRAP-CURSOR-STALE",
+      "operationId": "listAvailableWorkspaces",
+      "request": {"authState": "membership-changed-after-first-page", "query": {"cursor": "<stale-nonfunctional-cursor>"}},
+      "response": {
+        "status": 400,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "CURSOR_INVALID", "message": "Trang dữ liệu không còn phù hợp.", "details": {}, "correlationId": "corr_cursor"}}
+      },
+      "assertions": ["restart-pagination", "no-stale-grant"]
+    },
+    {
+      "id": "CT-BOOTSTRAP-LIMITED-DENIED",
+      "operationId": "listAvailableWorkspaces",
+      "request": {"authState": "valid-limited"},
+      "response": {
+        "status": 403,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "PASSWORD_CHANGE_REQUIRED", "message": "Cần đổi mật khẩu trước khi tiếp tục.", "details": {}, "correlationId": "corr_workspace_limited"}}
+      },
+      "assertions": ["no-membership-data"]
+    },
+    {
+      "id": "CT-WORKSPACE-CREATE-SUCCESS",
+      "operationId": "createWorkspace",
+      "request": {
+        "authState": "valid-full-app-creator-has-four-workspaces",
+        "headers": {"Content-Type": "application/json", "Idempotency-Key": "synthetic-intent-key-001"},
+        "body": {"name": "Lab", "description": "Phòng thử", "defaultTimezone": "Asia/Bangkok"}
+      },
+      "response": {
+        "status": 201,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "id": "55555555-5555-4555-8555-555555555555",
+          "name": "Lab",
+          "description": "Phòng thử",
+          "defaultTimezone": "Asia/Bangkok",
+          "status": "ACTIVE",
+          "revision": 1,
+          "role": "ADMIN",
+          "creatorId": "11111111-1111-4111-8111-111111111111",
+          "membershipStatus": "ACTIVE",
+          "authzVersion": 1,
+          "membershipRevision": 1,
+          "membershipAuthzVersion": 1,
+          "createdAt": "2026-10-22T00:00:00Z",
+          "archivedAt": null
+        }
+      },
+      "assertions": ["workspace-membership-quota-preference-audit-atomic", "refetch-current-detail-before-select"]
+    },
+    {
+      "id": "CT-WORKSPACE-SELECT-RECHECK",
+      "operationId": "getWorkspaceDetail",
+      "request": {
+        "authState": "valid-full-current-active-admin-A",
+        "path": {"id": "33333333-3333-4333-8333-333333333333"}
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "id": "33333333-3333-4333-8333-333333333333",
+          "name": "Workspace A",
+          "description": null,
+          "defaultTimezone": "UTC",
+          "status": "ACTIVE",
+          "revision": 1,
+          "role": "ADMIN",
+          "creatorId": "11111111-1111-4111-8111-111111111111",
+          "membershipStatus": "ACTIVE",
+          "authzVersion": 1,
+          "membershipRevision": 1,
+          "membershipAuthzVersion": 1,
+          "createdAt": "2026-10-22T00:00:00Z",
+          "archivedAt": null
+        }
+      },
+      "assertions": ["server-rechecks-membership", "no-workspace-resource-yet"]
+    },
+    {
+      "id": "CT-WORKSPACE-SELECT-MEMBERSHIP-REMOVED",
+      "operationId": "getWorkspaceDetail",
+      "request": {
+        "authState": "valid-full-membership-removed-after-list",
+        "path": {"id": "33333333-3333-4333-8333-333333333333"}
+      },
+      "response": {
+        "status": 404,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "RESOURCE_NOT_FOUND", "message": "Không tìm thấy tài nguyên.", "details": {}, "correlationId": "corr_removed"}}
+      },
+      "assertions": ["no-stale-membership-grant", "no-resource-data"]
+    },
+    {
+      "id": "CT-WORKSPACE-CREATE-QUOTA",
+      "operationId": "createWorkspace",
+      "request": {
+        "authState": "valid-full-app-creator-has-five-workspaces",
+        "headers": {"Content-Type": "application/json", "Idempotency-Key": "synthetic-intent-key-002"},
+        "body": {"name": "Lab 6", "defaultTimezone": "UTC"}
+      },
+      "response": {
+        "status": 409,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "WORKSPACE_LIMIT_EXCEEDED", "message": "Đã đạt giới hạn workspace có thể tạo.", "details": {}, "correlationId": "corr_quota"}}
+      },
+      "assertions": ["no-sixth-workspace"]
+    }
+  ]
+}

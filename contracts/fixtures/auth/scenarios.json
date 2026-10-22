@@ -1,0 +1,325 @@
+{
+  "contractVersion": "0.1.0",
+  "fixtureKind": "synthetic-contract-example",
+  "note": "Các marker <...> không hoạt động; fixture không phải bằng chứng provider/client đã chạy.",
+  "scenarios": [
+    {
+      "id": "CT-AUTH-WEB-FULL",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": " Member@Example.Test ", "password": "synthetic-password-123", "clientType": "WEB"}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Set-Cookie": "iot_session=<nonfunctional>; Secure; HttpOnly; SameSite=Lax; Path=/api/v1; Max-Age=86400",
+          "X-CSRF-Token": "<nonfunctional-csrf>"
+        },
+        "body": {
+          "me": {"id": "11111111-1111-4111-8111-111111111111", "email": "member@example.test", "mustChangePassword": false},
+          "expiresAt": "2026-10-23T00:00:00Z",
+          "limited": false
+        }
+      }
+    },
+    {
+      "id": "CT-AUTH-ANDROID-FULL",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json"},
+        "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "ANDROID"}
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "me": {"id": "11111111-1111-4111-8111-111111111111", "email": "member@example.test", "mustChangePassword": false},
+          "expiresAt": "2026-10-23T00:00:00Z",
+          "limited": false,
+          "token": "<nonfunctional-bearer>"
+        }
+      }
+    },
+    {
+      "id": "CT-AUTH-WEB-LIMITED",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": "temporary@example.test", "password": "synthetic-password-456", "clientType": "WEB"}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Set-Cookie": "iot_session=<nonfunctional>; Secure; HttpOnly; SameSite=Lax; Path=/api/v1; Max-Age=86400",
+          "X-CSRF-Token": "<nonfunctional-csrf>"
+        },
+        "body": {
+          "me": {"id": "22222222-2222-4222-8222-222222222222", "email": "temporary@example.test", "mustChangePassword": true},
+          "expiresAt": "2026-10-23T00:00:00Z",
+          "limited": true
+        }
+      }
+    },
+    {
+      "id": "CT-AUTH-ANDROID-LIMITED",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json"},
+        "body": {"email": "temporary@example.test", "password": "synthetic-password-456", "clientType": "ANDROID"}
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "me": {"id": "22222222-2222-4222-8222-222222222222", "email": "temporary@example.test", "mustChangePassword": true},
+          "expiresAt": "2026-10-23T00:00:00Z",
+          "limited": true,
+          "token": "<nonfunctional-bearer>"
+        }
+      }
+    },
+    {
+      "id": "CT-AUTH-IOS-LIMITED-SERVER-ONLY",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json"},
+        "body": {"email": "temporary@example.test", "password": "synthetic-password-456", "clientType": "IOS"}
+      },
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "me": {"id": "22222222-2222-4222-8222-222222222222", "email": "temporary@example.test", "mustChangePassword": true},
+          "expiresAt": "2026-10-23T00:00:00Z",
+          "limited": true,
+          "token": "<nonfunctional-bearer>"
+        }
+      }
+    },
+    {
+      "id": "CT-AUTH-ME-FULL",
+      "operationId": "getMe",
+      "request": {"authState": "valid-web-full"},
+      "response": {
+        "status": 200,
+        "headers": {"Cache-Control": "no-store", "X-CSRF-Token": "<nonfunctional-csrf>"},
+        "body": {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "email": "member@example.test",
+          "mustChangePassword": false,
+          "displayTimezone": "UTC",
+          "preferencesRevision": 1
+        }
+      }
+    },
+    {
+      "id": "CT-AUTH-ME-LIMITED",
+      "operationId": "getMe",
+      "request": {"authState": "valid-web-limited"},
+      "response": {
+        "status": 403,
+        "headers": {"Cache-Control": "no-store", "X-CSRF-Token": "<nonfunctional-csrf>"},
+        "body": {"error": {"code": "PASSWORD_CHANGE_REQUIRED", "message": "Cần đổi mật khẩu trước khi tiếp tục.", "details": {}, "correlationId": "corr_limited"}}
+      }
+    },
+    {
+      "id": "CT-AUTH-INVALID",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": "unknown@example.test", "password": "synthetic-password-000", "clientType": "WEB"}
+      },
+      "response": {
+        "status": 401,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "AUTH_INVALID", "message": "Thông tin đăng nhập không hợp lệ.", "details": {}, "correlationId": "corr_invalid"}}
+      },
+      "assertions": ["no-session", "no-cookie", "same-public-shape-for-wrong-password-and-disabled"]
+    },
+    {
+      "id": "CT-AUTH-UNKNOWN-FIELD",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "WEB", "role": "ADMIN"}
+      },
+      "response": {
+        "status": 422,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "UNKNOWN_FIELD"}]}, "correlationId": "corr_validation"}}
+      },
+      "assertions": ["no-session", "no-cookie", "role-never-authority"]
+    },
+    {
+      "id": "CT-AUTH-DUPLICATE-KEY",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "rawBody": "{\"email\":\"member@example.test\",\"email\":\"other@example.test\",\"password\":\"synthetic-password-123\",\"clientType\":\"WEB\"}"
+      },
+      "response": {
+        "status": 400,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "DUPLICATE_FIELD"}]}, "correlationId": "corr_duplicate"}}
+      }
+    },
+    {
+      "id": "CT-AUTH-BODY-TOO-LARGE",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "rawBodyGenerator": {
+          "kind": "jsonWithTrailingAsciiWhitespace",
+          "prefix": "{\"email\":\"member@example.test\",\"password\":\"synthetic-password-123\",\"clientType\":\"WEB\"}",
+          "totalBytes": 65537
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "BODY_TOO_LARGE"}]}, "correlationId": "corr_body_size"}}
+      },
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted"]
+    },
+    {
+      "id": "CT-AUTH-UNSUPPORTED-CONTENT-TYPE",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "text/plain", "Origin": "https://nexa.example.test"},
+        "rawBody": "{\"email\":\"member@example.test\",\"password\":\"synthetic-password-123\",\"clientType\":\"WEB\"}"
+      },
+      "response": {
+        "status": 415,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "CONTENT_TYPE"}]}, "correlationId": "corr_content_type"}}
+      },
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted"]
+    },
+    {
+      "id": "CT-AUTH-RATE-LIMITED",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": "member@example.test", "password": "synthetic-password-000", "clientType": "WEB"},
+        "authState": "five-prior-failures-in-fixed-window"
+      },
+      "response": {
+        "status": 429,
+        "headers": {"Cache-Control": "no-store", "Retry-After": "480"},
+        "body": {"error": {"code": "RATE_LIMITED", "message": "Vui lòng đợi trước khi thử lại.", "details": {}, "correlationId": "corr_rate"}}
+      },
+      "assertions": ["no-password-verification", "no-window-extension", "no-auto-retry"]
+    },
+    {
+      "id": "CT-AUTH-SESSION-EXPIRED",
+      "operationId": "getMe",
+      "request": {"authState": "expired-web-session"},
+      "response": {
+        "status": 401,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "SESSION_EXPIRED", "message": "Phiên đăng nhập không còn hiệu lực.", "details": {}, "correlationId": "corr_expired"}}
+      }
+    },
+    {
+      "id": "CT-AUTH-MIXED-CREDENTIAL",
+      "operationId": "getMe",
+      "request": {"authState": "cookie-and-bearer-present"},
+      "response": {
+        "status": 400,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "VALIDATION_ERROR", "message": "Yêu cầu chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "TYPE"}]}, "correlationId": "corr_mixed"}}
+      }
+    },
+    {
+      "id": "CT-AUTH-CSRF-INVALID",
+      "operationId": "changeOwnPassword",
+      "request": {
+        "authState": "valid-web-limited",
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"currentPassword": "synthetic-password-456", "newPassword": "synthetic-password-789"}
+      },
+      "response": {
+        "status": 403,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "CSRF_INVALID", "message": "Yêu cầu bảo mật không hợp lệ.", "details": {}, "correlationId": "corr_csrf"}}
+      },
+      "assertions": ["no-password-change", "no-session-revoke"]
+    },
+    {
+      "id": "CT-AUTH-PASSWORD-SAME",
+      "operationId": "changeOwnPassword",
+      "request": {
+        "authState": "valid-app-limited",
+        "headers": {"Content-Type": "application/json"},
+        "body": {"currentPassword": "synthetic-password-456", "newPassword": "synthetic-password-456"}
+      },
+      "response": {
+        "status": 422,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "VALIDATION_ERROR", "message": "Mật khẩu mới chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/newPassword", "code": "SAME_AS_CURRENT"}]}, "correlationId": "corr_same"}}
+      }
+    },
+    {
+      "id": "CT-AUTH-PASSWORD-SUCCESS",
+      "operationId": "changeOwnPassword",
+      "request": {
+        "authState": "valid-app-limited",
+        "headers": {"Content-Type": "application/json"},
+        "body": {"currentPassword": "synthetic-password-456", "newPassword": "synthetic-password-789"}
+      },
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "assertions": ["all-account-sessions-revoked", "new-login-required", "no-automatic-full-session"]
+    },
+    {
+      "id": "CT-AUTH-LOGOUT-REPEAT",
+      "operationId": "logout",
+      "request": {"authState": "recognized-revoked-app-session"},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "assertions": ["other-session-remains-active"]
+    },
+    {
+      "id": "CT-AUTH-WRONG-PASSWORD",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": "member@example.test", "password": "synthetic-password-000", "clientType": "WEB"}
+      },
+      "response": {
+        "status": 401,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "AUTH_INVALID", "message": "Thông tin đăng nhập không hợp lệ.", "details": {}, "correlationId": "corr_wrong"}}
+      }
+    },
+    {
+      "id": "CT-AUTH-DISABLED",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": "disabled@example.test", "password": "synthetic-password-123", "clientType": "WEB"}
+      },
+      "response": {
+        "status": 401,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "AUTH_INVALID", "message": "Thông tin đăng nhập không hợp lệ.", "details": {}, "correlationId": "corr_disabled"}}
+      }
+    },
+    {
+      "id": "CT-AUTH-COMMIT-UNKNOWN",
+      "operationId": "login",
+      "request": {
+        "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test"},
+        "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "WEB"},
+        "authState": "database-commit-ack-lost"
+      },
+      "response": {
+        "status": 503,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Dịch vụ tạm thời không khả dụng.", "details": {}, "correlationId": "corr_unknown"}}
+      },
+      "assertions": ["no-credential-emitted", "possible-orphan-expires-within-24h", "client-does-not-assume-success"]
+    }
+  ]
+}

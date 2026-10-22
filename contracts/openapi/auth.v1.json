@@ -1,0 +1,375 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Nexa IoT authentication and bootstrap contract",
+    "version": "0.1.0",
+    "description": "Hợp đồng P1 của FEAT-TN-001/002/004/041. Artifact chờ provider-client test và owner review tại G1; không chứng minh API đã chạy."
+  },
+  "servers": [{"url": "/"}],
+  "tags": [{"name": "Global authentication"}],
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["Global authentication"],
+        "operationId": "login",
+        "summary": "Tạo một phiên độc lập theo client",
+        "description": "Public, HTTPS, tối đa 64 KiB, không Idempotency-Key và không workspace context. WEB đòi Origin cùng HTTPS origin hoặc Referer HTTPS cùng origin nếu thiếu Origin. Browser origin policy vẫn áp dụng khi body khai ANDROID/IOS. Không tự retry khi response mất. Email được trim ASCII whitespace hai đầu rồi lowercase ASCII; password giữ nguyên và đếm Unicode code points. Unknown email, sai password và disabled cùng public 401. Năm failure đầu trong cửa sổ 15 phút trả 401, lần kế trả 429. clientType là metadata/transport, không là chứng cứ platform hoặc quyền.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/LoginRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "WEB nhận cookie HttpOnly và X-CSRF-Token; ANDROID/IOS nhận bearer token trong body, không Set-Cookie. limited phải khớp mustChangePassword. Chỉ phát credential sau commit session và audit.",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
+              "Set-Cookie": {"description": "Chỉ WEB: iot_session; Secure; HttpOnly; SameSite=Lax; Path=/api/v1; không Domain; Max-Age tối đa 86400 giây.", "schema": {"type": "string"}},
+              "X-CSRF-Token": {"description": "Chỉ WEB; bound với session, chỉ giữ trong memory.", "schema": {"type": "string"}}
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {"$ref": "#/components/schemas/WebLoginSuccess"},
+                    {"$ref": "#/components/schemas/AppLoginSuccess"}
+                  ]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/AuthInvalid"},
+          "413": {"$ref": "#/components/responses/ValidationError"},
+          "415": {"$ref": "#/components/responses/ValidationError"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "403": {"$ref": "#/components/responses/CsrfInvalid"},
+          "429": {"$ref": "#/components/responses/RateLimited"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "tags": ["Global authentication"],
+        "operationId": "getMe",
+        "summary": "Đọc profile toàn cục của chính chủ",
+        "description": "Cookie WEB hoặc bearer App; mixed credential trả 400. Không cần X-Workspace-Id. Guard đọc User hiện hành và session expiry/revocation. Limited trả 403 PASSWORD_CHANGE_REQUIRED, không trả profile; WEB vẫn nhận X-CSRF-Token để đổi password/logout sau reload.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "responses": {
+          "200": {
+            "description": "Profile toàn cục; không có global role hoặc membership.",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
+              "X-CSRF-Token": {"description": "WEB có session hợp lệ.", "schema": {"type": "string"}}
+            },
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MeProfile"}}}
+          },
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/SessionInvalid"},
+          "403": {"$ref": "#/components/responses/PasswordChangeRequired"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
+    "/api/v1/workspaces": {
+      "get": {
+        "tags": ["Global authentication"],
+        "operationId": "listAvailableWorkspaces",
+        "summary": "Liệt kê workspace khả dụng cho account hiện tại",
+        "description": "Chỉ full session; không cần X-Workspace-Id. Default filter chỉ Membership ACTIVE và Workspace ACTIVE. Cursor opaque có chữ ký, bound user/filter/sort; quyền đổi thì restart pagination. Trang rỗng còn nextCursor không phải empty state. Summary không cấp quyền cho request scoped tiếp theo; server recheck membership lúc chọn/sử dụng.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Cursor opaque từ trang trước; sai/hết hạn trả CURSOR_INVALID."},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}},
+          {"name": "includeHistorical", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Chỉ entry recovery/admin được duyệt theo FEAT068; default false không trả workspace ngừng/lưu trữ."},
+          {"name": "status", "in": "query", "schema": {"type": "string", "enum": ["ACTIVE", "SUSPENDED", "ARCHIVED"], "default": "ACTIVE"}, "description": "SUSPENDED/ARCHIVED cần includeHistorical=true và quyền historical Admin hiện hành; tổ hợp sai trả 422."}
+        ],
+        "responses": {
+          "200": {
+            "description": "Danh sách membership/workspace khả dụng; không có resource của workspace.",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspacePage"}}}
+          },
+          "400": {"$ref": "#/components/responses/WorkspaceListBadRequest"},
+          "401": {"$ref": "#/components/responses/SessionInvalid"},
+          "403": {"$ref": "#/components/responses/AccessDenied"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      },
+      "post": {
+        "tags": ["Global authentication"],
+        "operationId": "createWorkspace",
+        "summary": "Tạo workspace cho account có full session",
+        "description": "Global route không cần X-Workspace-Id; account ACTIVE/full và creator quota <5. Body không được khai creatorId/role/status/workspaceId. Idempotency-Key namespace theo account+route+key trong 24 giờ; cùng key/body replay receipt sau auth và recheck quyền, khác body trả 409. Workspace/Membership/quota/preference/audit cùng transaction; client refetch current detail trước chọn workspace.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/CsrfToken"},
+          {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[\\x20-\\x7E]+$"}, "description": "Cố định cho một create intent; không tạo key mới khi retry cùng intent."}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateWorkspaceRequest"}}}
+        },
+        "responses": {
+          "201": {
+            "description": "Workspace ACTIVE revision1, membership caller ADMIN; DTO detail không thay guard hiện hành.",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceDetail"}}}
+          },
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/SessionInvalid"},
+          "403": {"$ref": "#/components/responses/AccessDenied"},
+          "409": {"$ref": "#/components/responses/WorkspaceConflict"},
+          "413": {"$ref": "#/components/responses/ValidationError"},
+          "415": {"$ref": "#/components/responses/ValidationError"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}": {
+      "get": {
+        "tags": ["Global authentication"],
+        "operationId": "getWorkspaceDetail",
+        "summary": "Kiểm lại workspace được chọn với membership hiện hành",
+        "description": "Path id là scope authority; X-Workspace-Id nếu có phải trùng path, sai trả 403. Normal selection chỉ Workspace ACTIVE + Membership ACTIVE. Foreign/no membership trả 404. Detail có Workspace/Membership version riêng; client không tự coi summary hay role cache là quyền cho resource. Historical Admin recovery theo FEAT068 cần explicit flow riêng.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"name": "X-Workspace-Id", "in": "header", "required": false, "schema": {"type": "string", "format": "uuid"}, "description": "Nếu được gửi phải trùng path id; không dùng header để override path."}
+        ],
+        "responses": {
+          "200": {
+            "description": "Detail của workspace hiện hành được phép đọc; vẫn phải guard từng resource request sau đó.",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceDetail"}}}
+          },
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/SessionInvalid"},
+          "403": {"$ref": "#/components/responses/AccessDenied"},
+          "404": {"$ref": "#/components/responses/ResourceNotFound"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": ["Global authentication"],
+        "operationId": "logout",
+        "summary": "Thu hồi phiên hiện tại",
+        "description": "Body vắng/rỗng; JSON có nội dung kể cả {} trả 422. WEB dùng cookie và CSRF header + exact same-origin; bearer App không dùng CSRF. Digest nhận diện active/limited/revoked/expired cho phép 204; thiếu credential 204 không tác động; unknown/malformed credential 401. Lặp lại không thu hồi phiên khác. WEB xóa cookie cùng name/path.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [{"$ref": "#/components/parameters/CsrfToken"}],
+        "responses": {
+          "204": {
+            "description": "Không body. WEB clear iot_session; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0.",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
+              "Set-Cookie": {"description": "Chỉ WEB; xóa cookie đúng phạm vi.", "schema": {"type": "string"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/SessionInvalid"},
+          "403": {"$ref": "#/components/responses/CsrfInvalid"},
+          "413": {"$ref": "#/components/responses/ValidationError"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "tags": ["Global authentication"],
+        "operationId": "changeOwnPassword",
+        "summary": "Đổi mật khẩu của chính account và thu hồi mọi phiên",
+        "description": "Full/limited session; không cần workspace. WEB dùng CSRF + exact same-origin. currentPassword sai trả AUTH_INVALID nhưng giữ phiên/form; newPassword phải khác currentPassword nguyên bản. Hash/flag/revoke mọi session/audit atomic; không tự cấp full session, không tự retry khi kết quả chưa biết.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [{"$ref": "#/components/parameters/CsrfToken"}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChangePasswordRequest"}}}
+        },
+        "responses": {
+          "204": {
+            "description": "Không body; mọi phiên cũ bị revoke. WEB clear cookie đúng phạm vi.",
+            "headers": {
+              "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
+              "Set-Cookie": {"description": "Chỉ WEB; xóa iot_session cùng Path=/api/v1.", "schema": {"type": "string"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/SessionOrAuthInvalid"},
+          "403": {"$ref": "#/components/responses/CsrfInvalid"},
+          "413": {"$ref": "#/components/responses/ValidationError"},
+          "415": {"$ref": "#/components/responses/ValidationError"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "429": {"$ref": "#/components/responses/RateLimited"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "WebSession": {"type": "apiKey", "in": "cookie", "name": "iot_session", "description": "WEB only; HttpOnly Secure SameSite=Lax; không đọc từ JavaScript."},
+      "AppBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "opaque", "description": "ANDROID/IOS contract; OS secure storage. Cookie + bearer cùng request trả 400."}
+    },
+    "parameters": {
+      "CsrfToken": {"name": "X-CSRF-Token", "in": "header", "required": false, "description": "Bắt buộc với mutation dùng cookie WEB, bound session; bearer App không dùng.", "schema": {"type": "string"}}
+    },
+    "responses": {
+      "ValidationError": {"description": "VALIDATION_ERROR: JSON hỏng/duplicate key 400, body >64 KiB 413, content type sai 415, field thiếu/null/type/length/enum/unknown 422; mixed credential 400.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "AuthInvalid": {"description": "AUTH_INVALID; cùng public code/message/shape cho unknown email, sai password và disabled.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "SessionInvalid": {"description": "SESSION_EXPIRED hoặc SESSION_REVOKED; không profile/protected data.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "SessionOrAuthInvalid": {"description": "SESSION_EXPIRED/SESSION_REVOKED cho phiên hỏng; AUTH_INVALID cho currentPassword sai, không tự xóa phiên hợp lệ.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "PasswordChangeRequired": {"description": "PASSWORD_CHANGE_REQUIRED; không profile/workspace data. WEB limited GET /me có X-CSRF-Token và Cache-Control no-store.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}, "X-CSRF-Token": {"description": "WEB limited session hợp lệ.", "schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "AccessDenied": {"description": "PASSWORD_CHANGE_REQUIRED cho limited session; FORBIDDEN cho historical filter không đủ quyền hoặc CSRF_INVALID cho cookie mutation. Không trả workspace data.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "CsrfInvalid": {"description": "CSRF_INVALID; không side effect.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "WorkspaceListBadRequest": {"description": "CURSOR_INVALID cho cursor sai/hết hạn hoặc VALIDATION_ERROR cho mixed credential/query sai cú pháp; không dùng cursor cũ để đọc tiếp.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "WorkspaceConflict": {"description": "WORKSPACE_LIMIT_EXCEEDED hoặc IDEMPOTENCY_CONFLICT; không tự cấp workspace thứ sáu/không replay body khác.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "ResourceNotFound": {"description": "RESOURCE_NOT_FOUND; không tiết lộ resource ngoài membership/scope.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "RateLimited": {"description": "RATE_LIMITED; client không tự retry mutation.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}, "Retry-After": {"description": "Số giây nguyên làm tròn lên tới cuối fixed window, tối thiểu 1.", "schema": {"type": "integer", "minimum": 1}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "ServiceUnavailable": {"description": "SERVICE_UNAVAILABLE; không khẳng định có/không có orphan session khi commit ACK mất, không phát credential nếu commit chưa xác nhận.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}}
+    },
+    "schemas": {
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["email", "password", "clientType"],
+        "properties": {
+          "email": {"type": "string", "pattern": "^[\\x00-\\x7F]+$", "description": "Server trim ASCII whitespace hai đầu và lowercase ASCII trước khi kiểm email; canonical email tối đa 254 ký tự, local <=64. Raw value có thể chứa khoảng trắng biên nên format/maxLength phải kiểm sau canonicalization. Không bỏ dot/+tag; cùng DB unique rule."},
+          "password": {"type": "string", "minLength": 12, "maxLength": 128, "description": "Unicode scalar/code points; không trim/normalize; từ chối surrogate/UTF-8 hỏng."},
+          "clientType": {"type": "string", "enum": ["WEB", "ANDROID", "IOS"]}
+        }
+      },
+      "LoginMeSummary": {
+        "type": "object",
+        "required": ["id", "email", "mustChangePassword"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "email": {"type": "string", "format": "email"},
+          "mustChangePassword": {"type": "boolean"}
+        }
+      },
+      "WebLoginSuccess": {
+        "type": "object",
+        "required": ["me", "expiresAt", "limited"],
+        "not": {"required": ["token"]},
+        "properties": {
+          "me": {"$ref": "#/components/schemas/LoginMeSummary"},
+          "expiresAt": {"type": "string", "format": "date-time", "description": "UTC RFC3339; phiên tối đa 24 giờ."},
+          "limited": {"type": "boolean"}
+        }
+      },
+      "AppLoginSuccess": {
+        "type": "object",
+        "required": ["me", "expiresAt", "limited", "token"],
+        "properties": {
+          "me": {"$ref": "#/components/schemas/LoginMeSummary"},
+          "expiresAt": {"type": "string", "format": "date-time"},
+          "limited": {"type": "boolean"},
+          "token": {"type": "string", "minLength": 1, "writeOnly": false, "description": "Bearer secret cấp một lần; fixture chỉ dùng placeholder không hoạt động."}
+        }
+      },
+      "MeProfile": {
+        "type": "object",
+        "required": ["id", "email", "mustChangePassword", "displayTimezone", "preferencesRevision"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "email": {"type": "string", "format": "email"},
+          "mustChangePassword": {"type": "boolean", "const": false},
+          "displayTimezone": {"type": "string", "description": "IANA timezone; legacy default UTC theo FEAT041."},
+          "preferencesRevision": {"type": "integer", "minimum": 1}
+        }
+      },
+      "WorkspaceSummary": {
+        "type": "object",
+        "required": ["id", "name", "status", "role", "revision"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "name": {"type": "string"},
+          "status": {"type": "string", "enum": ["ACTIVE", "SUSPENDED", "ARCHIVED"], "description": "Bootstrap mặc định chỉ ACTIVE; trạng thái khác chỉ theo filter/quyền historical."},
+          "role": {"type": "string", "enum": ["ADMIN", "USER"]},
+          "revision": {"type": "integer", "minimum": 1}
+        }
+      },
+      "WorkspacePage": {
+        "type": "object",
+        "required": ["items", "nextCursor"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/WorkspaceSummary"}},
+          "nextCursor": {"type": ["string", "null"]}
+        }
+      },
+      "CreateWorkspaceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "defaultTimezone"],
+        "properties": {
+          "name": {"type": "string", "description": "NFC + trim rồi kiểm 1–100 Unicode code points; cấm whitespace-only/control chars. Giới hạn áp sau canonicalization."},
+          "description": {"type": ["string", "null"], "maxLength": 500, "description": "Plain text; omit hoặc empty thành null, không render HTML."},
+          "defaultTimezone": {"type": "string", "description": "IANA timezone hợp lệ từ tzdb backend đã pin."}
+        }
+      },
+      "WorkspaceDetail": {
+        "type": "object",
+        "required": ["id", "name", "description", "defaultTimezone", "status", "revision", "role", "creatorId", "membershipStatus", "authzVersion", "membershipRevision", "membershipAuthzVersion", "createdAt", "archivedAt"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"},
+          "name": {"type": "string"},
+          "description": {"type": ["string", "null"]},
+          "defaultTimezone": {"type": "string"},
+          "status": {"type": "string", "enum": ["ACTIVE", "SUSPENDED", "ARCHIVED"]},
+          "revision": {"type": "integer", "minimum": 1},
+          "role": {"type": "string", "enum": ["ADMIN", "USER"]},
+          "creatorId": {"type": "string", "format": "uuid"},
+          "membershipStatus": {"type": "string", "enum": ["ACTIVE", "SUSPENDED", "REMOVED"]},
+          "authzVersion": {"type": "integer", "minimum": 1, "description": "Version thuộc Workspace."},
+          "membershipRevision": {"type": "integer", "minimum": 1},
+          "membershipAuthzVersion": {"type": "integer", "minimum": 1, "description": "Version thuộc Membership của caller."},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "archivedAt": {"type": ["string", "null"], "format": "date-time"}
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["currentPassword", "newPassword"],
+        "properties": {
+          "currentPassword": {"type": "string", "minLength": 1, "maxLength": 128},
+          "newPassword": {"type": "string", "minLength": 12, "maxLength": 128, "description": "Khác currentPassword nguyên bản; vi phạm trả field code SAME_AS_CURRENT."}
+        }
+      },
+      "FieldError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "code"],
+        "properties": {
+          "path": {"type": "string", "description": "JSON Pointer cho field biết trước; chuỗi rỗng cho toàn body/unknown key."},
+          "code": {"type": "string", "enum": ["REQUIRED", "TYPE", "FORMAT", "LENGTH", "ENUM", "UNKNOWN_FIELD", "MALFORMED_JSON", "DUPLICATE_FIELD", "BODY_TOO_LARGE", "CONTENT_TYPE", "SAME_AS_CURRENT"]}
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "details", "correlationId"],
+            "properties": {
+              "code": {"type": "string", "enum": ["VALIDATION_ERROR", "AUTH_INVALID", "RATE_LIMITED", "SERVICE_UNAVAILABLE", "SESSION_EXPIRED", "SESSION_REVOKED", "PASSWORD_CHANGE_REQUIRED", "CSRF_INVALID", "CURSOR_INVALID", "WORKSPACE_LIMIT_EXCEEDED", "IDEMPOTENCY_CONFLICT", "FORBIDDEN", "RESOURCE_NOT_FOUND"]},
+              "message": {"type": "string", "description": "Thông báo công khai tiếng Việt, không phản ánh account tồn tại hoặc giá trị input."},
+              "details": {"type": "object", "additionalProperties": false, "properties": {"fieldErrors": {"type": "array", "items": {"$ref": "#/components/schemas/FieldError"}}}},
+              "correlationId": {"type": "string"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

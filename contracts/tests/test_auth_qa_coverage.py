@@ -13,7 +13,7 @@ class AuthQaCoverageTests(unittest.TestCase):
     def setUp(self):
         self.scenarios = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["scenarios"]
 
-    # Mỗi client thuộc scope phải có fixture thành công cho cả phiên full và limited.
+    # Mỗi client phải có full/limited fixture với transport và context Web đúng.
     def test_web_and_android_have_full_and_limited_login_fixtures(self):
         login_scenarios = [
             scenario
@@ -52,11 +52,13 @@ class AuthQaCoverageTests(unittest.TestCase):
                     self.assertIn("HttpOnly", response["headers"]["Set-Cookie"])
                     self.assertIn("Secure", response["headers"]["Set-Cookie"])
                     self.assertIn("X-CSRF-Token", response["headers"])
+                    self.assertIn("X-Auth-Context-Id", response["headers"])
                 else:
                     self.assertTrue(
                         response["body"]["token"].startswith("<nonfunctional-")
                     )
                     self.assertNotIn("Set-Cookie", response["headers"])
+                    self.assertNotIn("X-Auth-Context-Id", response["headers"])
 
     # Fixture login phải thể hiện đủ status validation đã khóa tại OQ-AUTH-008.
     def test_login_validation_fixtures_cover_http_boundaries(self):

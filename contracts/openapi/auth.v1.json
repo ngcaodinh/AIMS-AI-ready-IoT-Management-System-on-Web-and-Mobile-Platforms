@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Nexa IoT authentication and bootstrap contract",
-    "version": "0.1.0",
-    "description": "Hợp đồng P1 của FEAT-TN-001/002/004/041. Artifact chờ provider-client test và owner review tại G1; không chứng minh API đã chạy."
+    "version": "0.2.0",
+    "description": "Hợp đồng P1 của FEAT-TN-001/002/004/041. Bản đề xuất auth-context Web sau REV-AUTH-001/002 chờ CP-01 owner review, provider-client test và G1; không chứng minh API đã chạy."
   },
   "servers": [{"url": "/"}],
   "tags": [{"name": "Global authentication"}],
@@ -24,11 +24,12 @@
         },
         "responses": {
           "200": {
-            "description": "WEB nhận cookie HttpOnly và X-CSRF-Token; ANDROID/IOS nhận bearer token trong body, không Set-Cookie. limited phải khớp mustChangePassword. Chỉ phát credential sau commit session và audit.",
+            "description": "WEB nhận cookie HttpOnly, X-CSRF-Token và X-Auth-Context-Id không secret; ANDROID/IOS nhận bearer token trong body, không Set-Cookie/context Web. limited phải khớp mustChangePassword. Chỉ phát credential sau commit session và audit.",
             "headers": {
               "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
               "Set-Cookie": {"description": "Chỉ WEB: iot_session; Secure; HttpOnly; SameSite=Lax; Path=/api/v1; không Domain; Max-Age tối đa 86400 giây.", "schema": {"type": "string"}},
-              "X-CSRF-Token": {"description": "Chỉ WEB; bound với session, chỉ giữ trong memory.", "schema": {"type": "string"}}
+              "X-CSRF-Token": {"description": "Chỉ WEB; bound với session, chỉ giữ trong memory.", "schema": {"type": "string"}},
+              "X-Auth-Context-Id": {"description": "Chỉ WEB; UUID ngẫu nhiên của session context, không là credential/quyền; Web giữ marker không secret để đối soát cookie.", "schema": {"type": "string", "format": "uuid"}}
             },
             "content": {
               "application/json": {
@@ -57,20 +58,23 @@
         "tags": ["Global authentication"],
         "operationId": "getMe",
         "summary": "Đọc profile toàn cục của chính chủ",
-        "description": "Cookie WEB hoặc bearer App; mixed credential trả 400. Không cần X-Workspace-Id. Guard đọc User hiện hành và session expiry/revocation. Limited trả 403 PASSWORD_CHANGE_REQUIRED, không trả profile; WEB vẫn nhận X-CSRF-Token để đổi password/logout sau reload.",
+        "description": "Cookie WEB hoặc bearer App; mixed credential trả 400. Không cần X-Workspace-Id. WEB gửi X-Auth-Context-Id nếu đã accepted; thiếu header chỉ dùng discovery khi UI khóa, không tự bootstrap. Header sai trả 409 trước profile/limited guard. Guard đọc User hiện hành và session expiry/revocation. Limited với context đúng trả 403 PASSWORD_CHANGE_REQUIRED, không profile; WEB nhận X-CSRF-Token và context để đổi password/logout sau reload.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [{"$ref": "#/components/parameters/AuthContext"}],
         "responses": {
           "200": {
             "description": "Profile toàn cục; không có global role hoặc membership.",
             "headers": {
               "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
-              "X-CSRF-Token": {"description": "WEB có session hợp lệ.", "schema": {"type": "string"}}
+              "X-CSRF-Token": {"description": "WEB có session hợp lệ.", "schema": {"type": "string"}},
+              "X-Auth-Context-Id": {"description": "WEB; context của chính session cookie đã xác thực.", "schema": {"type": "string", "format": "uuid"}}
             },
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MeProfile"}}}
           },
           "400": {"$ref": "#/components/responses/ValidationError"},
           "401": {"$ref": "#/components/responses/SessionInvalid"},
           "403": {"$ref": "#/components/responses/PasswordChangeRequired"},
+          "409": {"$ref": "#/components/responses/AuthContextMismatch"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
@@ -80,9 +84,10 @@
         "tags": ["Global authentication"],
         "operationId": "listAvailableWorkspaces",
         "summary": "Liệt kê workspace khả dụng cho account hiện tại",
-        "description": "Chỉ full session; không cần X-Workspace-Id. Default filter chỉ Membership ACTIVE và Workspace ACTIVE. Cursor opaque có chữ ký, bound user/filter/sort; quyền đổi thì restart pagination. Trang rỗng còn nextCursor không phải empty state. Summary không cấp quyền cho request scoped tiếp theo; server recheck membership lúc chọn/sử dụng.",
+        "description": "Chỉ full session; WEB cần context khớp cookie trước khi trả dữ liệu, App bearer không dùng header này. Không cần X-Workspace-Id. Default filter chỉ Membership ACTIVE và Workspace ACTIVE. Cursor opaque có chữ ký, bound user/filter/sort; quyền đổi thì restart pagination. Trang rỗng còn nextCursor không phải empty state. Summary không cấp quyền cho request scoped tiếp theo; server recheck membership lúc chọn/sử dụng.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
         "parameters": [
+          {"$ref": "#/components/parameters/AuthContext"},
           {"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Cursor opaque từ trang trước; sai/hết hạn trả CURSOR_INVALID."},
           {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}},
           {"name": "includeHistorical", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Chỉ entry recovery/admin được duyệt theo FEAT068; default false không trả workspace ngừng/lưu trữ."},
@@ -97,6 +102,7 @@
           "400": {"$ref": "#/components/responses/WorkspaceListBadRequest"},
           "401": {"$ref": "#/components/responses/SessionInvalid"},
           "403": {"$ref": "#/components/responses/AccessDenied"},
+          "409": {"$ref": "#/components/responses/AuthContextMismatch"},
           "422": {"$ref": "#/components/responses/ValidationError"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
@@ -105,9 +111,10 @@
         "tags": ["Global authentication"],
         "operationId": "createWorkspace",
         "summary": "Tạo workspace cho account có full session",
-        "description": "Global route không cần X-Workspace-Id; account ACTIVE/full và creator quota <5. Body không được khai creatorId/role/status/workspaceId. Idempotency-Key namespace theo account+route+key trong 24 giờ; cùng key/body replay receipt sau auth và recheck quyền, khác body trả 409. Workspace/Membership/quota/preference/audit cùng transaction; client refetch current detail trước chọn workspace.",
+        "description": "Global route không cần X-Workspace-Id; WEB phải khớp context cookie và CSRF trước side effect; account ACTIVE/full và creator quota <5. Body không được khai creatorId/role/status/workspaceId. Idempotency-Key namespace theo account+route+key trong 24 giờ; cùng key/body replay receipt sau auth và recheck quyền, khác body trả 409. Workspace/Membership/quota/preference/audit cùng transaction; client refetch current detail trước chọn workspace.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
         "parameters": [
+          {"$ref": "#/components/parameters/AuthContext"},
           {"$ref": "#/components/parameters/CsrfToken"},
           {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[\\x20-\\x7E]+$"}, "description": "Cố định cho một create intent; không tạo key mới khi retry cùng intent."}
         ],
@@ -124,7 +131,7 @@
           "400": {"$ref": "#/components/responses/ValidationError"},
           "401": {"$ref": "#/components/responses/SessionInvalid"},
           "403": {"$ref": "#/components/responses/AccessDenied"},
-          "409": {"$ref": "#/components/responses/WorkspaceConflict"},
+          "409": {"$ref": "#/components/responses/WorkspaceOrAuthContextConflict"},
           "413": {"$ref": "#/components/responses/ValidationError"},
           "415": {"$ref": "#/components/responses/ValidationError"},
           "422": {"$ref": "#/components/responses/ValidationError"},
@@ -137,9 +144,10 @@
         "tags": ["Global authentication"],
         "operationId": "getWorkspaceDetail",
         "summary": "Kiểm lại workspace được chọn với membership hiện hành",
-        "description": "Path id là scope authority; X-Workspace-Id nếu có phải trùng path, sai trả 403. Normal selection chỉ Workspace ACTIVE + Membership ACTIVE. Foreign/no membership trả 404. Detail có Workspace/Membership version riêng; client không tự coi summary hay role cache là quyền cho resource. Historical Admin recovery theo FEAT068 cần explicit flow riêng.",
+        "description": "Path id là scope authority; WEB cần context khớp cookie trước resource. X-Workspace-Id nếu có phải trùng path, sai trả 403. Normal selection chỉ Workspace ACTIVE + Membership ACTIVE. Foreign/no membership trả 404. Detail có Workspace/Membership version riêng; client không tự coi summary hay role cache là quyền cho resource. Historical Admin recovery theo FEAT068 cần explicit flow riêng.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
         "parameters": [
+          {"$ref": "#/components/parameters/AuthContext"},
           {"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
           {"name": "X-Workspace-Id", "in": "header", "required": false, "schema": {"type": "string", "format": "uuid"}, "description": "Nếu được gửi phải trùng path id; không dùng header để override path."}
         ],
@@ -152,6 +160,7 @@
           "400": {"$ref": "#/components/responses/ValidationError"},
           "401": {"$ref": "#/components/responses/SessionInvalid"},
           "403": {"$ref": "#/components/responses/AccessDenied"},
+          "409": {"$ref": "#/components/responses/AuthContextMismatch"},
           "404": {"$ref": "#/components/responses/ResourceNotFound"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
@@ -162,9 +171,9 @@
         "tags": ["Global authentication"],
         "operationId": "logout",
         "summary": "Thu hồi phiên hiện tại",
-        "description": "Body vắng/rỗng; JSON có nội dung kể cả {} trả 422. WEB dùng cookie và CSRF header + exact same-origin; bearer App không dùng CSRF. Digest nhận diện active/limited/revoked/expired cho phép 204; thiếu credential 204 không tác động; unknown/malformed credential 401. Lặp lại không thu hồi phiên khác. WEB xóa cookie cùng name/path.",
+        "description": "Body vắng/rỗng; JSON có nội dung kể cả {} trả 422. WEB dùng cookie, auth context khớp, CSRF header và exact same-origin; context sai không revoke cookie của phiên khác. Bearer App không dùng context/CSRF Web. Digest nhận diện active/limited/revoked/expired cho phép 204; thiếu credential 204 không tác động; unknown/malformed credential 401. Lặp lại không thu hồi phiên khác. WEB xóa cookie cùng name/path.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
-        "parameters": [{"$ref": "#/components/parameters/CsrfToken"}],
+        "parameters": [{"$ref": "#/components/parameters/AuthContext"}, {"$ref": "#/components/parameters/CsrfToken"}],
         "responses": {
           "204": {
             "description": "Không body. WEB clear iot_session; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0.",
@@ -176,6 +185,7 @@
           "400": {"$ref": "#/components/responses/ValidationError"},
           "401": {"$ref": "#/components/responses/SessionInvalid"},
           "403": {"$ref": "#/components/responses/CsrfInvalid"},
+          "409": {"$ref": "#/components/responses/AuthContextMismatch"},
           "413": {"$ref": "#/components/responses/ValidationError"},
           "422": {"$ref": "#/components/responses/ValidationError"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
@@ -187,9 +197,9 @@
         "tags": ["Global authentication"],
         "operationId": "changeOwnPassword",
         "summary": "Đổi mật khẩu của chính account và thu hồi mọi phiên",
-        "description": "Full/limited session; không cần workspace. WEB dùng CSRF + exact same-origin. currentPassword sai trả AUTH_INVALID nhưng giữ phiên/form; newPassword phải khác currentPassword nguyên bản. Hash/flag/revoke mọi session/audit atomic; không tự cấp full session, không tự retry khi kết quả chưa biết.",
+        "description": "Full/limited session; không cần workspace. WEB dùng auth context khớp cookie, CSRF + exact same-origin trước side effect. currentPassword sai trả AUTH_INVALID nhưng giữ phiên/form; newPassword phải khác currentPassword nguyên bản. Hash/flag/revoke mọi session/audit atomic; không tự cấp full session, không tự retry khi kết quả chưa biết.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
-        "parameters": [{"$ref": "#/components/parameters/CsrfToken"}],
+        "parameters": [{"$ref": "#/components/parameters/AuthContext"}, {"$ref": "#/components/parameters/CsrfToken"}],
         "requestBody": {
           "required": true,
           "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChangePasswordRequest"}}}
@@ -205,6 +215,7 @@
           "400": {"$ref": "#/components/responses/ValidationError"},
           "401": {"$ref": "#/components/responses/SessionOrAuthInvalid"},
           "403": {"$ref": "#/components/responses/CsrfInvalid"},
+          "409": {"$ref": "#/components/responses/AuthContextMismatch"},
           "413": {"$ref": "#/components/responses/ValidationError"},
           "415": {"$ref": "#/components/responses/ValidationError"},
           "422": {"$ref": "#/components/responses/ValidationError"},
@@ -216,22 +227,24 @@
   },
   "components": {
     "securitySchemes": {
-      "WebSession": {"type": "apiKey", "in": "cookie", "name": "iot_session", "description": "WEB only; HttpOnly Secure SameSite=Lax; không đọc từ JavaScript."},
+      "WebSession": {"type": "apiKey", "in": "cookie", "name": "iot_session", "description": "WEB only; HttpOnly Secure SameSite=Lax; không đọc từ JavaScript. X-Auth-Context-Id chỉ đối soát session cookie đã xác thực, không là credential."},
       "AppBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "opaque", "description": "ANDROID/IOS contract; OS secure storage. Cookie + bearer cùng request trả 400."}
     },
     "parameters": {
-      "CsrfToken": {"name": "X-CSRF-Token", "in": "header", "required": false, "description": "Bắt buộc với mutation dùng cookie WEB, bound session; bearer App không dùng.", "schema": {"type": "string"}}
+      "CsrfToken": {"name": "X-CSRF-Token", "in": "header", "required": false, "description": "Bắt buộc với mutation dùng cookie WEB, bound session; bearer App không dùng.", "schema": {"type": "string"}},
+      "AuthContext": {"name": "X-Auth-Context-Id", "in": "header", "required": false, "description": "Bắt buộc cho protected request dùng cookie WEB, trừ GET /me discovery khi UI khóa. UUID không secret chỉ so với Session đã xác thực; thiếu/sai trả 409 AUTH_CONTEXT_MISMATCH trước dữ liệu/side effect. App bearer không gửi.", "schema": {"type": "string", "format": "uuid"}}
     },
     "responses": {
       "ValidationError": {"description": "VALIDATION_ERROR: JSON hỏng/duplicate key 400, body >64 KiB 413, content type sai 415, field thiếu/null/type/length/enum/unknown 422; mixed credential 400.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "AuthInvalid": {"description": "AUTH_INVALID; cùng public code/message/shape cho unknown email, sai password và disabled.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "SessionInvalid": {"description": "SESSION_EXPIRED hoặc SESSION_REVOKED; không profile/protected data.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "SessionOrAuthInvalid": {"description": "SESSION_EXPIRED/SESSION_REVOKED cho phiên hỏng; AUTH_INVALID cho currentPassword sai, không tự xóa phiên hợp lệ.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
-      "PasswordChangeRequired": {"description": "PASSWORD_CHANGE_REQUIRED; không profile/workspace data. WEB limited GET /me có X-CSRF-Token và Cache-Control no-store.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}, "X-CSRF-Token": {"description": "WEB limited session hợp lệ.", "schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "PasswordChangeRequired": {"description": "PASSWORD_CHANGE_REQUIRED; không profile/workspace data. WEB limited GET /me có X-CSRF-Token, X-Auth-Context-Id và Cache-Control no-store.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}, "X-CSRF-Token": {"description": "WEB limited session hợp lệ.", "schema": {"type": "string"}}, "X-Auth-Context-Id": {"description": "WEB limited session hợp lệ; không là credential.", "schema": {"type": "string", "format": "uuid"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "AccessDenied": {"description": "PASSWORD_CHANGE_REQUIRED cho limited session; FORBIDDEN cho historical filter không đủ quyền hoặc CSRF_INVALID cho cookie mutation. Không trả workspace data.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "CsrfInvalid": {"description": "CSRF_INVALID; không side effect.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "AuthContextMismatch": {"description": "AUTH_CONTEXT_MISMATCH; cookie WEB không khớp context đã xác nhận hoặc header thiếu trên protected request; không profile/resource/side effect. GET /me không header chỉ là discovery cho UI khóa.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "WorkspaceListBadRequest": {"description": "CURSOR_INVALID cho cursor sai/hết hạn hoặc VALIDATION_ERROR cho mixed credential/query sai cú pháp; không dùng cursor cũ để đọc tiếp.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
-      "WorkspaceConflict": {"description": "WORKSPACE_LIMIT_EXCEEDED hoặc IDEMPOTENCY_CONFLICT; không tự cấp workspace thứ sáu/không replay body khác.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "WorkspaceOrAuthContextConflict": {"description": "WORKSPACE_LIMIT_EXCEEDED hoặc IDEMPOTENCY_CONFLICT; không tự cấp workspace thứ sáu/không replay body khác. AUTH_CONTEXT_MISMATCH trả trước side effect nếu cookie Web khác context.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "ResourceNotFound": {"description": "RESOURCE_NOT_FOUND; không tiết lộ resource ngoài membership/scope.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "RateLimited": {"description": "RATE_LIMITED; client không tự retry mutation.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}, "Retry-After": {"description": "Số giây nguyên làm tròn lên tới cuối fixed window, tối thiểu 1.", "schema": {"type": "integer", "minimum": 1}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
       "ServiceUnavailable": {"description": "SERVICE_UNAVAILABLE; không khẳng định có/không có orphan session khi commit ACK mất, không phát credential nếu commit chưa xác nhận.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}}
@@ -362,7 +375,7 @@
             "type": "object",
             "required": ["code", "message", "details", "correlationId"],
             "properties": {
-              "code": {"type": "string", "enum": ["VALIDATION_ERROR", "AUTH_INVALID", "RATE_LIMITED", "SERVICE_UNAVAILABLE", "SESSION_EXPIRED", "SESSION_REVOKED", "PASSWORD_CHANGE_REQUIRED", "CSRF_INVALID", "CURSOR_INVALID", "WORKSPACE_LIMIT_EXCEEDED", "IDEMPOTENCY_CONFLICT", "FORBIDDEN", "RESOURCE_NOT_FOUND"]},
+              "code": {"type": "string", "enum": ["VALIDATION_ERROR", "AUTH_INVALID", "RATE_LIMITED", "SERVICE_UNAVAILABLE", "SESSION_EXPIRED", "SESSION_REVOKED", "PASSWORD_CHANGE_REQUIRED", "CSRF_INVALID", "AUTH_CONTEXT_MISMATCH", "CURSOR_INVALID", "WORKSPACE_LIMIT_EXCEEDED", "IDEMPOTENCY_CONFLICT", "FORBIDDEN", "RESOURCE_NOT_FOUND"]},
               "message": {"type": "string", "description": "Thông báo công khai tiếng Việt, không phản ánh account tồn tại hoặc giá trị input."},
               "details": {"type": "object", "additionalProperties": false, "properties": {"fieldErrors": {"type": "array", "items": {"$ref": "#/components/schemas/FieldError"}}}},
               "correlationId": {"type": "string"}

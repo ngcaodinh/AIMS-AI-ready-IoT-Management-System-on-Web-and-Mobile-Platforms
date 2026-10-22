@@ -1,12 +1,12 @@
 {
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.2.0",
   "fixtureKind": "synthetic-contract-example",
   "note": "Các scenario mô tả contract; không là bản ghi người dùng hoặc provider evidence.",
   "scenarios": [
     {
       "id": "CT-BOOTSTRAP-EMPTY",
       "operationId": "listAvailableWorkspaces",
-      "request": {"authState": "valid-full-no-active-membership", "query": {}},
+      "request": {"authState": "valid-web-full-no-active-membership", "headers": {"X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "query": {}},
       "response": {
         "status": 200,
         "headers": {"Cache-Control": "no-store"},
@@ -17,7 +17,7 @@
     {
       "id": "CT-BOOTSTRAP-TWO-WORKSPACES",
       "operationId": "listAvailableWorkspaces",
-      "request": {"authState": "valid-full-A-admin-B-user-C-suspended-D-removed", "query": {"limit": 20}},
+      "request": {"authState": "valid-web-full-A-admin-B-user-C-suspended-D-removed", "headers": {"X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "query": {"limit": 20}},
       "response": {
         "status": 200,
         "headers": {"Cache-Control": "no-store"},
@@ -32,9 +32,31 @@
       "assertions": ["suspended-and-removed-absent", "no-auto-selection", "no-device-or-dashboard-data"]
     },
     {
+      "id": "CT-BOOTSTRAP-CONTEXT-MISMATCH",
+      "operationId": "listAvailableWorkspaces",
+      "request": {"authState": "cookie-session-A-accepted-context-B", "headers": {"X-Auth-Context-Id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}, "query": {}},
+      "response": {
+        "status": 409,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "AUTH_CONTEXT_MISMATCH", "message": "Phiên hiện tại không khớp với phiên đã xác nhận.", "details": {}, "correlationId": "corr_context_workspace"}}
+      },
+      "assertions": ["no-side-effect", "no-membership-data", "lock-protected-ui"]
+    },
+    {
+      "id": "CT-BOOTSTRAP-CONTEXT-MISSING",
+      "operationId": "listAvailableWorkspaces",
+      "request": {"authState": "valid-web-cookie-without-accepted-context", "query": {}},
+      "response": {
+        "status": 409,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {"error": {"code": "AUTH_CONTEXT_MISMATCH", "message": "Phiên hiện tại không khớp với phiên đã xác nhận.", "details": {}, "correlationId": "corr_context_missing"}}
+      },
+      "assertions": ["no-side-effect", "no-membership-data", "lock-protected-ui"]
+    },
+    {
       "id": "CT-BOOTSTRAP-CURSOR-PAGE",
       "operationId": "listAvailableWorkspaces",
-      "request": {"authState": "valid-full", "query": {"limit": 1}},
+      "request": {"authState": "valid-web-full", "headers": {"X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "query": {"limit": 1}},
       "response": {
         "status": 200,
         "headers": {"Cache-Control": "no-store"},
@@ -48,7 +70,7 @@
     {
       "id": "CT-BOOTSTRAP-CURSOR-STALE",
       "operationId": "listAvailableWorkspaces",
-      "request": {"authState": "membership-changed-after-first-page", "query": {"cursor": "<stale-nonfunctional-cursor>"}},
+      "request": {"authState": "valid-web-full-membership-changed-after-first-page", "headers": {"X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "query": {"cursor": "<stale-nonfunctional-cursor>"}},
       "response": {
         "status": 400,
         "headers": {"Cache-Control": "no-store"},
@@ -59,7 +81,7 @@
     {
       "id": "CT-BOOTSTRAP-LIMITED-DENIED",
       "operationId": "listAvailableWorkspaces",
-      "request": {"authState": "valid-limited"},
+      "request": {"authState": "valid-web-limited", "headers": {"X-Auth-Context-Id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"}},
       "response": {
         "status": 403,
         "headers": {"Cache-Control": "no-store"},
@@ -101,7 +123,8 @@
       "id": "CT-WORKSPACE-SELECT-RECHECK",
       "operationId": "getWorkspaceDetail",
       "request": {
-        "authState": "valid-full-current-active-admin-A",
+        "authState": "valid-web-full-current-active-admin-A",
+        "headers": {"X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
         "path": {"id": "33333333-3333-4333-8333-333333333333"}
       },
       "response": {
@@ -130,7 +153,8 @@
       "id": "CT-WORKSPACE-SELECT-MEMBERSHIP-REMOVED",
       "operationId": "getWorkspaceDetail",
       "request": {
-        "authState": "valid-full-membership-removed-after-list",
+        "authState": "valid-web-full-membership-removed-after-list",
+        "headers": {"X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
         "path": {"id": "33333333-3333-4333-8333-333333333333"}
       },
       "response": {

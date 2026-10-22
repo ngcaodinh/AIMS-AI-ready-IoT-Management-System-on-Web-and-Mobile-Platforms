@@ -135,9 +135,11 @@ class AuthContractTests(unittest.TestCase):
                         self.assertNotIn("token", body)
                         self.assertIn("iot_session=", response["headers"]["Set-Cookie"])
                         self.assertIn("X-CSRF-Token", response["headers"])
+                        UUID(response["headers"]["X-Auth-Context-Id"])
                     else:
                         self.assertTrue(body["token"].startswith("<nonfunctional-"))
                         self.assertNotIn("Set-Cookie", response["headers"])
+                        self.assertNotIn("X-Auth-Context-Id", response["headers"])
                 elif scenario["operationId"] == "getMe":
                     self.assertEqual(response["body"]["displayTimezone"], "UTC")
                     self.assertGreaterEqual(response["body"]["preferencesRevision"], 1)
@@ -208,7 +210,10 @@ class AuthContractTests(unittest.TestCase):
     # Giữ default picker chỉ cho quyền vận hành ACTIVE.
     def test_default_workspace_filter_is_explicit(self):
         operation = self.operations["listAvailableWorkspaces"]
-        parameters = {item["name"]: item for item in operation["parameters"]}
+        # Header tham chiếu được kiểm riêng; test này chỉ đọc query khai trực tiếp.
+        parameters = {
+            item["name"]: item for item in operation["parameters"] if "name" in item
+        }
         self.assertFalse(parameters["includeHistorical"]["schema"]["default"])
         self.assertEqual(parameters["status"]["schema"]["default"], "ACTIVE")
         self.assertEqual(parameters["limit"]["schema"]["default"], 20)
@@ -224,6 +229,116 @@ class AuthContractTests(unittest.TestCase):
         pairs = json.loads(scenario["request"]["rawBody"], object_pairs_hook=list)
         keys = [key for key, _ in pairs]
         self.assertGreater(keys.count("email"), 1)
+
+    # Phân biệt discovery limited với đối soát context bắt buộc sau login Web.
+    def test_web_limited_confirmation_has_matching_and_mismatch_fixtures(self):
+        scenarios = {item["id"]: item for item in self.fixtures["scenarios"]}
+        login = scenarios["CT-AUTH-WEB-LIMITED"]["response"]
+        context_id = login["headers"]["X-Auth-Context-Id"]
+        discovery = scenarios["CT-AUTH-ME-LIMITED"]
+        self.assertNotIn("X-Auth-Context-Id", discovery["request"].get("headers", {}))
+        confirmation = scenarios["CT-AUTH-ME-LIMITED-CONFIRMATION"]
+        self.assertEqual(confirmation["operationId"], "getMe")
+        self.assertEqual(confirmation["request"]["headers"]["X-Auth-Context-Id"], context_id)
+        self.assertEqual(confirmation["response"]["status"], 403)
+        self.assertEqual(
+            confirmation["response"]["body"]["error"]["code"],
+            "PASSWORD_CHANGE_REQUIRED",
+        )
+        self.assertEqual(confirmation["response"]["headers"]["X-Auth-Context-Id"], context_id)
+        self.assertNotIn("me", confirmation["response"]["body"])
+        self.assertNotIn("memberships", confirmation["response"]["body"])
+        self.assertIn("no-profile", confirmation["assertions"])
+        self.assertIn("no-membership-data", confirmation["assertions"])
+        self.assertIn("no-workspace-request", confirmation["assertions"])
+        mismatch = scenarios["CT-AUTH-ME-LIMITED-CONTEXT-MISMATCH"]
+        self.assertEqual(mismatch["operationId"], "getMe")
+        self.assertNotEqual(mismatch["request"]["headers"]["X-Auth-Context-Id"], context_id)
+        self.assertEqual(mismatch["response"]["status"], 409)
+        self.assertEqual(mismatch["response"]["body"]["error"]["code"], "AUTH_CONTEXT_MISMATCH")
+        self.assertIn("lock-protected-ui", mismatch["assertions"])
+
+    # Khóa header đối soát phiên Web trên mọi route bảo vệ trước khi có provider.
+    def test_web_auth_context_fence_is_declared_for_protected_routes(self):
+        self.assertEqual(self.contract["info"]["version"], "0.2.0")
+        parameters = self.contract["components"]["parameters"]
+        self.assertEqual(parameters["AuthContext"]["name"], "X-Auth-Context-Id")
+        self.assertIn(
+            "AUTH_CONTEXT_MISMATCH",
+            self.contract["components"]["schemas"]["ErrorEnvelope"]["properties"]
+            ["error"]["properties"]["code"]["enum"],
+        )
+        self.assertIn(
+            "X-Auth-Context-Id", self.operations["login"]["responses"]["200"]["headers"]
+        )
+        self.assertIn(
+            "X-Auth-Context-Id", self.operations["getMe"]["responses"]["200"]["headers"]
+        )
+        self.assertIn(
+            "X-Auth-Context-Id",
+            self.contract["components"]["responses"]["PasswordChangeRequired"]["headers"],
+        )
+        for operation_id in (
+            "getMe", "listAvailableWorkspaces", "getWorkspaceDetail",
+            "createWorkspace", "logout", "changeOwnPassword",
+        ):
+            with self.subTest(operation=operation_id):
+                operation = self.operations[operation_id]
+                self.assertIn(
+                    {"$ref": "#/components/parameters/AuthContext"},
+                    operation["parameters"],
+                )
+                self.assertIn("409", operation["responses"])
+
+    # Fixture phải chứng minh cookie khác context không trả dữ liệu hoặc revoke sai phiên.
+    def test_web_auth_context_mismatch_fixtures_are_denials(self):
+        scenarios = {
+            item["id"]: item
+            for item in self.fixtures["scenarios"] + self.workspace_fixtures["scenarios"]
+        }
+        # Discovery chỉ được đọc khi UI khóa; một response 200 không tự xác nhận intent.
+        discovery = scenarios["CT-AUTH-ME-DISCOVERY"]
+        self.assertNotIn("X-Auth-Context-Id", discovery["request"].get("headers", {}))
+        self.assertIn("explicit-resume-confirmation", discovery["assertions"])
+        self.assertIn("no-workspace-before-confirmation", discovery["assertions"])
+        # Các fixture Web đã có context phải gửi header trước guard nghiệp vụ.
+        for scenario in scenarios.values():
+            auth_state = scenario["request"].get("authState", "")
+            if auth_state.startswith("valid-web") and scenario["id"] not in (
+                "CT-AUTH-ME-LIMITED", "CT-BOOTSTRAP-CONTEXT-MISSING"
+            ):
+                with self.subTest(web_context=scenario["id"]):
+                    self.assertIn(
+                        "X-Auth-Context-Id", scenario["request"].get("headers", {})
+                    )
+        expected = {
+            "CT-AUTH-ME-CONTEXT-MISMATCH": "getMe",
+            "CT-AUTH-ME-LIMITED-CONTEXT-MISMATCH": "getMe",
+            "CT-BOOTSTRAP-CONTEXT-MISMATCH": "listAvailableWorkspaces",
+            "CT-BOOTSTRAP-CONTEXT-MISSING": "listAvailableWorkspaces",
+            "CT-AUTH-LOGOUT-CONTEXT-MISMATCH": "logout",
+        }
+        for scenario_id, operation_id in expected.items():
+            with self.subTest(scenario=scenario_id):
+                scenario = scenarios[scenario_id]
+                self.assertEqual(scenario["operationId"], operation_id)
+                self.assertIn("authState", scenario["request"])
+                if scenario_id == "CT-BOOTSTRAP-CONTEXT-MISSING":
+                    self.assertNotIn(
+                        "X-Auth-Context-Id", scenario["request"].get("headers", {})
+                    )
+                else:
+                    self.assertIn(
+                        "X-Auth-Context-Id", scenario["request"]["headers"]
+                    )
+                response = scenario["response"]
+                self.assertEqual(response["status"], 409)
+                self.assertEqual(response["body"]["error"]["code"], "AUTH_CONTEXT_MISMATCH")
+                self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+                self.assertNotIn("Set-Cookie", response["headers"])
+                self.assertNotIn("items", response["body"])
+                self.assertNotIn("me", response["body"])
+                self.assertIn("no-side-effect", scenario["assertions"])
 
 
 if __name__ == "__main__":

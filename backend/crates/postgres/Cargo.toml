@@ -1,0 +1,16 @@
+[package]
+name = "iot-postgres"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+iot-domain = { path = "../domain" }
+iot-application = { path = "../application" }
+chrono.workspace = true
+uuid.workspace = true
+sqlx.workspace = true
+
+[lints]
+workspace = true

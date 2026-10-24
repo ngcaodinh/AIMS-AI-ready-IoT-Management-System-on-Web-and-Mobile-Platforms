@@ -1,0 +1,6 @@
+# Máy phát triển có GCC UCRT và chưa có MSVC linker; khóa target để test chạy được.
+[build]
+target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-gnu]
+linker = "C:/msys64/ucrt64/bin/gcc.exe"

@@ -1,0 +1,14 @@
+[package]
+name = "iot-application"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+iot-domain = { path = "../domain" }
+chrono.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

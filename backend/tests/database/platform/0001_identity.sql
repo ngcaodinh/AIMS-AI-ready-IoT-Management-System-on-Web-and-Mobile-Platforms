@@ -1,0 +1,10 @@
+/* Hai tenant có grant đầy đủ là positive control của deferred pointer. */
+SELECT CASE WHEN count(*)=2 THEN 'PASS:identity_two_workspaces' ELSE 'FAIL:identity_two_workspaces' END FROM workspaces;
+SELECT pg_temp.rejects('identity_bucket_missing_window',
+ $$INSERT INTO login_attempt_buckets VALUES(decode(repeat('01',32),'hex'),1,NULL)$$,'23514','ck_login_bucket_coherence');
+SELECT pg_temp.rejects('identity_cross_workspace_reset',
+ $$INSERT INTO password_reset_admissions VALUES('00000000-0000-0000-0000-000000000501','00000000-0000-0000-0000-000000000101','00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001',now())$$,'23503');
+SELECT pg_temp.rejects('identity_grant_generation_unique',
+ $$INSERT INTO membership_grants(workspace_id,user_id,grant_generation) VALUES('00000000-0000-0000-0000-000000000101','00000000-0000-0000-0000-000000000001',2)$$,'23505','uq_membership_grants_current');
+SELECT pg_temp.rejects('identity_no_ios_scope',
+ $$INSERT INTO sessions(session_id,user_id,token_digest,auth_context_id,limited,client_type,issued_at,expires_at) VALUES('00000000-0000-0000-0000-000000000401','00000000-0000-0000-0000-000000000001',decode(repeat('01',32),'hex'),'00000000-0000-0000-0000-000000000402',false,'IOS',now(),now()+interval '24 hours')$$,'23514');

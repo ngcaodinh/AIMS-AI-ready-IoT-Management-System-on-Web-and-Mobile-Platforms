@@ -1,0 +1,134 @@
+{
+  "timestamp_utc": "2026-10-23T15:50:05.628936+00:00",
+  "database": "iot_database_lab",
+  "container": "iot-postgres17-database",
+  "image": "postgres@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27",
+  "server_version": "17.11 (Debian 17.11-1.pgdg12+2)",
+  "migration_sha256": "8957cdb90ff4f4ef46abaadcb92ae3afdc640870bf4ddab992982cc20578595d",
+  "migration_checksums": {
+    "draft-0001-auth": "8957cdb90ff4f4ef46abaadcb92ae3afdc640870bf4ddab992982cc20578595d",
+    "0002-auth-integrity": "eae2990687eed9488162b674c5fb2b78ee7a725fafa62f1ed61d3e9866cef12d"
+  },
+  "main_migrations": {
+    "draft-0001-auth": "ALREADY_APPLIED",
+    "0002-auth-integrity": "ALREADY_APPLIED"
+  },
+  "migration_database": "iot_database_restore_48414d011bff",
+  "migration_contenders": [
+    {
+      "draft-0001-auth": "ALREADY_APPLIED",
+      "0002-auth-integrity": "ALREADY_APPLIED"
+    },
+    {
+      "draft-0001-auth": "APPLIED",
+      "0002-auth-integrity": "APPLIED"
+    }
+  ],
+  "checksum_drift": "REJECTED_FOR_ALL_VERSIONS",
+  "interrupted_ddl": "ROLLED_BACK",
+  "sql_checks": [
+    "PASS:account_status_domain",
+    "PASS:anonymous_global_audit_positive_control",
+    "PASS:audit_actor_session_binding",
+    "PASS:audit_requires_session",
+    "PASS:audit_session_requires_actor",
+    "PASS:deferred_admin_handoff_positive_control",
+    "PASS:disabled_account_not_capable_admin",
+    "PASS:failed_batch_left_no_user",
+    "PASS:full_session_admission_immutable",
+    "PASS:invalid_signing_key_length",
+    "PASS:last_active_admin_guard",
+    "PASS:last_admin_delete_guard",
+    "PASS:last_admin_suspend_guard",
+    "PASS:limited_session_upgrade_guard",
+    "PASS:limiter_counter_bound",
+    "PASS:limiter_digest_length",
+    "PASS:membership_requires_user",
+    "PASS:membership_requires_workspace",
+    "PASS:membership_role_domain",
+    "PASS:membership_scope_positive_control",
+    "PASS:membership_truncate_cannot_bypass_guard",
+    "PASS:positive_failure_requires_window",
+    "PASS:positive_failure_window_positive_control",
+    "PASS:positive_preferences_revision",
+    "PASS:session_delete_preserves_audit",
+    "PASS:session_digest_length",
+    "PASS:session_identity_immutable",
+    "PASS:session_requires_existing_user",
+    "PASS:session_revocation_cannot_rewind",
+    "PASS:session_ttl_24h",
+    "PASS:seven_application_tables",
+    "PASS:statement_batch_is_atomic",
+    "PASS:temporary_account_not_capable_admin",
+    "PASS:two_workspace_positive_control",
+    "PASS:unique_auth_context",
+    "PASS:unique_canonical_email",
+    "PASS:unique_membership",
+    "PASS:unique_session_token",
+    "PASS:unique_user_identity",
+    "PASS:workspace_name_not_blank",
+    "PASS:workspace_requires_first_capable_admin",
+    "PASS:workspace_revision_positive",
+    "PASS:workspace_status_domain",
+    "PASS:zero_failure_has_no_window"
+  ],
+  "sql_pass_count": 44,
+  "concurrency_checks": [
+    {
+      "case": "demote",
+      "isolation": "READ COMMITTED",
+      "lock_barrier": "OBSERVED",
+      "winner": "COMMITTED",
+      "loser_sqlstate": "23514",
+      "capable_admins": 1
+    },
+    {
+      "case": "disable",
+      "isolation": "READ COMMITTED",
+      "lock_barrier": "OBSERVED",
+      "winner": "COMMITTED",
+      "loser_sqlstate": "23514",
+      "capable_admins": 1
+    },
+    {
+      "case": "new_grant_after_snapshot",
+      "isolation": "READ COMMITTED",
+      "barrier": "SNAPSHOT_THEN_GRANT_COMMIT",
+      "loser_sqlstate": "23514"
+    },
+    {
+      "case": "demote",
+      "isolation": "REPEATABLE READ",
+      "lock_barrier": "OBSERVED",
+      "winner": "COMMITTED",
+      "loser_sqlstate": "40001",
+      "capable_admins": 1
+    },
+    {
+      "case": "disable",
+      "isolation": "REPEATABLE READ",
+      "lock_barrier": "OBSERVED",
+      "winner": "COMMITTED",
+      "loser_sqlstate": "40001",
+      "capable_admins": 1
+    },
+    {
+      "case": "new_grant_after_snapshot",
+      "isolation": "REPEATABLE READ",
+      "barrier": "SNAPSHOT_THEN_GRANT_COMMIT",
+      "loser_sqlstate": "40001"
+    }
+  ],
+  "schema_fingerprint": "61e1eee670b174bf23bd946ba4d2b53b",
+  "schema_snapshot": {
+    "path": "backend\\migrations\\schema.sql",
+    "sha256": "2ed15ce574b708d07afa1b954bce938d9d956eb199d66e875f3436b9c58cddd9",
+    "verification_database": "iot_database_restore_f4c49244b7a8",
+    "status": "REIMPORTED_SCHEMA_AND_ACL_MATCH"
+  },
+  "runtime_denials": 4,
+  "runtime_roles": "NON_SUPERUSER",
+  "restore_database": "iot_database_restore_5c1f5648346e",
+  "restore": "SCHEMA_TRIGGERS_FUNCTIONS_ACL_AND_SYNTHETIC_ROW_MATCH",
+  "design_plan_acceptance": "CURRENT_IMPORTED_SCHEMA_REPAIRED_NOT_ALL_FEATURES"
+}

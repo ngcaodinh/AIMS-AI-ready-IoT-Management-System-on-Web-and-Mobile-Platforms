@@ -1,0 +1,11 @@
+{
+  "timestamp_utc": "2026-10-23T17:24:12.095094+00:00",
+  "database": "iot_platform_lab",
+  "probe_scope": "DISPOSABLE_TABLES_USING_ACTUAL_GUARD_FUNCTIONS",
+  "late_child_normally_rejected": true,
+  "noop_update_unseals_published_parent": true,
+  "valid_savepoint_publish_rejected": true,
+  "savepoint_error": "ERROR:  Published content cannot be extended\nCONTEXT:  PL/pgSQL function enforce_published_child_insert() line 4 at RAISE",
+  "valid_90_day_fixed_duration_rejected_in_dst_timezone": true,
+  "fixture_ownership_and_cleanup_verified": true
+}

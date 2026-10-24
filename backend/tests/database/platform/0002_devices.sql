@@ -1,0 +1,7 @@
+/* FK kiểm bằng INSERT để immutable UPDATE không che lỗi cần kiểm. */
+SELECT CASE WHEN count(*)=7 THEN 'PASS:devices_two_workspaces' ELSE 'FAIL:devices_two_workspaces' END FROM devices;
+SELECT pg_temp.rejects('device_cross_workspace_owner', $$INSERT INTO devices(device_id,workspace_id,serial_number,template_version_id,owner_user_id,name,model,hardware_revision) VALUES(pg_temp.fixture_id(399),pg_temp.fixture_id(101),'SYNTHETIC-INVALID',pg_temp.fixture_id(211),pg_temp.fixture_id(2),'Invalid','ESP32','1')$$,'23503');
+SELECT pg_temp.rejects('stream_numeric_bound_on_boolean', $$INSERT INTO datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,min_value,channel_kind) SELECT workspace_id,template_version_id,'invalid','Invalid','BOOLEAN','READ',1,'STATE' FROM datastream_definitions LIMIT 1$$,'23514','ck_datastream_bounds');
+SELECT pg_temp.rejects('device_global_serial_unique', $$INSERT INTO devices SELECT pg_temp.fixture_id(398),workspace_id,serial_number,template_version_id,owner_user_id,name,description,model,hardware_revision,firmware_version,firmware_digest,lifecycle_status,revision,authorization_version,created_at,updated_at FROM devices WHERE device_id=pg_temp.fixture_id(301)$$,'23505');
+SELECT pg_temp.rejects('device_pin_immutable', $$UPDATE devices SET template_version_id=pg_temp.fixture_id(212)$$,'23514','ck_resource_identity_immutable');
+SELECT pg_temp.rejects('published_stream_immutable', $$UPDATE datastream_definitions SET display_name='Changed'$$,'23514','ck_record_immutable');

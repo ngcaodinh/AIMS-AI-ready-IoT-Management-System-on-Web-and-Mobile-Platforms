@@ -1,0 +1,51 @@
+{
+  "timestamp_utc": "2026-10-23T18:13:08.336488+00:00",
+  "connection": {
+    "role": "iot_dbeaver_reader",
+    "database": "iot_platform_lab",
+    "read_only": "on",
+    "table_count": 89
+  },
+  "host": "127.0.0.1",
+  "port": 15432,
+  "authentication": "SCRAM-SHA-256",
+  "checks": [
+    "PASS:wrong_password_rejected_by_scram",
+    "PASS:provided_password_verified_with_scram",
+    "PASS:reader_cannot_read_password",
+    "PASS:reader_cannot_read_session_verifier",
+    "PASS:reader_cannot_update_audit",
+    "PASS:reader_cannot_create_table",
+    "PASS:reader_cannot_call_worker",
+    "PASS:reader_cannot_become_owner",
+    "PASS:dbeaver_jdbc_sessions_confirmed_on_server"
+  ],
+  "dbeaver_active_session_count": 5,
+  "dbeaver_sessions": [
+    {
+      "role": "iot_dbeaver_reader",
+      "database": "iot_platform_lab",
+      "application": "DBeaver 26.2.0 - SQLEditor <dbeaver-check.sql>"
+    },
+    {
+      "role": "iot_dbeaver_reader",
+      "database": "iot_platform_lab",
+      "application": "DBeaver 26.2.0 - Main <iot_platform_lab>"
+    },
+    {
+      "role": "iot_dbeaver_reader",
+      "database": "iot_platform_lab",
+      "application": "DBeaver 26.2.0 - Metadata <iot_platform_lab>"
+    },
+    {
+      "role": "iot_dbeaver_reader",
+      "database": "iot_platform_lab",
+      "application": "DBeaver 26.2.0 - SQLEditor <IoT Platform - Local Reader>"
+    },
+    {
+      "role": "iot_dbeaver_reader",
+      "database": "iot_platform_lab",
+      "application": "DBeaver 26.2.0 - SQLEditor <IoT Platform - Local Reader>"
+    }
+  ]
+}

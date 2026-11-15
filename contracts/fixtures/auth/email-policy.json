@@ -1,0 +1,20 @@
+{
+  "policyVersion": 1,
+  "fixtureKind": "synthetic-nonfunctional-email-examples",
+  "cases": [
+    {"id":"CANONICAL","email":"member.name+tag@example.test","canonical":"member.name+tag@example.test","error":null},
+    {"id":"ASCII_CASE","email":"MeMbEr.NaMe+TaG@EXAMPLE.TEST","canonical":"member.name+tag@example.test","error":null},
+    {"id":"ASCII_EDGE_WHITESPACE","email":"\t\n\f\r Member.Name+Tag@Example.Test \t\n\f\r","canonical":"member.name+tag@example.test","error":null},
+    {"id":"DOT_RETAINED","email":"member.name@example.test","canonical":"member.name@example.test","error":null},
+    {"id":"PLUS_RETAINED","email":"member+tag@example.test","canonical":"member+tag@example.test","error":null},
+    {"id":"DISTINCT_PLAIN","email":"membername@example.test","canonical":"membername@example.test","error":null},
+    {"id":"UNICODE_LOCAL","email":"thànhviên@example.test","canonical":null,"error":"FORMAT"},
+    {"id":"UNICODE_DOMAIN","email":"member@vídụ.test","canonical":null,"error":"FORMAT"},
+    {"id":"UNICODE_NBSP_EDGE","email":"\u00a0member@example.test\u00a0","canonical":null,"error":"FORMAT"},
+    {"id":"UNICODE_EMSPACE_EDGE","email":"\u2003member@example.test\u2003","canonical":null,"error":"FORMAT"},
+    {"id":"VERTICAL_TAB_EDGE","email":"\u000bmember@example.test\u000b","canonical":null,"error":"FORMAT"},
+    {"id":"INNER_SPACE","email":"member name@example.test","canonical":null,"error":"FORMAT"},
+    {"id":"DOUBLE_DOT","email":"member..name@example.test","canonical":null,"error":"FORMAT"},
+    {"id":"DOMAIN_EDGE_HYPHEN","email":"member@-example.test","canonical":null,"error":"FORMAT"}
+  ]
+}

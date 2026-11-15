@@ -23,6 +23,7 @@ function createInitialDemoState(): DeviceDemoState {
     targetFanOn: false,
     automaticCommand: false,
     commandSequence: 0,
+    // Tạo mẫu giả lập có dao động nhẹ để biểu đồ ban đầu trông tự nhiên.
     history: Array.from({ length: 40 }, (_, index) => 29.6 + Math.sin(index / 5) * 0.6 + Math.random() * 0.3),
     toastMessage: '',
     toastSequence: 0,
@@ -49,6 +50,7 @@ export function useDeviceDemo(): { state: DeviceDemoState; sendFanCommand: (fanO
 
   /** Bắt đầu lệnh demo; chặn thao tác lặp khi chưa nhận được kết quả giả lập. */
   function sendFanCommand(fanOn: boolean): void {
+    // Chỉ nhận lệnh mới sau khi chuỗi lệnh đang chạy đã kết thúc.
     setState((current) => {
       if (current.stage === 1 || current.stage === 2) return current;
       return {
@@ -65,14 +67,17 @@ export function useDeviceDemo(): { state: DeviceDemoState; sendFanCommand: (fanO
   useEffect(() => {
     if (state.commandSequence === 0) return;
     const sequence = state.commandSequence;
+    // Chuyển sang trạng thái đã nhận nếu đây vẫn là lệnh mới nhất.
     const acceptedTimer = window.setTimeout(() => {
       setState((current) => current.commandSequence === sequence ? { ...current, stage: 2 } : current);
     }, 750);
+    // Chỉ cập nhật trạng thái quạt sau mốc xác nhận mô phỏng của cùng lệnh.
     const confirmedTimer = window.setTimeout(() => {
       setState((current) => current.commandSequence === sequence
         ? { ...current, fanOn: current.targetFanOn, stage: 3 }
         : current);
     }, 1500);
+    // Thu trạng thái lệnh về rảnh nếu không có lệnh mới thay thế trong lúc chờ.
     const settledTimer = window.setTimeout(() => {
       setState((current) => current.commandSequence === sequence && current.stage === 3
         ? { ...current, stage: 0 }
@@ -88,6 +93,7 @@ export function useDeviceDemo(): { state: DeviceDemoState; sendFanCommand: (fanO
 
   // Bộ hẹn giờ cập nhật dữ liệu giả lập và kích hoạt luật mẫu; chỉ tạo một lần khi gắn component.
   useEffect(() => {
+    // Tính mẫu tiếp theo từ state mới nhất để timer không dùng closure dữ liệu cũ.
     const updateTimer = window.setInterval(() => {
       setState((current) => {
         const temperature = Math.min(35.5, Math.max(26,
@@ -134,6 +140,7 @@ export function useDeviceDemo(): { state: DeviceDemoState; sendFanCommand: (fanO
   useEffect(() => {
     if (state.toastSequence === 0) return;
     const sequence = state.toastSequence;
+    // Chỉ ẩn thông báo nếu chưa có thông báo mới thay thế nó.
     const toastTimer = window.setTimeout(() => {
       setState((current) => current.toastSequence === sequence ? { ...current, toastMessage: '' } : current);
     }, 3200);

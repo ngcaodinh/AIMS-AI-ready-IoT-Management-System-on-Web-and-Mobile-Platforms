@@ -1,8 +1,9 @@
 //! SQL IAM có bind tham số; khóa và clock lấy sau khóa thuộc trách nhiệm adapter.
 
-use crate::{PgIdentityStore, PgUnitOfWork, commit_error, storage_error};
+use crate::{PgIdentityStore, PgUnitOfWork, commit_error, complete_auth_stage, storage_error};
 use chrono::{DateTime, Utc};
 use iot_application::{
+    auth_diagnostics::{AuthTimingOutcome, AuthTimingSpan, AuthTimingStage},
     error::ApplicationError,
     ports::{IdentityStore, IdentityTransaction, LockedSession},
 };
@@ -23,15 +24,37 @@ fn parse_client(value: &str) -> Result<ClientType, ApplicationError> {
     match value {
         "WEB" => Ok(ClientType::Web),
         "ANDROID" => Ok(ClientType::Android),
+        "IOS" => Ok(ClientType::Ios),
         _ => Err(ApplicationError::Unavailable),
     }
 }
 
-/// Ánh xạ enum domain sang literal bind của schema, không nối vào câu SQL.
+/** Ánh xạ metadata Web/Android/IOS sang literal schema để session/audit giữ đúng client; giá trị luôn bind SQL. */
 pub(crate) fn client_value(client: ClientType) -> &'static str {
     match client {
         ClientType::Web => "WEB",
         ClientType::Android => "ANDROID",
+        ClientType::Ios => "IOS",
+    }
+}
+
+#[cfg(test)]
+mod client_contract_tests {
+    use super::{ClientType, client_value, parse_client};
+
+    /** Metadata session/audit phải round-trip cả IOS, giữ enum lạ fail closed tại adapter. */
+    #[test]
+    fn client_metadata_round_trips_every_supported_server_value() {
+        for (value, client) in [
+            ("WEB", ClientType::Web),
+            ("ANDROID", ClientType::Android),
+            ("IOS", ClientType::Ios),
+        ] {
+            assert_eq!(parse_client(value).unwrap(), client);
+            assert_eq!(client_value(client), value);
+        }
+        assert!(parse_client("UNKNOWN").is_err());
+        assert!(parse_client("attacker").is_err());
     }
 }
 
@@ -63,10 +86,35 @@ impl IdentityStore for PgIdentityStore {
         self.audit_failure_counters.increment(kind);
     }
 
-    /// Bắt đầu transaction thật trên pool; application chỉ giữ handle của port, không biết `SQLx`.
+    /**
+     * Bắt đầu transaction thật, tách thời gian checkout khỏi BEGIN nhưng vẫn sở hữu connection như pool.begin.
+     * Output: handle transaction cùng optional sink; không phát SQL hoặc identity qua port đo.
+     * Errors: giữ mapping storage hiện có cho pool/BEGIN, cancellation chỉ làm span Abandoned.
+     */
     async fn begin(&self) -> Result<PgUnitOfWork, ApplicationError> {
+        let pool_span =
+            AuthTimingSpan::start(self.diagnostics.as_ref(), AuthTimingStage::PoolAcquire);
+        let connection = match self.pool.acquire().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                pool_span.finish(AuthTimingOutcome::Error);
+                return Err(storage_error(error));
+            }
+        };
+        // Mở stage mới trước khi đóng stage cũ để exporter không che BEGIN chưa bắt đầu.
+        let begin_span =
+            AuthTimingSpan::start(self.diagnostics.as_ref(), AuthTimingStage::TransactionBegin);
+        pool_span.finish(AuthTimingOutcome::Completed);
+        /* SQLx0.8.6 Pool::begin dùng cùng owned PoolConnection; constructor doc(hidden) đã pin bằng
+        Cargo.lock/compile gate. Không dùng Connection::begin vì nó mượn connection cục bộ. */
+        let result = sqlx::Transaction::begin(connection, None)
+            .await
+            .map_err(storage_error);
+        let transaction = complete_auth_stage(begin_span, result)?;
         Ok(PgUnitOfWork {
-            transaction: self.pool.begin().await.map_err(storage_error)?,
+            transaction,
+            diagnostics: self.diagnostics.clone(),
+            fenced_work: None,
         })
     }
 
@@ -79,21 +127,41 @@ impl IdentityStore for PgIdentityStore {
 }
 
 impl IdentityTransaction for PgUnitOfWork {
-    /// Upsert rồi khóa bucket bind digest; clock riêng sau FOR UPDATE tránh thời gian cũ khi chờ fence.
+    /**
+     * Upsert rồi khóa bucket bind digest, đo client round trips tới khi nhận row, không coi là lock time server thuần.
+     * Input
+     * Param: `digest` — bucket HMAC đã tính ở boundary, chỉ bind SQL và không gửi tới sink.
+     * Output: cửa sổ limiter cùng clock lấy riêng sau lock; `FencedWork` sống tới commit hoặc drop `UoW`.
+     * Errors: storage/mapping giữ nguyên; stage bị hủy là Abandoned, không chứng minh rollback hoàn tất.
+     */
     async fn lock_login_bucket(
         &mut self,
         digest: [u8; 32],
     ) -> Result<(LoginWindow, DateTime<Utc>), ApplicationError> {
-        // ON CONFLICT cùng row identity serialize email chưa có User trên nhiều instance.
-        sqlx::query(
+        let bucket_span =
+            AuthTimingSpan::start(self.diagnostics.as_ref(), AuthTimingStage::BucketAcquire);
+        // ON CONFLICT cùng row identity serialize email chưa có User trên nhiều instance; digest luôn bind.
+        let acquired = async {
+            sqlx::query(
             "INSERT INTO login_attempt_buckets(email_digest) VALUES($1) ON CONFLICT DO NOTHING",
         )
         .bind(digest.as_slice())
         .execute(&mut *self.transaction)
         .await
         .map_err(storage_error)?;
-        let row=sqlx::query("SELECT failure_count,window_started_at FROM login_attempt_buckets WHERE email_digest=$1 FOR UPDATE")
-            .bind(digest.as_slice()).fetch_one(&mut *self.transaction).await.map_err(storage_error)?;
+            // SELECT FOR UPDATE dùng cùng digest bind để giữ fence xuyên transaction; không đổi thứ tự lock.
+            sqlx::query("SELECT failure_count,window_started_at FROM login_attempt_buckets WHERE email_digest=$1 FOR UPDATE")
+                .bind(digest.as_slice()).fetch_one(&mut *self.transaction).await.map_err(storage_error)
+        }.await;
+        if acquired.is_ok() {
+            // FencedWork gồm cả clock/decode sau lock và không có gap trước khi kết thúc acquire.
+            self.fenced_work = Some(AuthTimingSpan::start(
+                self.diagnostics.as_ref(),
+                AuthTimingStage::FencedWork,
+            ));
+        }
+        let row = complete_auth_stage(bucket_span, acquired)?;
+        // Clock là statement riêng sau FOR UPDATE để không giữ thời gian cũ trong lúc đợi row lock.
         let now = sqlx::query_scalar("SELECT clock_timestamp()")
             .fetch_one(&mut *self.transaction)
             .await
@@ -107,14 +175,26 @@ impl IdentityTransaction for PgUnitOfWork {
         ))
     }
 
-    /// Khóa User theo email đã normalize sau bucket; input luôn bind để không thể chèn SQL.
+    /**
+     * Khóa User sau bucket và đo cả truy vấn/decode snapshot; None là truy vấn hoàn tất, không quyết định auth.
+     * Input
+     * Param: `email` — identity đã normalize, chỉ bind SQL và không dùng làm nhãn metric.
+     * Output: snapshot hiện hành hoặc None; không thay authorization hoặc lock order.
+     * Errors: storage/decode giữ mapping hiện có; cancellation làm guard Abandoned.
+     */
     async fn lock_account(
         &mut self,
         email: &str,
     ) -> Result<Option<AccountSnapshot>, ApplicationError> {
-        let row=sqlx::query("SELECT user_id,password_hash,account_status,must_change_password FROM users WHERE email_normalized=$1 FOR UPDATE")
+        let span =
+            AuthTimingSpan::start(self.diagnostics.as_ref(), AuthTimingStage::AccountAcquire);
+        let result = async {
+            // Email luôn bind; User fence bảo vệ trạng thái/password hiện hành sau bucket.
+            let row=sqlx::query("SELECT user_id,password_hash,account_status,must_change_password FROM users WHERE email_normalized=$1 FOR UPDATE")
             .bind(email).fetch_optional(&mut *self.transaction).await.map_err(storage_error)?;
-        row.as_ref().map(account_snapshot).transpose()
+            row.as_ref().map(account_snapshot).transpose()
+        }.await;
+        complete_auth_stage(span, result)
     }
 
     /// Lưu đúng cửa sổ domain đã tính dưới cùng khóa; không tự reset counter vì login success.
@@ -206,8 +286,19 @@ impl IdentityTransaction for PgUnitOfWork {
         Ok(())
     }
 
-    /// Commit vật lý chỉ tại port terminal; phân loại reject chắc chắn khác mất ACK chưa rõ outcome.
+    /**
+     * Commit vật lý tại port terminal và kết thúc `FencedWork` chỉ theo ACK quan sát được ở client.
+     * Output: kết quả commit giữ nguyên; Error metric không có nghĩa DB đã reject khi outcome UNKNOWN.
+     * Errors: reject chắc chắn và `CommitUnknown` vẫn theo mapping cũ; drop future chỉ ghi Abandoned.
+     */
     async fn commit(self) -> Result<(), ApplicationError> {
-        self.transaction.commit().await.map_err(commit_error)
+        let ack_span = AuthTimingSpan::start(self.diagnostics.as_ref(), AuthTimingStage::CommitAck);
+        let result = self.transaction.commit().await.map_err(commit_error);
+        let result = complete_auth_stage(ack_span, result);
+        if let Some(fenced_work) = self.fenced_work {
+            complete_auth_stage(fenced_work, result)
+        } else {
+            result
+        }
     }
 }

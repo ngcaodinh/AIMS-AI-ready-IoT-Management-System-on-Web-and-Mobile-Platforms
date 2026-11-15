@@ -18,10 +18,17 @@ use uuid::Uuid;
 
 impl DeviceStore for PgIdentityStore {
     type Transaction = PgUnitOfWork;
-    /// Mở physical transaction từ pool composition; không nâng quyền hoặc tự áp migration.
+    /**
+     * Mở physical transaction từ pool composition, không nâng quyền hoặc trộn diagnostic auth vào thiết bị.
+     * Output: unit of work không sink/`FencedWork`, giữ vòng đời transaction hiện có.
+     * Errors: storage được lọc như trước; không tự áp migration hoặc đổi timeout.
+     */
     async fn begin_device(&self) -> Result<PgUnitOfWork, ApplicationError> {
         Ok(PgUnitOfWork {
             transaction: self.pool.begin().await.map_err(storage_error)?,
+            // Transaction thiết bị không phải measurement auth; không gắn sink/window của login.
+            diagnostics: None,
+            fenced_work: None,
         })
     }
 }

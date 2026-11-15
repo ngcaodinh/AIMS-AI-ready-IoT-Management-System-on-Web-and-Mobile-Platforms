@@ -27,13 +27,24 @@ publish = false
 
 [features]
 repository-probe = ["dep:sqlx"]
+http-server = ["dep:sqlx"]
+
+[[test]]
+name = "http_auth"
+required-features = ["http-server"]
 
 [[bin]]
 name = "repository-probe"
 path = "src/bin/repository_probe.rs"
 required-features = ["repository-probe"]
 
+[[bin]]
+name = "auth-lab"
+path = "src/bin/auth_lab.rs"
+required-features = ["http-server"]
+
 [dependencies]
+axum = { version = "=0.8.6", default-features = false, features = ["http1", "json", "query", "tokio"] }
 iot-domain = { path = "crates/domain" }
 iot-application = { path = "crates/application" }
 iot-postgres = { path = "crates/postgres" }
@@ -45,8 +56,11 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
 sha2 = "=0.10.9"
 sqlx = { workspace = true, optional = true }
-tokio = { version = "=1.48.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "=1.48.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
 uuid = { version = "=1.18.1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tower = { version = "=0.5.2", features = ["util"] }
 
 [lints.rust]
 unsafe_code = "warn"

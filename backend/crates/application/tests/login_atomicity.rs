@@ -47,6 +47,9 @@ struct State {
     fail_required_audit: bool,
     fail_failure_audit: bool,
     lose_commit_ack: bool,
+    session_client_type: Option<ClientType>,
+    audit_client_type: Option<ClientType>,
+    lookup_emails: Vec<String>,
 }
 struct MemoryTransaction {
     store: MemoryStore,
@@ -70,6 +73,9 @@ impl MemoryStore {
             fail_required_audit: false,
             fail_failure_audit: false,
             lose_commit_ack: false,
+            session_client_type: None,
+            audit_client_type: None,
+            lookup_emails: Vec::new(),
         })))
     }
 }
@@ -122,12 +128,17 @@ impl IdentityTransaction for MemoryTransaction {
             ))
         })
     }
-    /// Cấp một account fake; xác minh mật khẩu do crypto port fake quyết định, không băm giả trong store.
+    /** Cấp account fake cố định và ghi lookup key đã canonicalize để kiểm mọi biến thể cùng identity.
+     * Input
+     * Param: email — key application chuyển sau validation, chỉ lưu trong ledger RAM tổng hợp của test.
+     * Output: cùng account nil UUID; xác minh password vẫn do crypto port quyết định.
+     */
     fn lock_account(
         &mut self,
-        _email: &str,
+        email: &str,
     ) -> impl Future<Output = Result<Option<AccountSnapshot>, ApplicationError>> + Send {
         std::future::ready({
+            self.staged.lookup_emails.push(email.to_owned());
             Ok(Some(AccountSnapshot {
                 user_id: Uuid::nil(),
                 password_verifier: SecretString::new("synthetic-verifier".into()),
@@ -147,13 +158,18 @@ impl IdentityTransaction for MemoryTransaction {
             Ok(())
         })
     }
-    /// Đếm session staged để required-audit failure chứng minh không có session commit riêng.
+    /** Ghi count và client_type vào staged state để kiểm commit atomic cùng metadata IOS/Android/Web.
+     * Input
+     * Param: session — session tổng hợp do application tạo sau verify; chỉ giữ metadata không secret.
+     * Output: hoàn tất staging; store chưa thấy thay đổi trước commit.
+     */
     fn insert_session(
         &mut self,
-        _session: &NewSession,
+        session: &NewSession,
     ) -> impl Future<Output = Result<(), ApplicationError>> + Send {
         std::future::ready({
             self.staged.sessions += 1;
+            self.staged.session_client_type = Some(session.client_type);
             Ok(())
         })
     }
@@ -164,16 +180,21 @@ impl IdentityTransaction for MemoryTransaction {
     ) -> impl Future<Output = Result<LockedSession, ApplicationError>> + Send {
         std::future::ready(Err(ApplicationError::SessionInvalid))
     }
-    /// Inject failure ngay tại required audit để kiểm đường rollback của use case.
+    /** Stage audit metadata hoặc inject required-audit failure để kiểm rollback session.
+     * Input
+     * Param: audit — audit tổng hợp từ use case, chỉ lưu metadata client để đối chiếu session.
+     * Output: hoàn tất staging hoặc Unavailable theo cấu hình failure fake.
+     */
     fn append_audit(
         &mut self,
-        _audit: AuditRecord,
+        audit: AuditRecord,
     ) -> impl Future<Output = Result<(), ApplicationError>> + Send {
         std::future::ready({
             if self.staged.fail_required_audit {
                 Err(ApplicationError::Unavailable)
             } else {
                 self.staged.audits += 1;
+                self.staged.audit_client_type = Some(audit.client_type);
                 Ok(())
             }
         })
@@ -193,10 +214,43 @@ impl IdentityTransaction for MemoryTransaction {
     }
 }
 
+/** Login IOS giữ metadata riêng xuyên session/audit commit, TTL24h giống Android và credential chỉ có sau ACK. */
+#[test]
+fn ios_login_commits_matching_session_and_audit_metadata() {
+    let store = MemoryStore::new();
+    let service = IdentityService::new(
+        store.clone(),
+        FakeSecurity {
+            valid: true,
+            expected_password: None,
+        },
+    );
+    let issued = run(service.login(
+        "unit@example.invalid",
+        "synthetic-password-Aa1".to_owned(),
+        ClientType::Ios,
+        Uuid::new_v4(),
+    ))
+    .unwrap();
+    assert_eq!(
+        issued.expires_at,
+        Utc.timestamp_opt(1_700_000_000, 0).unwrap() + chrono::TimeDelta::hours(24)
+    );
+    assert!(!issued.limited);
+    assert!(!issued.token.expose().is_empty());
+    let state = store.0.lock().unwrap();
+    assert_eq!(state.sessions, 1);
+    assert_eq!(state.audits, 1);
+    assert_eq!(state.commits, 1);
+    assert_eq!(state.session_client_type, Some(ClientType::Ios));
+    assert_eq!(state.audit_client_type, Some(ClientType::Ios));
+}
+
 /// Crypto fake chỉ điều khiển outcome orchestration, không được đưa vào composition production.
 #[derive(Clone)]
 struct FakeSecurity {
     valid: bool,
+    expected_password: Option<&'static str>,
 }
 impl IdentitySecurity for FakeSecurity {
     /// Fake trả marker đã che để contract hashing không kéo implementation crypto vào core test.
@@ -206,13 +260,26 @@ impl IdentitySecurity for FakeSecurity {
     ) -> impl Future<Output = Result<SecretString, ApplicationError>> + Send {
         std::future::ready(Ok(SecretString::new("synthetic-verifier".into())))
     }
-    /// Outcome được test case chọn; không tuyên bố fake là kiểm password thật.
+    /**
+     * Giả lập verify tại ranh giới crypto để test outcome và xác nhận use case giữ nguyên credential.
+     *
+     * # Input
+     * Param: password — password tổng hợp được use case chuyển tới port verify.
+     * Param: _verifier — verifier giả; không thực hiện băm hoặc so khớp hash thật.
+     *
+     * # Output
+     * Trả valid đã chọn và từ chối nếu password khác giá trị case yêu cầu.
+     */
     fn verify_password(
         &self,
-        _password: SecretString,
+        password: SecretString,
         _verifier: SecretString,
     ) -> impl Future<Output = Result<bool, ApplicationError>> + Send {
-        std::future::ready(Ok(self.valid))
+        std::future::ready(Ok(self.valid
+            && self.expected_password.is_none_or(
+                // Chỉ nhận credential nguyên bản của case khi test có đặt giá trị đối chứng.
+                |expected| password.expose() == expected,
+            )))
     }
     /// Unknown account dùng cùng interface, không làm test phụ thuộc PHC encoding.
     fn dummy_verifier(&self) -> SecretString {
@@ -236,12 +303,33 @@ impl IdentitySecurity for FakeSecurity {
     }
 }
 
+/** Mật khẩu tạm có composition mới nhưng capability phiên vẫn giữ định dạng token cũ, không giảm entropy nguồn. */
+#[test]
+fn generated_temporary_password_obeys_new_policy() {
+    let security = FakeSecurity {
+        valid: true,
+        expected_password: None,
+    };
+    let password = security.issue_temporary_password().unwrap();
+    assert!(iot_domain::input::validate_new_password(password.expose(), "/password").is_ok());
+    let random_suffix = password.expose().strip_prefix("Aa1").unwrap();
+    assert!(Uuid::parse_str(random_suffix).is_ok());
+    let (token, _) = security.issue_token();
+    assert!(Uuid::parse_str(token.expose()).is_ok());
+}
+
 /// Required audit failure bỏ cả staged session; không có commit hoặc credential thành công.
 #[test]
 fn success_audit_failure_rolls_back_session() {
     let store = MemoryStore::new();
     store.0.lock().unwrap().fail_required_audit = true;
-    let service = IdentityService::new(store.clone(), FakeSecurity { valid: true });
+    let service = IdentityService::new(
+        store.clone(),
+        FakeSecurity {
+            valid: true,
+            expected_password: None,
+        },
+    );
     assert!(matches!(
         run(service.login(
             "unit@example.invalid",
@@ -261,7 +349,13 @@ fn success_audit_failure_rolls_back_session() {
 fn failure_audit_error_preserves_committed_counter() {
     let store = MemoryStore::new();
     store.0.lock().unwrap().fail_failure_audit = true;
-    let service = IdentityService::new(store.clone(), FakeSecurity { valid: false });
+    let service = IdentityService::new(
+        store.clone(),
+        FakeSecurity {
+            valid: false,
+            expected_password: None,
+        },
+    );
     assert!(matches!(
         run(service.login(
             "unit@example.invalid",
@@ -284,7 +378,13 @@ fn failure_audit_error_preserves_committed_counter() {
 fn lost_commit_ack_returns_unknown_without_issuing_credential() {
     let store = MemoryStore::new();
     store.0.lock().unwrap().lose_commit_ack = true;
-    let service = IdentityService::new(store.clone(), FakeSecurity { valid: true });
+    let service = IdentityService::new(
+        store.clone(),
+        FakeSecurity {
+            valid: true,
+            expected_password: None,
+        },
+    );
     assert!(matches!(
         run(service.login(
             "unit@example.invalid",
@@ -297,4 +397,74 @@ fn lost_commit_ack_returns_unknown_without_issuing_credential() {
     let state = store.0.lock().unwrap();
     assert_eq!(state.sessions, 1);
     assert_eq!(state.commits, 1);
+}
+
+/** Giữ khoảng trắng đầu/cuối của password tổng hợp đến port verify để credential cũ không bị đổi nghĩa. */
+#[test]
+fn login_passes_password_whitespace_unchanged_to_verifier() {
+    let store = MemoryStore::new();
+    let password = "  synthetic-password  ";
+    let service = IdentityService::new(
+        store.clone(),
+        FakeSecurity {
+            valid: true,
+            expected_password: Some(password),
+        },
+    );
+    assert!(
+        run(service.login(
+            "unit@example.invalid",
+            password.to_owned(),
+            ClientType::Android,
+            Uuid::new_v4(),
+        ))
+        .is_ok()
+    );
+    assert_eq!(store.0.lock().unwrap().sessions, 1);
+}
+
+/** Cả ba input tương đương OQ001 tới đúng lookup key và account, còn Unicode bị chặn trước storage. */
+#[test]
+fn login_email_equivalents_use_the_same_account_lookup_key() {
+    let store = MemoryStore::new();
+    let service = IdentityService::new(
+        store.clone(),
+        FakeSecurity {
+            valid: true,
+            expected_password: None,
+        },
+    );
+    for email in [
+        "member.name+tag@example.test",
+        "MeMbEr.NaMe+TaG@EXAMPLE.TEST",
+        "\t\n\u{c}\r Member.Name+Tag@Example.Test \t\n\u{c}\r",
+    ] {
+        let issued = run(service.login(
+            email,
+            "synthetic-password-Aa1".to_owned(),
+            ClientType::Android,
+            Uuid::new_v4(),
+        ))
+        .unwrap();
+        assert_eq!(issued.user_id, Uuid::nil());
+    }
+    for email in [
+        "thànhviên@example.test",
+        "\u{a0}member@example.test\u{a0}",
+        "\u{b}member@example.test\u{b}",
+    ] {
+        assert!(matches!(
+            run(service.login(
+                email,
+                "synthetic-password-Aa1".to_owned(),
+                ClientType::Android,
+                Uuid::new_v4()
+            )),
+            Err(ApplicationError::InvalidInput)
+        ));
+    }
+    let state = store.0.lock().unwrap();
+    assert_eq!(state.lookup_emails, vec!["member.name+tag@example.test"; 3]);
+    assert_eq!(state.sessions, 3);
+    assert_eq!(state.commits, 3);
 }

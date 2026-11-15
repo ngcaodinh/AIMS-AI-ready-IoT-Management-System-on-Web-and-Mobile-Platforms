@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Nexa IoT authentication and bootstrap contract",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Hợp đồng P1 của FEAT-TN-001/002/004/041. Bản đề xuất auth-context Web sau REV-AUTH-001/002 chờ CP-01 owner review, provider-client test và G1; không chứng minh API đã chạy."
   },
   "servers": [{"url": "/"}],
@@ -171,15 +171,38 @@
         "tags": ["Global authentication"],
         "operationId": "logout",
         "summary": "Thu hồi phiên hiện tại",
-        "description": "Body vắng/rỗng; JSON có nội dung kể cả {} trả 422. WEB dùng cookie, auth context khớp, CSRF header và exact same-origin; context sai không revoke cookie của phiên khác. Bearer App không dùng context/CSRF Web. Digest nhận diện active/limited/revoked/expired cho phép 204; thiếu credential 204 không tác động; unknown/malformed credential 401. Lặp lại không thu hồi phiên khác. WEB xóa cookie cùng name/path.",
-        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "description": "Body phải vắng hoặc dài 0 byte; mọi JSON có nội dung kể cả {}, null, [] trả 422, JSON hỏng/duplicate key 400, quá 64 KiB 413, body không rỗng sai media type 415. Cookie + bearer cùng request trả 400. Resolver riêng tra digest active/limited/revoked/expired, không qua active-only middleware: nhận diện được trả 204 sau commit/đối soát revoke; thiếu credential 204 không tác động và không Set-Cookie; unknown/malformed credential trả 401 SESSION_EXPIRED; DB lỗi trả 503 SERVICE_UNAVAILABLE, không clear cookie hoặc giả commit. Với cookie đã nhận diện, kiểm auth context trước CSRF để context khác trả 409 không chạm cookie B; context đúng vẫn kiểm exact same-origin và CSRF bound S1, kể cả revoked/expired. Bearer App không dùng context/CSRF Web. Request lỗi không clear cookie. WEB thành công clear đúng name/path, không Domain. Revoke chỉ S1, giữ revokedAt lần đầu; audit chỉ một transition; push binding CAS activeSessionId=S1, ticket/audit/close outbox cùng transaction. 204 xác nhận commit, không tự chứng minh socket thực đóng: reconcile mỗi backend instance sau commit; lỗi close không phục hồi quyền. Bảo vệ HTTP/WS vẫn từ chối S1; không nhận sessionId/userId/installationId/workspaceId trong body làm authority. 429 dùng Retry-After theo rate policy chung, không thêm quota riêng. Không tự replay qua interceptor bằng bearer B hoặc cookie context khác.",
+        "security": [{"WebSession": []}, {"AppBearer": []}, {}],
         "parameters": [{"$ref": "#/components/parameters/AuthContext"}, {"$ref": "#/components/parameters/CsrfToken"}],
+        "x-logout-policy": {
+          "resolver": "session-digest-including-inactive",
+          "scope": "current-session-only",
+          "credentialOutcomes": {
+            "active": 204, "limited": 204, "revoked": 204, "expired": 204,
+            "absent": 204, "unknown": 401, "malformed": 401, "storeUnavailable": 503
+          },
+          "webGuards": {
+            "recognizedCookie": ["authContext", "sameOrigin", "csrfBoundToSession"],
+            "includesInactive": true, "contextMismatch": 409, "csrfInvalid": 403
+          },
+          "body": {
+            "maxBytes": 65536, "emptyAllowed": true, "jsonValue": 422,
+            "malformedJson": 400, "unsupportedMediaType": 415, "oversize": 413
+          },
+          "cookie": {
+            "clearOn": "recognized-web-session-success",
+            "clearOnError": false, "clearWhenAbsent": false
+          },
+          "idempotency": {
+            "repeatStatus": 204, "preserveRevokedAt": true, "audit": "first-transition-only"
+          }
+        },
         "responses": {
           "204": {
-            "description": "Không body. WEB clear iot_session; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0.",
+            "description": "Không body. Chỉ session WEB đã nhận diện và qua guard mới clear cookie. Bearer App hoặc không credential không có Set-Cookie. Không Domain.",
             "headers": {
               "Cache-Control": {"schema": {"type": "string", "const": "no-store"}},
-              "Set-Cookie": {"description": "Chỉ WEB; xóa cookie đúng phạm vi.", "schema": {"type": "string"}}
+              "Set-Cookie": {"description": "Chỉ WEB đã nhận diện; xóa cookie đúng phạm vi.", "schema": {"type": "string", "const": "iot_session=; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0"}}
             }
           },
           "400": {"$ref": "#/components/responses/ValidationError"},
@@ -187,7 +210,9 @@
           "403": {"$ref": "#/components/responses/CsrfInvalid"},
           "409": {"$ref": "#/components/responses/AuthContextMismatch"},
           "413": {"$ref": "#/components/responses/ValidationError"},
+          "415": {"$ref": "#/components/responses/ValidationError"},
           "422": {"$ref": "#/components/responses/ValidationError"},
+          "429": {"$ref": "#/components/responses/RateLimited"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
       }
@@ -256,7 +281,7 @@
         "required": ["email", "password", "clientType"],
         "properties": {
           "email": {"type": "string", "pattern": "^[\\x00-\\x7F]+$", "description": "Server trim ASCII whitespace hai đầu và lowercase ASCII trước khi kiểm email; canonical email tối đa 254 ký tự, local <=64. Raw value có thể chứa khoảng trắng biên nên format/maxLength phải kiểm sau canonicalization. Không bỏ dot/+tag; cùng DB unique rule."},
-          "password": {"type": "string", "minLength": 12, "maxLength": 128, "description": "Unicode scalar/code points; không trim/normalize; từ chối surrogate/UTF-8 hỏng."},
+          "password": {"type": "string", "minLength": 9, "maxLength": 128, "description": "Unicode scalar/code points; không trim/normalize; từ chối surrogate/UTF-8 hỏng. Login không áp composition mới lên credential đã lưu."},
           "clientType": {"type": "string", "enum": ["WEB", "ANDROID", "IOS"]}
         }
       },
@@ -355,7 +380,7 @@
         "required": ["currentPassword", "newPassword"],
         "properties": {
           "currentPassword": {"type": "string", "minLength": 1, "maxLength": 128},
-          "newPassword": {"type": "string", "minLength": 12, "maxLength": 128, "description": "Khác currentPassword nguyên bản; vi phạm trả field code SAME_AS_CURRENT."}
+          "newPassword": {"type": "string", "minLength": 9, "maxLength": 128, "x-password-policy": "new-password-v1", "description": "Có Unicode chữ hoa (Uppercase), chữ thường (Lowercase) và số ASCII0–9; thiếu thành phần trả FORMAT. Không bắt buộc ký tự đặc biệt; giữ nguyên khoảng trắng. Khác currentPassword nguyên bản; vi phạm trả field code SAME_AS_CURRENT. Oracle tại fixtures/auth/password-policy.json."}
         }
       },
       "FieldError": {

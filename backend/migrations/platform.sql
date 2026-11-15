@@ -4067,3 +4067,61 @@ DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
 \endif
 \endif
 COMMIT;
+
+\set migration_version platform-0020-auth-ios-client
+\set migration_checksum c2a7670b78bb967d986e1ea92635affd3b9485f2f149c3688a3e2ecc887dac22
+
+/* Template psql của runner; hai marker chỉ được thay bằng file SQL nguồn trong repo.
+ * migration_version/checksum là literal qua :'name', không chèn input vào SQL.
+ * DDL và ledger commit cùng nhau; advisory lock dùng chung cho mọi version/runner.
+ */
+BEGIN;
+SET LOCAL lock_timeout='5s';
+SET LOCAL statement_timeout='30s';
+SELECT pg_advisory_xact_lock(17001,1);
+/* Lịch sử runner lab: lưu checksum và thời điểm áp thật, không chứa credential.
+ * Phải chạy trong transaction đã lấy advisory lock; không thay SQLx production history.
+ */
+CREATE SCHEMA IF NOT EXISTS migration_control;
+CREATE TABLE IF NOT EXISTS migration_control.applied_migrations (
+    version text PRIMARY KEY,
+    checksum text NOT NULL CHECK(checksum ~ '^[0-9a-f]{64}$'),
+    applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+SELECT NOT EXISTS(
+    SELECT 1 FROM migration_control.applied_migrations WHERE version=:'migration_version'
+) AS should_apply \gset
+\if :should_apply
+/* Giữ enum server WEB/ANDROID/IOS theo OQ-AUTH-007, không triển khai iOS UI.
+ * Phải áp sau 0019; ALTER CHECK giữ ACCESS EXCLUSIVE và quét hai bảng trong transaction migration.
+ * Runner giới hạn lock_timeout 5 giây và statement_timeout 30 giây; không backfill hoặc sửa hàng session/audit.
+ * Nếu cần rollback sau khi đã có IOS, phải revoke/hết hạn và xử lý retention các hàng IOS trước migration thu hẹp.
+ */
+ALTER TABLE public.sessions DROP CONSTRAINT sessions_client_type_check,
+ ADD CONSTRAINT sessions_client_type_check CHECK (client_type IN ('WEB','ANDROID','IOS'));
+
+/* Audit giữ IOS là metadata hữu hạn; UNKNOWN tiếp tục dành cho input không nhận diện được. */
+ALTER TABLE public.audit_events DROP CONSTRAINT audit_events_client_type_check,
+ ADD CONSTRAINT audit_events_client_type_check CHECK (client_type IN ('WEB','ANDROID','IOS','UNKNOWN'));
+
+COMMENT ON COLUMN public.sessions.client_type IS 'Metadata client WEB/ANDROID/IOS; WEB dùng cookie còn ANDROID/IOS dùng bearer. Không chứng thực platform hoặc cấp quyền; session vẫn có TTL 24 giờ và guard hiện hành.';
+COMMENT ON COLUMN public.audit_events.client_type IS 'Metadata client WEB/ANDROID/IOS hoặc UNKNOWN khi không nhận diện được. Nhãn hữu hạn phục vụ audit, không cấp quyền hoặc tiết lộ credential.';
+
+/* History view giữ projection và mô tả cùng audit_events để metadata verification không lệch sau migrate. */
+COMMENT ON COLUMN public.audit_history.client_type IS 'Metadata client WEB/ANDROID/IOS hoặc UNKNOWN khi không nhận diện được. Nhãn hữu hạn phục vụ audit, không cấp quyền hoặc tiết lộ credential.';
+
+INSERT INTO migration_control.applied_migrations(version,checksum)
+    VALUES(:'migration_version',:'migration_checksum');
+\echo APPLIED
+\else
+SELECT checksum=:'migration_checksum' AS checksum_matches
+    FROM migration_control.applied_migrations WHERE version=:'migration_version' \gset
+\if :checksum_matches
+\echo ALREADY_APPLIED
+\else
+/* Drift phải rollback, không UPDATE checksum để hợp thức hóa lịch sử bị thay đổi. */
+DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
+\endif
+\endif
+COMMIT;

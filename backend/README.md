@@ -21,5 +21,20 @@ Từ root: `python -B ops/database/verify_repositories.py` chạy use case thậ
 trên cùng DB với fixture/role cleanup; `python -B ops/database/verify_platform.py verify`
 kiểm schema/restore. Các runner không được chạy song song vì verifier schema yêu cầu
 DB không có dữ liệu ứng dụng. Toolchain/linker hiện được pin cho máy Windows GNU này;
-Linux/production cần PoC riêng. Chưa có HTTP server, worker delivery hoặc release gate PASS.
+Linux/production cần PoC riêng. Đã có HTTP auth adapter và binary lab opt-in;
+worker delivery và release gates chưa PASS.
+
+## HTTP auth lab
+
+`src/http/` nối core cho login, `/me`, logout/password và workspace picker/detail.
+`cargo build --bin auth-lab --features http-server --locked --offline` build
+binary; không chạy binary trực tiếp bằng credential trong argv. Launcher từ
+repository root: `python -B ops/auth/run_local.py`, dùng password test nhập kín,
+temporary SCRAM role và config stdin, chỉ listen127.0.0.1:3000. Provider suite:
+`python -B ops/auth/run_local.py --verify --port 3001`.
+
+**DB execution hiện BLOCKED_APPROVAL:** automatic review yêu cầu phê duyệt cụ
+thể role grants +5accounts/2workspaces synthetic trên `iot_platform_lab`.
+Không reset dữ liệu để chạy.64 Rust tests PASS không thay provider evidence;
+browser/Android và CP-01/02/03 còn mở. Xem [hướng dẫn chi tiết và trạng thái](../docs/test-reports/FEAT-TN-001-runtime-handoff-2026-10-24.md).
 

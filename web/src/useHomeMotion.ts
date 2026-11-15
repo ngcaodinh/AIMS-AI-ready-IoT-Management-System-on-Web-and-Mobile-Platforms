@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 /** Gắn các hiệu ứng trang trí không ảnh hưởng dữ liệu React và gỡ chúng khi rời trang. */
 export function useHomeMotion(): void {
   // DOM ở đây chỉ dùng cho hiệu ứng thị giác; dữ liệu và hành động demo do React quản lý.
+  // Chỉ gắn listener/observer một lần và dọn toàn bộ tài nguyên khi hook bị tháo.
   useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const progress = document.getElementById('progress');
@@ -73,6 +74,7 @@ export function useHomeMotion(): void {
         const siblingIndex = Array.from(element.parentElement?.children ?? []).indexOf(element);
         element.style.setProperty('--d', `${Math.min(siblingIndex, 5) * 0.08}s`);
       });
+      // Xử lý các phần tử vừa vào khung nhìn và chỉ chạy hoạt ảnh một lần cho mỗi phần tử.
       observer = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
           if (!entry.isIntersecting) return;

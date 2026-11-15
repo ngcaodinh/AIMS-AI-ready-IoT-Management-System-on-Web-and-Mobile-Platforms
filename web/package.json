@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:auth": "node --experimental-transform-types --test tests/auth.test.mjs tests/password_policy.test.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },

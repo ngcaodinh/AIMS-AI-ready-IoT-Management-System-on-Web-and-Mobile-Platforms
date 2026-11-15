@@ -47,10 +47,17 @@ fn snapshot(row: &PgRow, draft: ValidatedTemplate) -> Result<TemplateSnapshot, A
 
 impl TemplateStore for PgIdentityStore {
     type Transaction = PgUnitOfWork;
-    /// Mở transaction cùng pool đã được composition cấp quyền; không dùng owner hoặc auto-migrate.
+    /**
+     * Mở transaction template trên pool đã được cấp quyền, không dùng owner hoặc auto-migrate.
+     * Output: unit of work không sink/`FencedWork` để không trộn sample với auth batch.
+     * Errors: storage giữ mapping và timeout hiện có, không nâng quyền để tiếp tục.
+     */
     async fn begin_template(&self) -> Result<PgUnitOfWork, ApplicationError> {
         Ok(PgUnitOfWork {
             transaction: self.pool.begin().await.map_err(storage_error)?,
+            // Transaction template không sinh auth metrics dù store được composition gắn sink.
+            diagnostics: None,
+            fenced_work: None,
         })
     }
 }

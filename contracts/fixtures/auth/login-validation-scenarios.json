@@ -1,0 +1,245 @@
+{
+  "contractVersion": "0.2.1",
+  "fixtureKind": "synthetic-contract-example",
+  "note": "Fixture validation tổng hợp; chưa phải kết quả provider hoặc E2E.",
+  "scenarios": [
+    {
+      "id": "CT-LOGIN-EMAIL-MISSING",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "REQUIRED"}]}, "correlationId": "corr_login_email_missing"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-NULL",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": null, "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "TYPE"}]}, "correlationId": "corr_login_email_null"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-TYPE",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": 7, "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "TYPE"}]}, "correlationId": "corr_login_email_type"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-MISSING",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/password", "code": "REQUIRED"}]}, "correlationId": "corr_login_password_missing"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-NULL",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": null, "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/password", "code": "TYPE"}]}, "correlationId": "corr_login_password_null"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-TYPE",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": 7, "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/password", "code": "TYPE"}]}, "correlationId": "corr_login_password_type"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-CLIENTTYPE-MISSING",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/clientType", "code": "REQUIRED"}]}, "correlationId": "corr_login_clienttype_missing"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-CLIENTTYPE-NULL",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": null}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/clientType", "code": "TYPE"}]}, "correlationId": "corr_login_clienttype_null"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-CLIENTTYPE-TYPE",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": 7}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/clientType", "code": "TYPE"}]}, "correlationId": "corr_login_clienttype_type"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-LENGTH-8",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "ssssssss", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/password", "code": "LENGTH"}]}, "correlationId": "corr_login_password_length_8"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-LENGTH-9",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "sssssssss", "clientType": "ANDROID"}},
+      "response": {"status": 200, "headers": {"Cache-Control": "no-store"}, "body": {"me": {"id": "11111111-1111-4111-8111-111111111111", "email": "member@example.test", "mustChangePassword": false}, "expiresAt": "2026-10-24T00:00:00Z", "limited": false, "token": "<nonfunctional-bearer>"}},
+      "given": {"accountAlias": "login_validation_user", "accountStatus": "ACTIVE", "mustChangePassword": false, "emailNormalized": "member@example.test", "storedPasswordEqualsRequest": true, "issuedAt": "2026-10-23T00:00:00Z"},
+      "assertions": ["password-preserved-exactly", "one-new-session", "session-expires-after-24h"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-LENGTH-128",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss", "clientType": "ANDROID"}},
+      "response": {"status": 200, "headers": {"Cache-Control": "no-store"}, "body": {"me": {"id": "11111111-1111-4111-8111-111111111111", "email": "member@example.test", "mustChangePassword": false}, "expiresAt": "2026-10-24T00:00:00Z", "limited": false, "token": "<nonfunctional-bearer>"}},
+      "given": {"accountAlias": "login_validation_user", "accountStatus": "ACTIVE", "mustChangePassword": false, "emailNormalized": "member@example.test", "storedPasswordEqualsRequest": true, "issuedAt": "2026-10-23T00:00:00Z"},
+      "assertions": ["password-preserved-exactly", "one-new-session", "session-expires-after-24h"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-LENGTH-129",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/password", "code": "LENGTH"}]}, "correlationId": "corr_login_password_length_129"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-UNICODE-12",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "🔒🔒🔒🔒🔒🔒🔒🔒🔒🔒🔒🔒", "clientType": "ANDROID"}},
+      "response": {"status": 200, "headers": {"Cache-Control": "no-store"}, "body": {"me": {"id": "11111111-1111-4111-8111-111111111111", "email": "member@example.test", "mustChangePassword": false}, "expiresAt": "2026-10-24T00:00:00Z", "limited": false, "token": "<nonfunctional-bearer>"}},
+      "given": {"accountAlias": "login_validation_user", "accountStatus": "ACTIVE", "mustChangePassword": false, "emailNormalized": "member@example.test", "storedPasswordEqualsRequest": true, "issuedAt": "2026-10-23T00:00:00Z"},
+      "assertions": ["password-preserved-exactly", "one-new-session", "session-expires-after-24h"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-WHITESPACE-12",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": " abcdefghij ", "clientType": "ANDROID"}},
+      "response": {"status": 200, "headers": {"Cache-Control": "no-store"}, "body": {"me": {"id": "11111111-1111-4111-8111-111111111111", "email": "member@example.test", "mustChangePassword": false}, "expiresAt": "2026-10-24T00:00:00Z", "limited": false, "token": "<nonfunctional-bearer>"}},
+      "given": {"accountAlias": "login_validation_user", "accountStatus": "ACTIVE", "mustChangePassword": false, "emailNormalized": "member@example.test", "storedPasswordEqualsRequest": true, "issuedAt": "2026-10-23T00:00:00Z"},
+      "assertions": ["password-preserved-exactly", "one-new-session", "session-expires-after-24h"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-TOTAL-254",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 200, "headers": {"Cache-Control": "no-store"}, "body": {"me": {"id": "11111111-1111-4111-8111-111111111111", "email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test", "mustChangePassword": false}, "expiresAt": "2026-10-24T00:00:00Z", "limited": false, "token": "<nonfunctional-bearer>"}},
+      "given": {"accountAlias": "login_validation_user", "accountStatus": "ACTIVE", "mustChangePassword": false, "emailNormalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test", "storedPasswordEqualsRequest": true, "issuedAt": "2026-10-23T00:00:00Z"},
+      "assertions": ["password-preserved-exactly", "one-new-session", "session-expires-after-24h"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-TOTAL-255",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "LENGTH"}]}, "correlationId": "corr_login_email_total_255"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-LOCAL-64",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.test", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 200, "headers": {"Cache-Control": "no-store"}, "body": {"me": {"id": "11111111-1111-4111-8111-111111111111", "email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.test", "mustChangePassword": false}, "expiresAt": "2026-10-24T00:00:00Z", "limited": false, "token": "<nonfunctional-bearer>"}},
+      "given": {"accountAlias": "login_validation_user", "accountStatus": "ACTIVE", "mustChangePassword": false, "emailNormalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.test", "storedPasswordEqualsRequest": true, "issuedAt": "2026-10-23T00:00:00Z"},
+      "assertions": ["password-preserved-exactly", "one-new-session", "session-expires-after-24h"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-LOCAL-65",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.test", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "LENGTH"}]}, "correlationId": "corr_login_email_local_65"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-FORMAT",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "invalid-address", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "FORMAT"}]}, "correlationId": "corr_login_email_format"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-UNICODE",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "thànhviên@example.test", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "FORMAT"}]}, "correlationId": "corr_login_email_unicode"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-CANONICAL",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "\t Member+tag@Example.Test \r\n", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 200, "headers": {"Cache-Control": "no-store"}, "body": {"me": {"id": "11111111-1111-4111-8111-111111111111", "email": "member+tag@example.test", "mustChangePassword": false}, "expiresAt": "2026-10-24T00:00:00Z", "limited": false, "token": "<nonfunctional-bearer>"}},
+      "given": {"accountAlias": "login_validation_user", "accountStatus": "ACTIVE", "mustChangePassword": false, "emailNormalized": "member+tag@example.test", "storedPasswordEqualsRequest": true, "issuedAt": "2026-10-23T00:00:00Z"},
+      "assertions": ["password-preserved-exactly", "one-new-session", "session-expires-after-24h"]
+    },
+    {
+      "id": "CT-LOGIN-UNKNOWN-ROLE",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "ANDROID", "role": "ADMIN"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "UNKNOWN_FIELD"}]}, "correlationId": "corr_login_unknown_role"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-UNKNOWN-WORKSPACEID",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "ANDROID", "workspaceId": "33333333-3333-4333-8333-333333333333"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "UNKNOWN_FIELD"}]}, "correlationId": "corr_login_unknown_workspaceid"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-UNKNOWN-USERID",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "ANDROID", "userId": "11111111-1111-4111-8111-111111111111"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "UNKNOWN_FIELD"}]}, "correlationId": "corr_login_unknown_userid"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-UNKNOWN-PERMISSIONS",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "ANDROID", "permissions": ["*"]}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "UNKNOWN_FIELD"}]}, "correlationId": "corr_login_unknown_permissions"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-MALFORMED",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "rawBody": "{\"email\":"},
+      "response": {"status": 400, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "MALFORMED_JSON"}]}, "correlationId": "corr_login_malformed"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-ROOT-NULL",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": null},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "TYPE"}]}, "correlationId": "corr_login_root_null"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-ROOT-ARRAY",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": []},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "", "code": "TYPE"}]}, "correlationId": "corr_login_root_array"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-EMAIL-EMPTY",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "", "password": "synthetic-password-123", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/email", "code": "FORMAT"}]}, "correlationId": "corr_login_email_empty"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-PASSWORD-EMPTY",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "", "clientType": "ANDROID"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/password", "code": "LENGTH"}]}, "correlationId": "corr_login_password_empty"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-CLIENTTYPE-EMPTY",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": ""}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/clientType", "code": "ENUM"}]}, "correlationId": "corr_login_clienttype_empty"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    },
+    {
+      "id": "CT-LOGIN-CLIENTTYPE-ENUM",
+      "operationId": "login",
+      "request": {"headers": {"Content-Type": "application/json"}, "body": {"email": "member@example.test", "password": "synthetic-password-123", "clientType": "web"}},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Thông tin đăng nhập hoặc giá trị chưa hợp lệ.", "details": {"fieldErrors": [{"path": "/clientType", "code": "ENUM"}]}, "correlationId": "corr_login_clienttype_enum"}}},
+      "assertions": ["no-session", "no-cookie", "no-credential-emitted", "no-input-echo"]
+    }
+  ]
+}

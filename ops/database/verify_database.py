@@ -77,17 +77,42 @@ def inspect_lab():
 
 # Gửi SQL qua stdin tới Unix socket của container được kiểm, không dùng connection secret.
 def sql(statement, role=MIGRATOR, database=DATABASE, check=True, variables=()):
-    """Input: statement là SQL nội bộ/synthetic, role thuộc allowlist, database thuộc lab.
-    Param: check — có raise khi psql lỗi; variables — literal psql được quote bởi :'name'.
-    Output: CompletedProcess để kiểm SQLSTATE/exit; Side effects: mutation theo SQL đã chọn.
+    """Gửi SQL nội bộ qua stdin với role/DB allowlist và quote riêng value để tránh chèn SQL.
+
+    Input
+    Param: statement — SQL source do caller nội bộ chọn; không nhận câu lệnh HTTP/client.
+    Param: role — một trong owner/migrator/runtime của lab, không principal tùy ý.
+    Param: database — đích lab được kiểm namespace trước khi chạy Docker.
+    Param: check — True truyền lỗi psql cho caller; False cho fault harness lọc lỗi an toàn.
+    Param: variables — value hữu hạn dùng qua quote :'name'; binding bucket lab chỉ nhận6digest tổng hợp khác nhau.
+    Output: CompletedProcess để kiểm exit/SQLSTATE; không tự log row hoặc value.
+    Side effects: mutation theo SQL nội bộ đã chọn, không mở owner TCP hoặc đọc credential/env.
     """
     validate_database_name(database)
     if role not in (ADMIN, MIGRATOR, RUNTIME):
         raise ValueError("Unknown lab role")
     arguments = ["exec", "-i", CONTAINER, "psql", "-X", "-q", "-A", "-t", "-w", "-v", "ON_ERROR_STOP=1", "-h", "/tmp", "-U", role, "-d", database]
+    has_lab_bucket_digests = False
     for name, value in variables:
+        # Psql lấy value cuối khi tên lặp; binding scope mới phải duy nhất trước khi tạo process.
+        if name == "auth_lab_bucket_digests":
+            if has_lab_bucket_digests:
+                raise ValueError("Duplicate auth lab bucket binding")
+            has_lab_bucket_digests = True
         valid = (name == "migration_checksum" and re.fullmatch(r"[0-9a-f]{64}", value)) or (
             name == "migration_version" and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,127}", value)
+        ) or (
+            name == "auth_fault_user_id" and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value)
+        ) or (
+            name == "auth_fault_bucket_digest" and re.fullmatch(r"[0-9a-f]{64}", value)
+        ) or (
+            # 5email fixture và1unknown: đúng6hex digest/389ký tự, không mở danh sách tùy ý hoặc nối SQL.
+            name == "auth_lab_bucket_digests" and isinstance(value, str)
+            and re.fullmatch(r"[0-9a-f]{64}(?:,[0-9a-f]{64}){5}", value)
+            and len(set(value.split(","))) == 6
+        ) or (
+            # Mảng UUID request bounded8 của fault suite; quote ở SQL rồi cast uuid[] kiểm kiểu lần nữa.
+            name == "auth_fault_correlations" and re.fullmatch(r"(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(?:,[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}){0,7}|", value)
         )
         if not valid:
             raise ValueError("Unexpected psql variable")

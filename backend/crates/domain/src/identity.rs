@@ -38,6 +38,20 @@ impl fmt::Debug for SecretString {
 pub enum ClientType {
     Web,
     Android,
+    Ios,
+}
+
+impl ClientType {
+    /**
+     * Đối chiếu kênh credential để metadata Android/IOS dùng chung bearer và Web chỉ dùng cookie.
+     * Input
+     * Param: transport — loại kênh đã tách từ header; không chứng thực hệ điều hành hoặc cấp quyền.
+     * Output: true khi hai loại cùng dùng cookie hoặc cùng dùng bearer theo OQ-AUTH-007.
+     */
+    #[must_use]
+    pub fn matches_transport(self, transport: Self) -> bool {
+        (self == Self::Web) == (transport == Self::Web)
+    }
 }
 
 /// Trạng thái account toàn cục, độc lập với membership từng tenant.

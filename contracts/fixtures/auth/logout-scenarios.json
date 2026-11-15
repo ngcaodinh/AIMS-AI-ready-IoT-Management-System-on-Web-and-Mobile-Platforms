@@ -1,0 +1,204 @@
+{
+  "contractVersion": "0.2.1",
+  "fixtureKind": "synthetic-contract-example",
+  "note": "Expected wire/effects chỉ là yêu cầu cho provider tương lai, không phải actual DB/HTTP/WS evidence. S1/S2 là alias fixture, không credential. Runner runtime phải cấp credential lab riêng và không log. response.body=null với 204 nghĩa là 0 byte, không gửi literal JSON null.",
+  "scenarios": [
+    {
+      "id": "CT-LOGOUT-001", "operationId": "logout",
+      "given": {"independentSessions": ["S1", "S2"], "sameAccount": true},
+      "request": {"clientType": "WEB", "credentialState": "active", "credentialSession": "S1", "rawBody": "", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store", "Set-Cookie": "iot_session=; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0"}, "body": null},
+      "expectedEffects": {"revokedSession": "S1", "preservedSessions": ["S2"], "newAuditTransitions": 1, "invalidateTicketsFor": "S1", "clearPushBindingIfSession": "S1"},
+      "assertions": ["derive-session-from-credential", "no-workspace-required", "commit-before-204", "reconcile-close-S1-on-each-instance", "S2-http-and-socket-remain-active"]
+    },
+    {
+      "id": "CT-LOGOUT-002", "operationId": "logout",
+      "given": {"independentSessions": ["S1", "S2"], "sameAccount": true},
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "rawBody": ""},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "expectedEffects": {"revokedSession": "S2", "preservedSessions": ["S1"], "newAuditTransitions": 1, "invalidateTicketsFor": "S2", "clearPushBindingIfSession": "S2"},
+      "assertions": ["no-web-csrf-or-context-required", "no-new-token", "no-installation-id-in-body", "S1-http-and-socket-remain-active"]
+    },
+    {
+      "id": "CT-LOGOUT-003", "operationId": "logout",
+      "given": {"revokedAt": "2026-10-23T03:00:00Z"},
+      "request": {"clientType": "WEB", "credentialState": "revoked", "credentialSession": "S1", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store", "Set-Cookie": "iot_session=; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0"}, "body": null},
+      "expectedEffects": {"revokedAt": "2026-10-23T03:00:00Z", "preservedSessions": ["S2"], "newAuditTransitions": 0},
+      "assertions": ["inactive-resolver-not-active-guard", "preserve-first-revokedAt", "no-new-transition-audit"]
+    },
+    {
+      "id": "CT-LOGOUT-APP-REPEAT", "operationId": "logout",
+      "given": {"revokedAt": "2026-10-23T03:00:00Z"},
+      "request": {"clientType": "ANDROID", "credentialState": "revoked", "credentialSession": "S2"},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "expectedEffects": {"revokedAt": "2026-10-23T03:00:00Z", "preservedSessions": ["S1"], "newAuditTransitions": 0},
+      "assertions": ["inactive-resolver-not-active-guard", "no-new-transition-audit"]
+    },
+    {
+      "id": "CT-LOGOUT-APP-LIMITED", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "limited", "credentialSession": "S2"},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "assertions": ["limited-may-logout-own-session", "no-new-token", "no-privilege-upgrade"]
+    },
+    {
+      "id": "CT-LOGOUT-WEB-EXPIRED", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "expired", "credentialSession": "S1", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store", "Set-Cookie": "iot_session=; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0"}, "body": null},
+      "assertions": ["recognized-digest-retained", "expired-cookie-still-requires-context-and-csrf", "no-new-token"]
+    },
+    {
+      "id": "CT-LOGOUT-004", "operationId": "getMe",
+      "request": {"clientType": "ANDROID", "credentialState": "revoked", "credentialSession": "S1"},
+      "response": {"status": 401, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "SESSION_REVOKED", "message": "Phiên đăng nhập không còn hiệu lực.", "details": {}, "correlationId": "corr_logout_reuse"}}},
+      "assertions": ["no-protected-data", "logout-resolver-does-not-weaken-protected-guard"]
+    },
+    {
+      "id": "CT-LOGOUT-LIMITED", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "limited", "credentialSession": "S1", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store", "Set-Cookie": "iot_session=; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0"}, "body": null},
+      "assertions": ["limited-may-logout-own-session", "no-profile-or-memberships", "no-privilege-upgrade"]
+    },
+    {
+      "id": "CT-LOGOUT-006-EXPIRED", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "expired", "credentialSession": "S2"},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "assertions": ["recognized-digest-retained", "no-new-token", "other-session-unchanged"]
+    },
+    {
+      "id": "CT-LOGOUT-006-ABSENT", "operationId": "logout",
+      "request": {"credentialState": "absent", "rawBody": ""},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "expectedEffects": {"preservedSessions": ["S1", "S2"], "newAuditTransitions": 0},
+      "assertions": ["no-side-effect", "no-cookie-clear"]
+    },
+    {
+      "id": "CT-LOGOUT-006-UNKNOWN", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "unknown"},
+      "response": {"status": 401, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "SESSION_EXPIRED", "message": "Phiên đăng nhập không hợp lệ hoặc đã hết hạn.", "details": {}, "correlationId": "corr_logout_unknown"}}},
+      "assertions": ["no-side-effect", "terminal-invalid-not-proof-of-revoke-commit"]
+    },
+    {
+      "id": "CT-LOGOUT-006-MALFORMED", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "malformed"},
+      "response": {"status": 401, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "SESSION_EXPIRED", "message": "Phiên đăng nhập không hợp lệ hoặc đã hết hạn.", "details": {}, "correlationId": "corr_logout_malformed"}}},
+      "assertions": ["no-side-effect", "no-credential-in-error"]
+    },
+    {
+      "id": "CT-LOGOUT-006-DB-DOWN", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "storeUnavailable", "credentialSession": "S2"},
+      "given": {"fault": "database-unavailable-before-commit"},
+      "response": {"status": 503, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Chưa xác nhận thu hồi phiên. Vui lòng kiểm tra lại.", "details": {}, "correlationId": "corr_logout_db"}}},
+      "expectedEffects": {"commitOutcome": "NOT_COMMITTED", "newAuditTransitions": 0},
+      "assertions": ["no-side-effect", "local-ui-stays-locked", "no-phantom-success-audit"]
+    },
+    {
+      "id": "CT-LOGOUT-CSRF-MISSING", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "active", "credentialSession": "S1", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}},
+      "response": {"status": 403, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "CSRF_INVALID", "message": "Không xác minh được yêu cầu đăng xuất.", "details": {}, "correlationId": "corr_logout_csrf_missing"}}},
+      "expectedEffects": {"newAuditTransitions": 0}, "assertions": ["no-side-effect", "no-cookie-clear"]
+    },
+    {
+      "id": "CT-LOGOUT-CSRF-REVOKED", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "revoked", "credentialSession": "S1", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-wrong-csrf>"}},
+      "response": {"status": 403, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "CSRF_INVALID", "message": "Không xác minh được yêu cầu đăng xuất.", "details": {}, "correlationId": "corr_logout_csrf_revoked"}}},
+      "expectedEffects": {"newAuditTransitions": 0}, "assertions": ["no-side-effect", "inactive-cookie-still-requires-csrf"]
+    },
+    {
+      "id": "CT-LOGOUT-ORIGIN-INVALID", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "active", "credentialSession": "S1", "headers": {"Origin": "https://other.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "response": {"status": 403, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "CSRF_INVALID", "message": "Không xác minh được yêu cầu đăng xuất.", "details": {}, "correlationId": "corr_logout_origin"}}},
+      "expectedEffects": {"newAuditTransitions": 0}, "assertions": ["no-side-effect", "exact-same-origin-required"]
+    },
+    {
+      "id": "CT-LOGOUT-CONTEXT-MISMATCH", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "active", "credentialSession": "S2", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "given": {"logoutPendingSession": "S1", "cookieSession": "S2", "cookieAuthContextId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
+      "response": {"status": 409, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "AUTH_CONTEXT_MISMATCH", "message": "Phiên hiện tại không khớp với phiên đã xác nhận.", "details": {}, "correlationId": "corr_logout_context"}}},
+      "expectedEffects": {"preservedSessions": ["S1", "S2"], "newAuditTransitions": 0}, "assertions": ["no-side-effect", "context-before-csrf", "no-cookie-clear", "never-revoke-S2-with-S1-intent"]
+    },
+    {
+      "id": "CT-LOGOUT-CONTEXT-MISSING", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "active", "credentialSession": "S1", "headers": {"Origin": "https://nexa.example.test", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "response": {"status": 409, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "AUTH_CONTEXT_MISMATCH", "message": "Phiên hiện tại không khớp với phiên đã xác nhận.", "details": {}, "correlationId": "corr_logout_context_missing"}}},
+      "expectedEffects": {"newAuditTransitions": 0}, "assertions": ["no-side-effect", "no-cookie-clear"]
+    },
+    {
+      "id": "CT-LOGOUT-BODY-OBJECT", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "headers": {"Content-Type": "application/json"}, "rawBody": "{}"},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Yêu cầu đăng xuất không nhận nội dung body.", "details": {}, "correlationId": "corr_logout_object"}}},
+      "assertions": ["no-side-effect"]
+    },
+    {
+      "id": "CT-LOGOUT-BODY-NULL", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "headers": {"Content-Type": "application/json"}, "rawBody": "null"},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Yêu cầu đăng xuất không nhận nội dung body.", "details": {}, "correlationId": "corr_logout_null"}}},
+      "assertions": ["no-side-effect"]
+    },
+    {
+      "id": "CT-LOGOUT-BODY-ARRAY", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "headers": {"Content-Type": "application/json"}, "rawBody": "[]"},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Yêu cầu đăng xuất không nhận nội dung body.", "details": {}, "correlationId": "corr_logout_array"}}},
+      "assertions": ["no-side-effect"]
+    },
+    {
+      "id": "CT-LOGOUT-BODY-AUTHORITY", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S1", "headers": {"Content-Type": "application/json"}, "rawBody": "{\"sessionId\":\"S2\",\"userId\":\"other-user\",\"workspaceId\":\"other-workspace\",\"installationId\":\"other-installation\"}"},
+      "response": {"status": 422, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Yêu cầu đăng xuất không nhận nội dung body.", "details": {}, "correlationId": "corr_logout_authority"}}},
+      "expectedEffects": {"preservedSessions": ["S1", "S2"], "newAuditTransitions": 0}, "assertions": ["no-side-effect", "body-is-not-authority"]
+    },
+    {
+      "id": "CT-LOGOUT-BODY-MALFORMED", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "headers": {"Content-Type": "application/json"}, "rawBody": "{"},
+      "response": {"status": 400, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Nội dung yêu cầu không hợp lệ.", "details": {}, "correlationId": "corr_logout_json"}}},
+      "assertions": ["no-side-effect"]
+    },
+    {
+      "id": "CT-LOGOUT-BODY-DUPLICATE", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "headers": {"Content-Type": "application/json"}, "rawBody": "{\"sessionId\":\"S1\",\"sessionId\":\"S2\"}"},
+      "response": {"status": 400, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Nội dung yêu cầu không hợp lệ.", "details": {}, "correlationId": "corr_logout_duplicate"}}},
+      "assertions": ["no-side-effect"]
+    },
+    {
+      "id": "CT-LOGOUT-BODY-TOO-LARGE", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "headers": {"Content-Type": "application/json"}, "rawBodyGenerator": {"kind": "jsonWithTrailingAsciiWhitespace", "prefix": "{}", "totalBytes": 65537}},
+      "response": {"status": 413, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Nội dung yêu cầu quá lớn.", "details": {}, "correlationId": "corr_logout_size"}}},
+      "assertions": ["no-side-effect", "reject-before-body-processing"]
+    },
+    {
+      "id": "CT-LOGOUT-MEDIA-TYPE", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2", "headers": {"Content-Type": "text/plain"}, "rawBody": "body-not-allowed"},
+      "response": {"status": 415, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Định dạng nội dung không được hỗ trợ.", "details": {}, "correlationId": "corr_logout_media"}}},
+      "assertions": ["no-side-effect"]
+    },
+    {
+      "id": "CT-LOGOUT-MIXED", "operationId": "logout",
+      "request": {"credentialState": "mixed", "credentialAliases": {"cookie": "S1", "bearer": "S2"}},
+      "response": {"status": 400, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "VALIDATION_ERROR", "message": "Yêu cầu xác thực không hợp lệ.", "details": {}, "correlationId": "corr_logout_mixed"}}},
+      "assertions": ["no-side-effect", "do-not-prefer-one-credential"]
+    },
+    {
+      "id": "CT-LOGOUT-RATE-LIMITED", "operationId": "logout",
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S2"},
+      "given": {"fault": "existing-shared-rate-policy-limit"},
+      "response": {"status": 429, "headers": {"Cache-Control": "no-store", "Retry-After": 5}, "body": {"error": {"code": "RATE_LIMITED", "message": "Vui lòng thử lại sau.", "details": {}, "correlationId": "corr_logout_rate"}}},
+      "assertions": ["no-side-effect", "bounded-retry-honors-retry-after", "no-new-logout-quota-implied"]
+    },
+    {
+      "id": "CT-LOGOUT-COMMIT-UNKNOWN", "operationId": "logout",
+      "request": {"clientType": "WEB", "credentialState": "active", "credentialSession": "S1", "headers": {"Origin": "https://nexa.example.test", "X-Auth-Context-Id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "X-CSRF-Token": "<nonfunctional-csrf-S1>"}},
+      "given": {"fault": "commit-ack-lost"},
+      "response": {"status": 503, "headers": {"Cache-Control": "no-store"}, "body": {"error": {"code": "SERVICE_UNAVAILABLE", "message": "Chưa xác nhận thu hồi phiên. Vui lòng kiểm tra lại.", "details": {}, "correlationId": "corr_logout_commit_unknown"}}},
+      "expectedEffects": {"commitOutcome": "UNKNOWN"},
+      "assertions": ["local-ui-stays-locked", "retry-only-same-session-context", "no-cookie-clear", "do-not-claim-rollback-or-revoke-success"]
+    },
+    {
+      "id": "CT-LOGOUT-REBIND-B", "operationId": "logout",
+      "given": {"activeSessionId": "S2", "installationAccount": "B", "logoutAccount": "A"},
+      "request": {"clientType": "ANDROID", "credentialState": "active", "credentialSession": "S1"},
+      "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
+      "expectedEffects": {"revokedSession": "S1", "activeSessionId": "S2", "preservedSessions": ["S2"]},
+      "assertions": ["push-binding-CAS-only-activeSessionId-S1", "keep-installation-proof", "never-inject-bearer-B"]
+    }
+  ]
+}

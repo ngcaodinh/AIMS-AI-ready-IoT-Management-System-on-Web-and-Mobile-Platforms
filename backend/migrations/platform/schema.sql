@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict ivaGRJfLJp9C6FgYEiTmNPCtH0jHd5rFJtikQmiQfPpDeWSli1cuNOcXe0mQ3Il
+\restrict n3XRCjpJ7DbGk9sAnX5leXOl2Cg57XsefwZs1IAUxHNUgRV3hvmeoFrjN3lUlGt
 
 -- Dumped from database version 17.11 (Debian 17.11-1.pgdg12+2)
 -- Dumped by pg_dump version 17.11 (Debian 17.11-1.pgdg12+2)
@@ -2325,14 +2325,15 @@ CREATE TABLE public.audit_events (
     -- Cho phép NULL: chưa có/không áp dụng giá trị theo nghiệp vụ; không đồng nghĩa chuỗi rỗng hoặc số 0.
     redacted_diff jsonb,
 
-    -- Loại client khởi tạo phiên/thao tác; enum của từng bảng phân biệt WEB, ANDROID và UNKNOWN khi được phép.
+    -- Metadata client WEB/ANDROID/IOS hoặc UNKNOWN khi không nhận diện được. Nhãn hữu hạn phục vụ audit, không cấp
+    -- quyền hoặc tiết lộ credential.
     -- text: chuỗi Unicode có độ dài biến đổi; kiểu này không tự trim, đổi chữ thường hoặc xác minh định dạng nghiệp
     -- vụ.
     -- NOT NULL: bắt buộc có giá trị. Chuỗi rỗng vẫn cần CHECK riêng.
     -- Không có DEFAULT: đường ghi phải cung cấp giá trị, trừ khi trigger được chỉ định gán trước INSERT.
     -- Ràng buộc hiện hành audit_events_client_type_check: CHECK chỉ chặn khi biểu thức là FALSE; NULL/UNKNOWN vẫn qua,
     -- nên phải phối hợp NOT NULL và CHECK shape khi cần.
-    -- CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'UNKNOWN'::text])))
+    -- CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'IOS'::text, 'UNKNOWN'::text])))
     client_type text NOT NULL,
 
     -- Thời điểm server ghi audit bằng statement_timestamp(); dùng phân trang và retention30 ngày, độc lập occurred_at
@@ -2350,7 +2351,7 @@ CREATE TABLE public.audit_events (
     CONSTRAINT audit_events_check1 CHECK (((resource_type IS NULL) = (resource_id IS NULL))),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
-    CONSTRAINT audit_events_client_type_check CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'UNKNOWN'::text])))
+    CONSTRAINT audit_events_client_type_check CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'IOS'::text, 'UNKNOWN'::text])))
 );
 
 
@@ -2449,7 +2450,7 @@ COMMENT ON COLUMN public.audit_events.redacted_diff IS 'Phần thay đổi metad
 -- Name: COLUMN audit_events.client_type; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.audit_events.client_type IS 'Loại client khởi tạo phiên/thao tác; enum của từng bảng phân biệt WEB, ANDROID và UNKNOWN khi được phép.';
+COMMENT ON COLUMN public.audit_events.client_type IS 'Metadata client WEB/ANDROID/IOS hoặc UNKNOWN khi không nhận diện được. Nhãn hữu hạn phục vụ audit, không cấp quyền hoặc tiết lộ credential.';
 
 
 --
@@ -2581,7 +2582,7 @@ COMMENT ON COLUMN public.audit_history.redacted_diff IS 'Phần thay đổi meta
 -- Name: COLUMN audit_history.client_type; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.audit_history.client_type IS 'Loại client khởi tạo phiên/thao tác; enum của từng bảng phân biệt WEB, ANDROID và UNKNOWN khi được phép.';
+COMMENT ON COLUMN public.audit_history.client_type IS 'Metadata client WEB/ANDROID/IOS hoặc UNKNOWN khi không nhận diện được. Nhãn hữu hạn phục vụ audit, không cấp quyền hoặc tiết lộ credential.';
 
 
 --
@@ -14342,14 +14343,15 @@ CREATE TABLE public.sessions (
     -- Không có DEFAULT: đường ghi phải cung cấp giá trị, trừ khi trigger được chỉ định gán trước INSERT.
     limited boolean NOT NULL,
 
-    -- Loại client khởi tạo phiên/thao tác; enum của từng bảng phân biệt WEB, ANDROID và UNKNOWN khi được phép.
+    -- Metadata client WEB/ANDROID/IOS; WEB dùng cookie còn ANDROID/IOS dùng bearer. Không chứng thực platform hoặc cấp
+    -- quyền; session vẫn có TTL 24 giờ và guard hiện hành.
     -- text: chuỗi Unicode có độ dài biến đổi; kiểu này không tự trim, đổi chữ thường hoặc xác minh định dạng nghiệp
     -- vụ.
     -- NOT NULL: bắt buộc có giá trị. Chuỗi rỗng vẫn cần CHECK riêng.
     -- Không có DEFAULT: đường ghi phải cung cấp giá trị, trừ khi trigger được chỉ định gán trước INSERT.
     -- Ràng buộc hiện hành sessions_client_type_check: CHECK chỉ chặn khi biểu thức là FALSE; NULL/UNKNOWN vẫn qua, nên
     -- phải phối hợp NOT NULL và CHECK shape khi cần.
-    -- CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text])))
+    -- CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'IOS'::text])))
     client_type text NOT NULL,
 
     -- Thời điểm phát hành phiên/grant/credential/ticket, làm gốc tính TTL theo loại bản ghi.
@@ -14381,7 +14383,7 @@ CREATE TABLE public.sessions (
     CONSTRAINT ck_sessions_ttl CHECK ((expires_at = (issued_at + '24:00:00'::interval))),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
-    CONSTRAINT sessions_client_type_check CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text]))),
+    CONSTRAINT sessions_client_type_check CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'IOS'::text]))),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT sessions_token_digest_check CHECK ((octet_length(token_digest) = 32))
@@ -14434,7 +14436,7 @@ COMMENT ON COLUMN public.sessions.limited IS 'True nếu phiên bị giới hạ
 -- Name: COLUMN sessions.client_type; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.sessions.client_type IS 'Loại client khởi tạo phiên/thao tác; enum của từng bảng phân biệt WEB, ANDROID và UNKNOWN khi được phép.';
+COMMENT ON COLUMN public.sessions.client_type IS 'Metadata client WEB/ANDROID/IOS; WEB dùng cookie còn ANDROID/IOS dùng bearer. Không chứng thực platform hoặc cấp quyền; session vẫn có TTL 24 giờ và guard hiện hành.';
 
 
 --
@@ -31077,7 +31079,7 @@ GRANT SELECT(archived_at) ON TABLE public.workspaces TO iot_dbeaver_reader;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ivaGRJfLJp9C6FgYEiTmNPCtH0jHd5rFJtikQmiQfPpDeWSli1cuNOcXe0mQ3Il
+\unrestrict n3XRCjpJ7DbGk9sAnX5leXOl2Cg57XsefwZs1IAUxHNUgRV3hvmeoFrjN3lUlGt
 
 
 /* Khôi phục ACL mặc định public mà pg_dump có thể lược bỏ. */

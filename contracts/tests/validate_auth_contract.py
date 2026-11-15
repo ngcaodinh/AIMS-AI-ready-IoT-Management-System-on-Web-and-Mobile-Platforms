@@ -11,6 +11,9 @@ CONTRACT_ROOT = Path(__file__).resolve().parents[1]
 OPENAPI_PATH = CONTRACT_ROOT / "openapi" / "auth.v1.json"
 FIXTURE_PATH = CONTRACT_ROOT / "fixtures" / "auth" / "scenarios.json"
 WORKSPACE_FIXTURE_PATH = CONTRACT_ROOT / "fixtures" / "auth" / "workspace-scenarios.json"
+LOGIN_VALIDATION_FIXTURE_PATH = (
+    CONTRACT_ROOT / "fixtures" / "auth" / "login-validation-scenarios.json"
+)
 
 
 class AuthContractTests(unittest.TestCase):
@@ -23,6 +26,9 @@ class AuthContractTests(unittest.TestCase):
         cls.fixtures = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         cls.workspace_fixtures = json.loads(
             WORKSPACE_FIXTURE_PATH.read_text(encoding="utf-8")
+        )
+        cls.login_validation_fixtures = json.loads(
+            LOGIN_VALIDATION_FIXTURE_PATH.read_text(encoding="utf-8")
         )
         cls.operations = {
             operation["operationId"]: operation
@@ -37,6 +43,10 @@ class AuthContractTests(unittest.TestCase):
         self.assertEqual(
             self.contract["info"]["version"],
             self.workspace_fixtures["contractVersion"],
+        )
+        self.assertEqual(
+            self.contract["info"]["version"],
+            self.login_validation_fixtures["contractVersion"],
         )
 
         # Duyệt cả response lồng nhau để mọi $ref nội bộ trỏ về cùng artifact.
@@ -64,7 +74,7 @@ class AuthContractTests(unittest.TestCase):
         self.assertEqual(login["required"], ["email", "password", "clientType"])
         self.assertFalse(login["additionalProperties"])
         self.assertEqual(login["properties"]["clientType"]["enum"], ["WEB", "ANDROID", "IOS"])
-        self.assertEqual(login["properties"]["password"]["minLength"], 12)
+        self.assertEqual(login["properties"]["password"]["minLength"], 9)
         self.assertEqual(login["properties"]["password"]["maxLength"], 128)
         self.assertEqual(schemas["WebLoginSuccess"]["not"]["required"], ["token"])
         self.assertIn("token", schemas["AppLoginSuccess"]["required"])
@@ -92,6 +102,7 @@ class AuthContractTests(unittest.TestCase):
         )
         for scenario in (
             self.fixtures["scenarios"] + self.workspace_fixtures["scenarios"]
+            + self.login_validation_fixtures["scenarios"]
         ):
             with self.subTest(scenario=scenario["id"]):
                 self.assertNotIn(scenario["id"], scenario_ids)
@@ -260,7 +271,7 @@ class AuthContractTests(unittest.TestCase):
 
     # Khóa header đối soát phiên Web trên mọi route bảo vệ trước khi có provider.
     def test_web_auth_context_fence_is_declared_for_protected_routes(self):
-        self.assertEqual(self.contract["info"]["version"], "0.2.0")
+        self.assertEqual(self.contract["info"]["version"], "0.2.1")
         parameters = self.contract["components"]["parameters"]
         self.assertEqual(parameters["AuthContext"]["name"], "X-Auth-Context-Id")
         self.assertIn(
@@ -289,6 +300,51 @@ class AuthContractTests(unittest.TestCase):
                     operation["parameters"],
                 )
                 self.assertIn("409", operation["responses"])
+
+    # Resolver logout nhận cả phiên đã thu hồi/hết hạn, không nới guard của route bảo vệ.
+    def test_logout_resolver_and_anonymous_security_match_the_policy(self):
+        operation = self.operations["logout"]
+        self.assertIn({}, operation["security"])
+        policy = operation["x-logout-policy"]
+        self.assertEqual(policy["resolver"], "session-digest-including-inactive")
+        self.assertEqual(policy["scope"], "current-session-only")
+        self.assertEqual(policy["credentialOutcomes"], {
+            "active": 204, "limited": 204, "revoked": 204, "expired": 204,
+            "absent": 204, "unknown": 401, "malformed": 401,
+            "storeUnavailable": 503,
+        })
+        self.assertNotIn({}, self.operations["getMe"]["security"])
+        self.assertNotIn("requestBody", operation)
+        for status in (204, 400, 401, 403, 409, 413, 415, 422, 429, 503):
+            self.assertIn(str(status), operation["responses"])
+
+    # Cookie clear chỉ áp dụng thành công Web đã nhận diện, không chạm cookie B khi lỗi.
+    def test_logout_cookie_clear_has_exact_scope_and_no_success_body(self):
+        operation = self.operations["logout"]
+        response = operation["responses"]["204"]
+        self.assertNotIn("content", response)
+        self.assertEqual(response["headers"]["Set-Cookie"]["schema"]["const"],
+                         "iot_session=; Path=/api/v1; Secure; HttpOnly; SameSite=Lax; Max-Age=0")
+        cookie = operation["x-logout-policy"]["cookie"]
+        self.assertEqual(cookie["clearOn"], "recognized-web-session-success")
+        self.assertFalse(cookie["clearOnError"])
+        self.assertFalse(cookie["clearWhenAbsent"])
+
+    # Khóa CSRF/context cho cả cookie inactive và phân biệt body rỗng với JSON null/{}.
+    def test_logout_guards_and_body_boundaries_are_explicit(self):
+        policy = self.operations["logout"]["x-logout-policy"]
+        self.assertEqual(policy["webGuards"], {
+            "recognizedCookie": ["authContext", "sameOrigin", "csrfBoundToSession"],
+            "includesInactive": True, "contextMismatch": 409, "csrfInvalid": 403,
+        })
+        self.assertEqual(policy["body"], {
+            "maxBytes": 65536, "emptyAllowed": True, "jsonValue": 422,
+            "malformedJson": 400, "unsupportedMediaType": 415, "oversize": 413,
+        })
+        self.assertEqual(policy["idempotency"], {
+            "repeatStatus": 204, "preserveRevokedAt": True,
+            "audit": "first-transition-only",
+        })
 
     # Fixture phải chứng minh cookie khác context không trả dữ liệu hoặc revoke sai phiên.
     def test_web_auth_context_mismatch_fixtures_are_denials(self):

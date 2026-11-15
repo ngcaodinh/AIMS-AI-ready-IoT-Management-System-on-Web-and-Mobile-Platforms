@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.2.0",
+  "contractVersion": "0.2.1",
   "fixtureKind": "synthetic-contract-example",
   "note": "Các marker <...> không hoạt động; fixture không phải bằng chứng provider/client đã chạy.",
   "scenarios": [
@@ -292,7 +292,7 @@
       "request": {
         "authState": "valid-web-limited",
         "headers": {"Content-Type": "application/json", "Origin": "https://nexa.example.test", "X-Auth-Context-Id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"},
-        "body": {"currentPassword": "synthetic-password-456", "newPassword": "synthetic-password-789"}
+        "body": {"currentPassword": "synthetic-password-456", "newPassword": "Synthetic-password-789"}
       },
       "response": {
         "status": 403,
@@ -307,7 +307,7 @@
       "request": {
         "authState": "valid-app-limited",
         "headers": {"Content-Type": "application/json"},
-        "body": {"currentPassword": "synthetic-password-456", "newPassword": "synthetic-password-456"}
+        "body": {"currentPassword": "Synthetic-password-456", "newPassword": "Synthetic-password-456"}
       },
       "response": {
         "status": 422,
@@ -321,7 +321,7 @@
       "request": {
         "authState": "valid-app-limited",
         "headers": {"Content-Type": "application/json"},
-        "body": {"currentPassword": "synthetic-password-456", "newPassword": "synthetic-password-789"}
+        "body": {"currentPassword": "synthetic-password-456", "newPassword": "Synthetic-password-789"}
       },
       "response": {"status": 204, "headers": {"Cache-Control": "no-store"}, "body": null},
       "assertions": ["all-account-sessions-revoked", "new-login-required", "no-automatic-full-session"]

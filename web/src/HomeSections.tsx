@@ -286,7 +286,7 @@ export function CallToActionSection() {
                   <a href="#" className="btn btn-primary">Tạo workspace <svg className="i" aria-hidden="true">
                       <use href="#i-arrow" />
                     </svg></a>
-                  <a href="#" className="btn btn-ghost">Đăng nhập</a>
+                  <a href="/login" className="btn btn-ghost">Đăng nhập</a>
                 </div>
               </div>
             </div>
@@ -317,7 +317,7 @@ export function SiteFooter() {
                   mật</a>
               </div>
               <div>
-                <h4>Tài khoản</h4><a href="#">Đăng nhập</a><a href="#">Tạo workspace</a><a href="#">Liên hệ</a>
+                <h4>Tài khoản</h4><a href="/login">Đăng nhập</a><a href="#">Tạo workspace</a><a href="#">Liên hệ</a>
               </div>
             </div>
             <div className="copy mt-12 flex flex-wrap justify-between gap-2 border-t border-line pt-6 text-[.84rem]"><span>© 2026 Nexa IoT. Đồ án tốt nghiệp — bản thiết kế giao diện trang chủ.</span><span>Phiên

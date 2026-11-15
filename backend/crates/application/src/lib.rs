@@ -2,6 +2,8 @@
 
 pub mod audit;
 pub mod audit_retention;
+pub mod auth_diagnostics;
+pub mod auth_read;
 pub mod device;
 pub mod device_ports;
 pub mod error;

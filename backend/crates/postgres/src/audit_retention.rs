@@ -12,10 +12,17 @@ use uuid::Uuid;
 
 impl AuditRetentionStore for PgIdentityStore {
     type Transaction = PgUnitOfWork;
-    /// Mở transaction worker trên pool đã được cấp quyền; không tự grant hoặc dùng owner credential.
+    /**
+     * Mở transaction worker retention trên pool đã được cấp quyền, không tự grant hoặc dùng owner credential.
+     * Output: unit of work không sink/`FencedWork`, giữ worker tách khỏi measurement auth.
+     * Errors: storage được lọc như trước, không thay đổi transaction/rollback policy.
+     */
     async fn begin_retention(&self) -> Result<PgUnitOfWork, ApplicationError> {
         Ok(PgUnitOfWork {
             transaction: self.pool.begin().await.map_err(storage_error)?,
+            // Worker retention có vòng đời riêng; không trộn sample với auth batch của lab.
+            diagnostics: None,
+            fenced_work: None,
         })
     }
 }

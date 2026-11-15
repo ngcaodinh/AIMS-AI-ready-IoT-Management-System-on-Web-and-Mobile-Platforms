@@ -1,0 +1,4930 @@
+{
+  "recordedAt": "2026-11-15T07:56:01.955135+00:00",
+  "buildId": "ba425ad-dirty",
+  "database": "iot_platform_lab",
+  "checks": [
+    "pool-budget-web-control",
+    "pool-budget-android-control",
+    "pool-budget-held-eight",
+    "pool-budget-web-safe-unavailable",
+    "pool-budget-web-stages",
+    "pool-budget-web-held-after-end",
+    "pool-budget-web-committed-unchanged",
+    "pool-budget-android-safe-unavailable",
+    "pool-budget-android-stages",
+    "pool-budget-android-held-after-end",
+    "pool-budget-android-committed-unchanged",
+    "pool-budget-released-eight",
+    "pool-budget-web-recovered",
+    "pool-budget-android-recovered",
+    "pool-budget-stopped-reaped",
+    "security-wrong-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-unknown-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-disabled-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-unknown-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-disabled-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-wrong-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-disabled-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-wrong-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-unknown-exact-denial",
+    "security-denials-equivalent-projection",
+    "security-export-login-issued",
+    "security-export-session-before",
+    "security-export-control-rejected",
+    "security-export-rejection-preserves-committed-session",
+    "security-success-audit-scan",
+    "security-export-evidence-scan",
+    "security-runtime-sink-scans",
+    "login-origin-foreign-origin-web-denied-no-credential",
+    "login-origin-foreign-origin-android-denied-no-credential",
+    "login-origin-foreign-origin-ios-denied-no-credential",
+    "login-origin-web-missing-origin-referer-denied-no-credential",
+    "login-origin-web-http-referer-fallback-denied-no-credential",
+    "login-origin-web-foreign-referer-denied-no-credential",
+    "login-origin-denials-no-session-or-success-audit",
+    "web-login-after-commit-no-bearer",
+    "web-full-login-exact-projection",
+    "web-session-protected-digest-metadata-ttl",
+    "email-canonical-case-same-account",
+    "email-canonical-ascii-edges-same-account",
+    "email-canonical-variants-distinct-durable-sessions",
+    "email-canonical-unique-key-rejects-duplicate",
+    "cookie-protected-exact-path",
+    "web-metadata-no-store",
+    "full-me-discovery-safe-projection",
+    "web-full-profile-exact-schema",
+    "bootstrap-foreign-origin-me-denied-no-data",
+    "bootstrap-foreign-origin-workspaces-denied-no-data",
+    "bootstrap-foreign-origin-devices-denied-no-data",
+    "full-me-context-confirmation",
+    "context-mismatch-before-profile",
+    "picker-rejects-missing-context",
+    "picker-current-membership-roles",
+    "four-workspace-original-active-pair",
+    "four-workspace-exact-given-active-suspended-removed-active",
+    "four-workspace-exact-active-pair",
+    "four-workspace-stable-page-contract",
+    "four-workspace-stable-cursor-progress",
+    "four-workspace-stable-page-contract",
+    "four-workspace-stable-cursor-progress",
+    "four-workspace-stable-page-contract",
+    "four-workspace-stable-exact-active-pair",
+    "four-workspace-inactive-detail-denied-no-data",
+    "four-workspace-inactive-detail-denied-no-data",
+    "four-workspace-authority-change-invalidates-cursor",
+    "four-workspace-restart-page-contract",
+    "four-workspace-restart-cursor-progress",
+    "four-workspace-restart-page-contract",
+    "four-workspace-restart-cursor-progress",
+    "four-workspace-restart-page-contract",
+    "four-workspace-restart-exact-active-pair",
+    "four-workspace-fixture-removed",
+    "protected-get-workspaces-missing-context",
+    "protected-get-workspaces-wrong-context",
+    "protected-get-workspaces-missing-context",
+    "protected-get-workspaces-wrong-context",
+    "protected-get-devices-missing-context",
+    "protected-get-devices-wrong-context",
+    "picker-explicit-active-or-max-limit-same-memberships",
+    "picker-explicit-active-or-max-limit-same-memberships",
+    "selection-rechecks-detail-contract",
+    "foreign-workspace-not-found-no-data",
+    "signed-keyset-first-page",
+    "signed-keyset-no-duplicate",
+    "signed-keyset-exact-traversal-no-omissions",
+    "signed-keyset-terminal-empty-page",
+    "cursor-forgery-rejected",
+    "cursor-limit-binding-rejected",
+    "foreign-context-control-login",
+    "cursor-user-binding-rejected",
+    "foreign-context-me-denied",
+    "foreign-context-me-original-session-retained",
+    "foreign-context-me-foreign-session-retained",
+    "foreign-context-logout-denied",
+    "foreign-context-logout-original-session-retained",
+    "foreign-context-logout-foreign-session-retained",
+    "foreign-context-password-denied",
+    "foreign-context-password-original-session-retained",
+    "foreign-context-password-foreign-session-retained",
+    "cursor-current-authority-change-rejected",
+    "suspended-membership-selection-denied",
+    "picker-excludes-suspended-membership",
+    "suspended-membership-detail-error-only",
+    "picker-excludes-removed-membership",
+    "removed-membership-detail-error-only",
+    "cookie-mutation-requires-csrf",
+    "logout-denied-wrong-csrf",
+    "logout-denied-wrong-csrf-authority-retained",
+    "logout-denied-wrong-origin",
+    "logout-denied-wrong-origin-authority-retained",
+    "logout-denied-missing-context",
+    "logout-denied-missing-context-authority-retained",
+    "logout-denied-wrong-context",
+    "logout-denied-wrong-context-authority-retained",
+    "android-bearer-without-cookie",
+    "android-full-login-exact-projection",
+    "android-session-protected-digest-metadata-ttl",
+    "ios-full-login-exact-projection",
+    "ios-session-protected-digest-metadata-ttl",
+    "ios-full-protected-profile-exact",
+    "ios-token-not-accepted-as-cookie",
+    "owned-ios-expired-session-fixture-inserted",
+    "expired-session-http-denied-error-only",
+    "mixed-credential-rejected",
+    "web-token-not-accepted-as-bearer",
+    "android-token-not-accepted-as-cookie",
+    "web-logout-committed",
+    "web-logout-idempotent",
+    "web-logout-keeps-android-session",
+    "limited-login",
+    "limited-web-login-exact-projection",
+    "limited-guard-or-empty",
+    "ios-limited-login-no-authority-projection",
+    "ios-limited-session-protected-digest-metadata-ttl",
+    "ios-limited-me-no-authority",
+    "ios-limited-workspaces-no-authority",
+    "ios-limited-devices-no-authority",
+    "limited-ios-logout-committed",
+    "limited-ios-logout-revoked-only-session",
+    "limited-confirmation-no-profile",
+    "limited-resource-guard",
+    "password-change-android-limited-session",
+    "password-new-length-8",
+    "password-new-length-8-session-retained",
+    "password-new-missing-uppercase",
+    "password-new-missing-uppercase-session-retained",
+    "password-new-missing-lowercase",
+    "password-new-missing-lowercase-session-retained",
+    "password-new-missing-digit",
+    "password-new-missing-digit-session-retained",
+    "password-new-same-as-current",
+    "password-new-same-as-current-session-retained",
+    "password-current-wrong-denied",
+    "password-current-wrong-keeps-session",
+    "password-change-requires-csrf",
+    "password-denials-keep-android-session",
+    "password-change-nine-codepoints-committed",
+    "password-change-revokes-web-session",
+    "password-change-revokes-android-session",
+    "password-change-rejects-old-password",
+    "password-change-new-android-login-full",
+    "password-change-preserves-profile-identity",
+    "password-change-new-web-login-full",
+    "password-change-keeps-other-account-session",
+    "empty-login",
+    "empty-web-login-exact-projection",
+    "empty-guard-or-empty",
+    "empty-account-known-workspace-denied-no-data",
+    "known-wrong-exact-public-invalid-projection",
+    "disabled-exact-public-invalid-projection",
+    "shared-limiter-attempt-1",
+    "shared-limiter-exact-envelope-1",
+    "shared-limiter-attempt-2",
+    "shared-limiter-exact-envelope-2",
+    "shared-limiter-attempt-3",
+    "shared-limiter-exact-envelope-3",
+    "shared-limiter-attempt-4",
+    "shared-limiter-exact-envelope-4",
+    "shared-limiter-attempt-5",
+    "shared-limiter-exact-envelope-5",
+    "shared-limiter-attempt-6",
+    "shared-limiter-exact-envelope-6",
+    "rate-limit-retry-after",
+    "public-auth-invalid-projection-equivalent",
+    "forged-forwarded-and-client-change-share-limiter-key",
+    "measurement-startup-empty-windows",
+    "measurement-primary-smoke",
+    "measurement-peer-smoke",
+    "measurement-baseline-same_key",
+    "measurement-baseline-same_key",
+    "measurement-baseline-same_key",
+    "measurement-baseline-same_key",
+    "measurement-baseline-same_key",
+    "measurement-baseline-multi_key",
+    "measurement-baseline-multi_key",
+    "measurement-baseline-multi_key",
+    "measurement-baseline-multi_key",
+    "measurement-baseline-multi_key",
+    "lock-budget-web-control",
+    "lock-budget-web-fresh-bucket",
+    "lock-budget-web-actual-wait",
+    "lock-budget-web-held-after-response",
+    "lock-budget-web-safe-unavailable",
+    "lock-budget-web-stages",
+    "lock-budget-web-committed-unchanged",
+    "lock-budget-web-recovered",
+    "lock-budget-android-control",
+    "lock-budget-android-fresh-bucket",
+    "lock-budget-android-actual-wait",
+    "lock-budget-android-held-after-response",
+    "lock-budget-android-safe-unavailable",
+    "lock-budget-android-stages",
+    "lock-budget-android-committed-unchanged",
+    "lock-budget-android-recovered",
+    "user-fence-login-first-password-web-after-verify-actual-lock-chain",
+    "user-fence-login-first-password-web-login-committed",
+    "user-fence-login-first-password-web-issued-session-revoked-after-mutation",
+    "user-fence-login-first-password-web-old-session-unusable",
+    "user-fence-login-first-password-android-after-verify-actual-lock-chain",
+    "user-fence-login-first-password-android-login-committed",
+    "user-fence-login-first-password-android-issued-session-revoked-after-mutation",
+    "user-fence-login-first-password-android-old-session-unusable",
+    "user-fence-login-first-status-web-after-verify-actual-lock-chain",
+    "user-fence-login-first-status-web-login-committed",
+    "user-fence-login-first-status-web-issued-session-revoked-after-mutation",
+    "user-fence-login-first-status-web-old-session-unusable",
+    "user-fence-login-first-status-android-after-verify-actual-lock-chain",
+    "user-fence-login-first-status-android-login-committed",
+    "user-fence-login-first-status-android-issued-session-revoked-after-mutation",
+    "user-fence-login-first-status-android-old-session-unusable",
+    "user-fence-login-first-reset-web-after-verify-actual-lock-chain",
+    "user-fence-login-first-reset-web-login-committed",
+    "user-fence-login-first-reset-web-issued-session-revoked-after-mutation",
+    "user-fence-login-first-reset-web-old-session-unusable",
+    "user-fence-login-first-reset-android-after-verify-actual-lock-chain",
+    "user-fence-login-first-reset-android-login-committed",
+    "user-fence-login-first-reset-android-issued-session-revoked-after-mutation",
+    "user-fence-login-first-reset-android-old-session-unusable",
+    "user-fence-reset-first-web-below-limiter",
+    "user-fence-reset-first-web-actual-user-wait",
+    "user-fence-reset-first-web-invalid",
+    "user-fence-reset-first-web-no-credential",
+    "user-fence-reset-first-web-no-issued-session",
+    "user-fence-reset-first-web-counter-and-audit",
+    "user-fence-reset-first-android-below-limiter",
+    "user-fence-reset-first-android-actual-user-wait",
+    "user-fence-reset-first-android-invalid",
+    "user-fence-reset-first-android-no-credential",
+    "user-fence-reset-first-android-no-issued-session",
+    "user-fence-reset-first-android-counter-and-audit",
+    "user-fence-reset-probe-restores-exact-owned-bucket-baseline",
+    "user-fence-password-web-control",
+    "user-fence-password-web-below-limiter",
+    "user-fence-password-web-actual-wait",
+    "user-fence-password-web-mutation-committed",
+    "user-fence-password-web-invalid",
+    "user-fence-password-web-no-credential",
+    "user-fence-password-web-no-issued-session",
+    "user-fence-password-web-counter-and-audit",
+    "user-fence-password-android-control",
+    "user-fence-password-android-below-limiter",
+    "user-fence-password-android-actual-wait",
+    "user-fence-password-android-mutation-committed",
+    "user-fence-password-android-invalid",
+    "user-fence-password-android-no-credential",
+    "user-fence-password-android-no-issued-session",
+    "user-fence-password-android-counter-and-audit",
+    "disabled-web-invalid",
+    "disabled-web-no-credential",
+    "disabled-web-no-issued-session",
+    "disabled-web-counter-and-audit",
+    "disabled-android-invalid",
+    "disabled-android-no-credential",
+    "disabled-android-no-issued-session",
+    "disabled-android-counter-and-audit",
+    "user-fence-status-web-control",
+    "user-fence-status-web-below-limiter",
+    "user-fence-status-web-actual-wait",
+    "user-fence-status-web-mutation-committed",
+    "user-fence-status-web-invalid",
+    "user-fence-status-web-no-credential",
+    "user-fence-status-web-no-issued-session",
+    "user-fence-status-web-counter-and-audit",
+    "user-fence-status-android-control",
+    "user-fence-status-android-below-limiter",
+    "user-fence-status-android-actual-wait",
+    "user-fence-status-android-mutation-committed",
+    "user-fence-status-android-invalid",
+    "user-fence-status-android-no-credential",
+    "user-fence-status-android-no-issued-session",
+    "user-fence-status-android-counter-and-audit",
+    "two-instance-session-issued",
+    "two-instance-session-discovery",
+    "concurrent-multi-key-logins",
+    "concurrent-same-account-distinct-durable-sessions",
+    "concurrent-shared-limiter-counts",
+    "concurrent-shared-limiter-safe-response",
+    "concurrent-shared-limiter-safe-response",
+    "concurrent-shared-limiter-safe-response",
+    "concurrent-shared-limiter-safe-response",
+    "concurrent-shared-limiter-safe-response",
+    "concurrent-shared-limiter-safe-response",
+    "limiter-boundary-five-committed",
+    "limiter-correct-web-safe-limited",
+    "limiter-correct-web-window-not-extended",
+    "limiter-correct-android-safe-limited",
+    "limiter-correct-android-window-not-extended",
+    "limiter-correct-alternate-ip-ios-safe-limited",
+    "limiter-alternate-ip-window-not-extended",
+    "limiter-correct-denials-no-session-audit-counter-change",
+    "limiter-last-second-correct-password-safe-limited",
+    "limiter-last-second-retry-one-window-not-extended",
+    "limiter-owned-bucket-expired-by-db-clock",
+    "limiter-expired-correct-password-verified",
+    "limiter-expired-success-clears-only-expired-window",
+    "session-insert-fault-permission-denial-confirmed",
+    "session-insert-fault-web-safe-unavailable",
+    "session-insert-fault-web-no-credential",
+    "session-insert-fault-android-safe-unavailable",
+    "session-insert-fault-android-no-credential",
+    "session-insert-fault-ios-safe-unavailable",
+    "session-insert-fault-ios-no-credential",
+    "session-insert-fault-session-audit-counter-unchanged",
+    "session-insert-fault-permission-restored",
+    "limiter-update-fault-permission-denial-confirmed",
+    "limiter-update-fault-web-safe-unavailable",
+    "limiter-update-fault-web-no-credential",
+    "limiter-update-fault-android-safe-unavailable",
+    "limiter-update-fault-android-no-credential",
+    "limiter-update-fault-ios-safe-unavailable",
+    "limiter-update-fault-ios-no-credential",
+    "limiter-update-fault-session-audit-counter-unchanged",
+    "limiter-update-fault-permission-restored",
+    "audit-fault-fresh-fixture-bucket",
+    "audit-fault-web-unavailable",
+    "audit-fault-web-no-credential",
+    "audit-fault-android-unavailable",
+    "audit-fault-android-no-credential",
+    "audit-fault-required-session-audit-rollback",
+    "audit-fault-denied-attempt-1",
+    "audit-fault-denied-attempt-2",
+    "audit-fault-denied-attempt-3",
+    "audit-fault-denied-attempt-4",
+    "audit-fault-denied-attempt-5",
+    "audit-fault-counter-committed",
+    "audit-fault-denials-no-session-or-audit",
+    "audit-fault-rate-limit-retained",
+    "audit-fault-permission-restored",
+    "commit-ack-web-unavailable",
+    "commit-ack-web-no-credential",
+    "commit-ack-web-one-transaction",
+    "commit-ack-web-exact-committed-pair",
+    "commit-ack-android-unavailable",
+    "commit-ack-android-no-credential",
+    "commit-ack-android-one-transaction",
+    "commit-ack-android-exact-committed-pair",
+    "backend-output-capture-primary-terminal",
+    "backend-output-capture-peer-terminal"
+  ],
+  "fixtureCleanup": "APPLICATION_ROWS_REMOVED",
+  "anonymousFailureAudit": "RETAINED_BY_CANONICAL_POLICY",
+  "ownershipJournal": "ops\\auth\\ownership\\d7fa1fde-f9fb-4149-ad06-d4dd06cc5c8a.json",
+  "browser": "NOT_RUN",
+  "android": "NOT_RUN",
+  "kind": "real HTTP + PostgreSQL provider, not browser E2E",
+  "concurrency": {
+    "kind": "HTTP wall time observations, not hash/queue/pool/lock or load acceptance",
+    "multiKey": {
+      "samples": 6,
+      "instances": 2,
+      "keys": 3,
+      "minMs": 1143.38,
+      "maxMs": 3391.61,
+      "p50Ms": 2279.46,
+      "p95Ms": 3391.61
+    },
+    "sameKey": {
+      "samples": 6,
+      "instances": 2,
+      "keys": 1,
+      "minMs": 1184.93,
+      "maxMs": 5715.36,
+      "p50Ms": 3702.62,
+      "p95Ms": 5715.36
+    }
+  },
+  "commitAck": [
+    {
+      "clientType": "WEB",
+      "confirmed": true,
+      "begins": 1,
+      "commits": 1
+    },
+    {
+      "clientType": "ANDROID",
+      "confirmed": true,
+      "begins": 1,
+      "commits": 1
+    }
+  ],
+  "userFence": [
+    {
+      "kind": "password",
+      "clientType": "WEB",
+      "waitObserved": true,
+      "mutationCommitted": true
+    },
+    {
+      "kind": "password",
+      "clientType": "ANDROID",
+      "waitObserved": true,
+      "mutationCommitted": true
+    },
+    {
+      "kind": "disabled",
+      "clientType": "WEB"
+    },
+    {
+      "kind": "disabled",
+      "clientType": "ANDROID"
+    },
+    {
+      "kind": "status",
+      "clientType": "WEB",
+      "waitObserved": true,
+      "mutationCommitted": true
+    },
+    {
+      "kind": "status",
+      "clientType": "ANDROID",
+      "waitObserved": true,
+      "mutationCommitted": true
+    }
+  ],
+  "measurements": {
+    "kind": "internal stage smoke, not repeated baseline or production SLO",
+    "windows": [
+      {
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3113,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2254,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 6120,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2621,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 54,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 553880,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 8074,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 574034,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 12
+      },
+      {
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3552,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2496,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 14138,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 6374,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 237,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 562377,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 12610,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 609990,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 2
+      }
+    ]
+  },
+  "measurementBaseline": {
+    "kind": "repeated local stage baseline, not production SLO or budget fault acceptance",
+    "windows": [
+      {
+        "topology": "same_key",
+        "batch": 1,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4327,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4402,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2944,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2830,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 304066,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2770,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 664017,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3126,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 7,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 71,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 573106,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 1257700,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 8017,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 593919,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 3650,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 35,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 546947,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4796,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 564609,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2605289,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 7768,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 11,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 46,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 553057,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 6130,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 593812,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 13
+      },
+      {
+        "topology": "same_key",
+        "batch": 1,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4107,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3144,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 11364,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3057,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 10,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 39,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 297448,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 297649,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3607,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4390,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 628007,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5114,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 652621,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 1527920,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 5721,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 7,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 80,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 510504,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5892,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 543542,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2071708,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 5770,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 6,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 43,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 498301,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5785,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 538750,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 3
+      },
+      {
+        "topology": "same_key",
+        "batch": 2,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3432,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3635,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3573,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2830,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2847,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2969,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 567052,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2219,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 36,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 542772,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 7675,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 564739,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 1131843,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3617,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 32,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 104,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 539718,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 1693111,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 6155,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 561367,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 3332,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 30,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 541831,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5099,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 559701,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 14
+      },
+      {
+        "topology": "same_key",
+        "batch": 2,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 2770,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3248,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3307,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2800,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2853,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2875,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 7009,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 4243,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 15,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 53,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 533773,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 9203,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 560093,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2252618,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3185,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 47,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 526120,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 8565,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 549189,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2802333,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2395,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 6,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 37,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 533653,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3489,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 551346,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 4
+      },
+      {
+        "topology": "same_key",
+        "batch": 3,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3095,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3108,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3029,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3748,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4021,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4321,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 8776,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2796,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 11,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 47,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 518175,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 546625,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 7449,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 538778,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 3083,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 11,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 38,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 544302,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 8366,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 568050,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2227908,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 4014,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 12,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 37,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 530790,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4611,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 551318,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 15
+      },
+      {
+        "topology": "same_key",
+        "batch": 3,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 2753,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3172,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3133,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3093,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4457,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 7529,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 1116165,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3667,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 10,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 33,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 575053,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 1710420,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 4663,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 596277,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2668,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 5,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 54,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 496781,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 7461,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 516928,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2776153,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2782,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 14,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 51,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 568277,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 9347,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 592394,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 5
+      },
+      {
+        "topology": "same_key",
+        "batch": 4,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 5016,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5092,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4711,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3030,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3622,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3464,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 9157,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3334,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 7,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 32,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 567701,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4179,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 585797,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 1633534,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2223,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 38,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 554512,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4264,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 570654,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2746360,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3011,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 10,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 49,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 511024,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3787,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 527674,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 16
+      },
+      {
+        "topology": "same_key",
+        "batch": 4,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4129,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5229,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5897,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3546,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3333,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3488,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 594834,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2720,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 33,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 512558,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 1129126,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 8752,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 535401,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 3203,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 11,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 42,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 484812,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4259,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 503792,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2204405,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2919,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 6,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 32,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 517797,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 7983,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 541976,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 6
+      },
+      {
+        "topology": "same_key",
+        "batch": 5,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4750,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4935,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3971,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4050,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 7798,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2316,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2479,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2727,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 7,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 35,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 514126,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 10110,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 536437,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2293249,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3111,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 34,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 546738,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4719,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 567447,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2848082,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3172,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 7,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 85,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 552901,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4304,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 570443,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 17
+      },
+      {
+        "topology": "same_key",
+        "batch": 5,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4682,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4585,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4840,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4165,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4200,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4047,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 544307,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2742,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 36,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 524181,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 7967,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 545339,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 1090333,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3547,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 36,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 567289,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3647,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 584430,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 1675168,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2606,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 40,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 593221,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 9981,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 618198,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 7
+      },
+      {
+        "topology": "multi_key",
+        "batch": 1,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4740,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5407,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5444,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3804,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4059,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4460,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 7519,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 7648,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 4698,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 7,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 48,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 4915,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 3,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 202,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 553320,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 563667,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 580430,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 6265,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 573779,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 2433,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 7,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 32,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 5618,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 584458,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 559567,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3897,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 579536,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 18
+      },
+      {
+        "topology": "multi_key",
+        "batch": 1,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 5279,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5664,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5609,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4106,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3756,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3699,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 8681,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3648,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 33,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 550830,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4839,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 571642,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 581873,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2367,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 4,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 31,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 592384,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2819,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 244,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 599154,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5977,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 622279,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 633787,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3804,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 650775,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 8
+      },
+      {
+        "topology": "multi_key",
+        "batch": 2,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4257,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4370,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4523,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3928,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4595,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4706,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 8357,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 8809,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 10591,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2283,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 33,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 2251,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 3,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 29,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 2673,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 567195,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 565916,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 41,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 7885,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 587965,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 599196,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3980,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 619194,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 574153,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 7649,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 1162363,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 19
+      },
+      {
+        "topology": "multi_key",
+        "batch": 2,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 4452,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4709,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4692,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3889,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3946,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4295,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 597324,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2549,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 36,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 628981,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2392,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 42,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 1172636,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3833,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 605943,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 30076,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 44,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 4087,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 625069,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 589361,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 6367,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 609644,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 541082,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5152,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 592515,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 9
+      },
+      {
+        "topology": "multi_key",
+        "batch": 3,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3417,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3503,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3664,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3591,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3557,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4142,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 6201,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 6531,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2718,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 2846,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 30,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 4,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 23,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 556430,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2907,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 583938,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 31551,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 56,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 5834,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 604354,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 604384,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3875,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 622806,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 599957,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 8116,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 655109,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 20
+      },
+      {
+        "topology": "multi_key",
+        "batch": 3,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3264,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3430,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3814,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3088,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4223,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 4455,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 6961,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2779,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 4,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 24,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 533365,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4144,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 550930,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 609986,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3767,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 33,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 75,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 628205,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3286,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 13,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 91,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 575232,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 568377,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 8104,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 599575,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 3260,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 587978,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 10
+      },
+      {
+        "topology": "multi_key",
+        "batch": 4,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 5097,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5854,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5891,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3489,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3506,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3753,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 6941,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 8309,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3636,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 13,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 49,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 2899,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 4,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 30,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 560282,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5444,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 582205,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 578113,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 596290,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2931,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 10,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 40,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 4489,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 597173,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 598470,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4237,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 616116,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 21
+      },
+      {
+        "topology": "multi_key",
+        "batch": 4,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 5588,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5815,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 5818,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3504,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3660,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3646,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 7240,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 3717,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 142,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 569579,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 589054,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 5979,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 589131,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 4509,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 30,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 605299,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2743,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 8,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 31,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 561721,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 7724,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 590408,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 570986,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 3627,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 587119,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 11
+      },
+      {
+        "topology": "multi_key",
+        "batch": 5,
+        "process": "primary",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3472,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3647,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3773,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2819,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 3080,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2797,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 10701,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2782,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 2,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 28,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 569785,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 4282,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 57,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 179,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 600333,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2648,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 602505,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 12407,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 33,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 3566,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 618238,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 563898,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 7804,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 587697,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 561166,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4459,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 591769,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 22
+      },
+      {
+        "topology": "multi_key",
+        "batch": 5,
+        "process": "peer",
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 2923,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3772,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 4051,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2279,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2959,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 2830,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 8157,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 10711,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2911,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 12,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 45,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 2607,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 4,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 26,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 539729,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5836,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 559100,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 571028,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5113,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 592400,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          },
+          {
+            "elapsedUs": 628949,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2586,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 37,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 547676,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 4584,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 564157,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 12
+      }
+    ],
+    "summaries": [
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "hash_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 9,
+        "p95Us": 32,
+        "maxUs": 32
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "blocking_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 38,
+        "p95Us": 104,
+        "maxUs": 104
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "hash_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 544302,
+        "p95Us": 573106,
+        "maxUs": 573106
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "pool_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 4327,
+        "p95Us": 304066,
+        "maxUs": 304066
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "transaction_begin",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 3030,
+        "p95Us": 4321,
+        "maxUs": 4321
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "bucket_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 1257700,
+        "p95Us": 2848082,
+        "maxUs": 2848082
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "account_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 3126,
+        "p95Us": 7768,
+        "maxUs": 7768
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "fenced_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 564739,
+        "p95Us": 593919,
+        "maxUs": 593919
+      },
+      {
+        "topology": "same_key",
+        "process": "primary",
+        "stage": "commit_ack",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 5099,
+        "p95Us": 10110,
+        "maxUs": 10110
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "hash_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 8,
+        "p95Us": 15,
+        "maxUs": 15
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "blocking_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 40,
+        "p95Us": 80,
+        "maxUs": 80
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "hash_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 526120,
+        "p95Us": 628007,
+        "maxUs": 628007
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "pool_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 4129,
+        "p95Us": 297649,
+        "maxUs": 297649
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "transaction_begin",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 3546,
+        "p95Us": 7529,
+        "maxUs": 7529
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "bucket_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 1527920,
+        "p95Us": 2802333,
+        "maxUs": 2802333
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "account_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 3057,
+        "p95Us": 5770,
+        "maxUs": 5770
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "fenced_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 549189,
+        "p95Us": 652621,
+        "maxUs": 652621
+      },
+      {
+        "topology": "same_key",
+        "process": "peer",
+        "stage": "commit_ack",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 7461,
+        "p95Us": 9981,
+        "maxUs": 9981
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "hash_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 8,
+        "p95Us": 565916,
+        "maxUs": 565916
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "blocking_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 33,
+        "p95Us": 202,
+        "maxUs": 202
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "hash_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 574153,
+        "p95Us": 604384,
+        "maxUs": 604384
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "pool_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 4370,
+        "p95Us": 5891,
+        "maxUs": 5891
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "transaction_begin",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 3753,
+        "p95Us": 4706,
+        "maxUs": 4706
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "bucket_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 8809,
+        "p95Us": 600333,
+        "maxUs": 600333
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "account_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 2846,
+        "p95Us": 4915,
+        "maxUs": 4915
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "fenced_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 597173,
+        "p95Us": 1162363,
+        "maxUs": 1162363
+      },
+      {
+        "topology": "multi_key",
+        "process": "primary",
+        "stage": "commit_ack",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 5444,
+        "p95Us": 8116,
+        "maxUs": 8116
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "hash_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 8,
+        "p95Us": 30076,
+        "maxUs": 30076
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "blocking_queue",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 37,
+        "p95Us": 244,
+        "maxUs": 244
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "hash_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 569579,
+        "p95Us": 633787,
+        "maxUs": 633787
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "pool_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 4692,
+        "p95Us": 5818,
+        "maxUs": 5818
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "transaction_begin",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 3699,
+        "p95Us": 4455,
+        "maxUs": 4455
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "bucket_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 592384,
+        "p95Us": 1172636,
+        "maxUs": 1172636
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "account_acquire",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 2819,
+        "p95Us": 4509,
+        "maxUs": 4509
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "fenced_work",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 590408,
+        "p95Us": 650775,
+        "maxUs": 650775
+      },
+      {
+        "topology": "multi_key",
+        "process": "peer",
+        "stage": "commit_ack",
+        "outcome": "completed",
+        "samples": 15,
+        "p50Us": 5113,
+        "p95Us": 8104,
+        "maxUs": 8104
+      }
+    ]
+  },
+  "lockBudget": [
+    {
+      "clientType": "WEB",
+      "waitObserved": true,
+      "holderHeldAfterResponse": true,
+      "committedStateUnchanged": true,
+      "recovered": true,
+      "snapshot": {
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 2815,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2350,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 6475,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 5005314,
+            "outcome": "error",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 5007836,
+            "outcome": "abandoned",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 23
+      }
+    },
+    {
+      "clientType": "ANDROID",
+      "waitObserved": true,
+      "holderHeldAfterResponse": true,
+      "committedStateUnchanged": true,
+      "recovered": true,
+      "snapshot": {
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3328,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 3165,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 5972,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 5004950,
+            "outcome": "error",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 5008376,
+            "outcome": "abandoned",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 24
+      }
+    }
+  ],
+  "poolBudget": [
+    {
+      "clientType": "WEB",
+      "heldConnections": 8,
+      "heldAfterEnd": true,
+      "committedStateUnchanged": true,
+      "snapshot": {
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 5014731,
+            "outcome": "error",
+            "stage": "pool_acquire"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 1
+      },
+      "recoveredOnSamePool": true
+    },
+    {
+      "clientType": "ANDROID",
+      "heldConnections": 8,
+      "heldAfterEnd": true,
+      "committedStateUnchanged": true,
+      "snapshot": {
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 5006131,
+            "outcome": "error",
+            "stage": "pool_acquire"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 2
+      },
+      "recoveredOnSamePool": true
+    }
+  ],
+  "securityEvidence": {
+    "kind": "bounded actual password-verification observations",
+    "sameInput": true,
+    "sameClient": "ANDROID",
+    "samplesPerBranch": 3,
+    "correlationIds": [
+      "f9b6c9d3-52c2-4738-a648-d3fad865aaca",
+      "4c5f4e4a-5796-4434-a5f9-a110a46bb2f2",
+      "582b963a-38b5-41c7-a93c-f54d84009ccb",
+      "6225f199-af32-49b7-b6bf-e30e8487fa71",
+      "9c01b4df-98d6-48cc-bc15-89bfaf612f48",
+      "723db92f-4421-4496-b9d7-444bc4663c05",
+      "1293c52b-54e3-4e49-8727-71a31b23443a",
+      "aeb47dbb-3262-4baa-b890-51c560250b66",
+      "10ccb1b1-a7aa-4304-b99d-c3376ac03808"
+    ],
+    "auditOutcomeLookups": 9,
+    "observations": [
+      {
+        "branch": "wrong",
+        "round": 1,
+        "httpElapsedUs": 948808,
+        "hashWorkUs": 560441,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 3608,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 3453,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 13877,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 6566,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 7,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 34,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 560441,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 4860,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 585378,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 292157,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 3993,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 5783,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 1
+        }
+      },
+      {
+        "branch": "unknown",
+        "round": 1,
+        "httpElapsedUs": 655971,
+        "hashWorkUs": 596300,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 3933,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2760,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 6867,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 3083,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 7,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 29,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 596300,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 7209,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 613988,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 2770,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2122,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 5069,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 2
+        }
+      },
+      {
+        "branch": "disabled",
+        "round": 1,
+        "httpElapsedUs": 599376,
+        "hashWorkUs": 546359,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 2800,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2221,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 6187,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 2752,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 6,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 33,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 546359,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 3520,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 559456,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 2718,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2777,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 4893,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 3
+        }
+      },
+      {
+        "branch": "unknown",
+        "round": 2,
+        "httpElapsedUs": 641512,
+        "hashWorkUs": 595355,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 3117,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2373,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 6050,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 3031,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 10,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 33,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 595355,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 8328,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 614266,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 3152,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2874,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 4743,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 4
+        }
+      },
+      {
+        "branch": "disabled",
+        "round": 2,
+        "httpElapsedUs": 683830,
+        "hashWorkUs": 616834,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 3454,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 6353,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 7449,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 3056,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 9,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 35,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 616834,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 8780,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 636956,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 5632,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2713,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 4274,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 5
+        }
+      },
+      {
+        "branch": "wrong",
+        "round": 2,
+        "httpElapsedUs": 630837,
+        "hashWorkUs": 584239,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 3678,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2183,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 6888,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 2717,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 11,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 44,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 584239,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 6168,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 600735,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 3238,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2381,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 5106,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 6
+        }
+      },
+      {
+        "branch": "disabled",
+        "round": 3,
+        "httpElapsedUs": 565371,
+        "hashWorkUs": 497062,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 3820,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 4003,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 7056,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 3056,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 8,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 37,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 497062,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 4376,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 511432,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 3289,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2679,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 3193,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 7
+        }
+      },
+      {
+        "branch": "wrong",
+        "round": 3,
+        "httpElapsedUs": 622267,
+        "hashWorkUs": 562413,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 4358,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2812,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 6027,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 2549,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 7,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 41,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 562413,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 5424,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 578650,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 3224,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2190,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 4679,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 8
+        }
+      },
+      {
+        "branch": "unknown",
+        "round": 3,
+        "httpElapsedUs": 591737,
+        "hashWorkUs": 552387,
+        "snapshot": {
+          "droppedSamples": 0,
+          "poisoned": false,
+          "samples": [
+            {
+              "elapsedUs": 2969,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2133,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 5473,
+              "outcome": "completed",
+              "stage": "bucket_acquire"
+            },
+            {
+              "elapsedUs": 3556,
+              "outcome": "completed",
+              "stage": "account_acquire"
+            },
+            {
+              "elapsedUs": 6,
+              "outcome": "completed",
+              "stage": "hash_queue"
+            },
+            {
+              "elapsedUs": 42,
+              "outcome": "completed",
+              "stage": "blocking_queue"
+            },
+            {
+              "elapsedUs": 552387,
+              "outcome": "completed",
+              "stage": "hash_work"
+            },
+            {
+              "elapsedUs": 3644,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            },
+            {
+              "elapsedUs": 567817,
+              "outcome": "completed",
+              "stage": "fenced_work"
+            },
+            {
+              "elapsedUs": 2826,
+              "outcome": "completed",
+              "stage": "pool_acquire"
+            },
+            {
+              "elapsedUs": 2238,
+              "outcome": "completed",
+              "stage": "transaction_begin"
+            },
+            {
+              "elapsedUs": 4314,
+              "outcome": "completed",
+              "stage": "commit_ack"
+            }
+          ],
+          "staleSamples": 0,
+          "valid": true,
+          "windowId": 9
+        }
+      }
+    ],
+    "exportControlFailure": {
+      "scope": "rejected measurement export control",
+      "snapshot": {
+        "droppedSamples": 0,
+        "poisoned": false,
+        "samples": [
+          {
+            "elapsedUs": 3501,
+            "outcome": "completed",
+            "stage": "pool_acquire"
+          },
+          {
+            "elapsedUs": 2501,
+            "outcome": "completed",
+            "stage": "transaction_begin"
+          },
+          {
+            "elapsedUs": 5669,
+            "outcome": "completed",
+            "stage": "bucket_acquire"
+          },
+          {
+            "elapsedUs": 2721,
+            "outcome": "completed",
+            "stage": "account_acquire"
+          },
+          {
+            "elapsedUs": 9,
+            "outcome": "completed",
+            "stage": "hash_queue"
+          },
+          {
+            "elapsedUs": 49,
+            "outcome": "completed",
+            "stage": "blocking_queue"
+          },
+          {
+            "elapsedUs": 551716,
+            "outcome": "completed",
+            "stage": "hash_work"
+          },
+          {
+            "elapsedUs": 5505,
+            "outcome": "completed",
+            "stage": "commit_ack"
+          },
+          {
+            "elapsedUs": 580375,
+            "outcome": "completed",
+            "stage": "fenced_work"
+          }
+        ],
+        "staleSamples": 0,
+        "valid": true,
+        "windowId": 10
+      },
+      "committedSessionUsableBefore": true,
+      "committedSessionUsableAfter": true,
+      "successAuditScan": {
+        "sink": "audit",
+        "status": "PASS",
+        "byteCount": 679,
+        "canaryCount": 3,
+        "canaryMatches": 0,
+        "namedFieldMatches": 0
+      },
+      "evidenceScan": {
+        "sink": "evidence",
+        "status": "PASS",
+        "byteCount": 1010,
+        "canaryCount": 3,
+        "canaryMatches": 0,
+        "namedFieldMatches": 0
+      }
+    },
+    "missingSinks": [
+      "structured_log",
+      "browser_debug",
+      "app_debug"
+    ],
+    "sinkScans": [
+      {
+        "sink": "audit",
+        "status": "PASS",
+        "byteCount": 4967,
+        "canaryCount": 8,
+        "canaryMatches": 0,
+        "namedFieldMatches": 0
+      },
+      {
+        "sink": "metric",
+        "status": "PASS",
+        "byteCount": 9398,
+        "canaryCount": 8,
+        "canaryMatches": 0,
+        "namedFieldMatches": 0
+      },
+      {
+        "sink": "evidence",
+        "status": "PASS",
+        "byteCount": 11189,
+        "canaryCount": 8,
+        "canaryMatches": 0,
+        "namedFieldMatches": 0
+      }
+    ],
+    "bucketRestore": {
+      "restoredSeedBucketCount": 1,
+      "removedCreatedBucketCount": 2,
+      "anonymousAudit": "RETAINED"
+    }
+  },
+  "backendOutputCapture": [
+    {
+      "process": "primary",
+      "streams": [
+        {
+          "sink": "backend_stdout",
+          "status": "PASS",
+          "byteCount": 15,
+          "canaryCount": 166,
+          "canaryMatches": 0,
+          "namedFieldMatches": 0
+        },
+        {
+          "sink": "backend_stderr",
+          "status": "NOT_RUN",
+          "byteCount": 0,
+          "canaryCount": 166,
+          "canaryMatches": 0,
+          "namedFieldMatches": 0
+        }
+      ],
+      "structuredLog": {
+        "status": "NOT_RUN",
+        "eventCount": 0
+      }
+    },
+    {
+      "process": "peer",
+      "streams": [
+        {
+          "sink": "backend_stdout",
+          "status": "PASS",
+          "byteCount": 15,
+          "canaryCount": 166,
+          "canaryMatches": 0,
+          "namedFieldMatches": 0
+        },
+        {
+          "sink": "backend_stderr",
+          "status": "NOT_RUN",
+          "byteCount": 0,
+          "canaryCount": 166,
+          "canaryMatches": 0,
+          "namedFieldMatches": 0
+        }
+      ],
+      "structuredLog": {
+        "status": "NOT_RUN",
+        "eventCount": 0
+      }
+    }
+  ],
+  "fenceBoundaries": {
+    "observations": [
+      {
+        "kind": "password",
+        "clientType": "WEB",
+        "afterVerifyInsertWait": true,
+        "mutationWaitsForUser": true,
+        "oldSessionRevoked": true
+      },
+      {
+        "kind": "password",
+        "clientType": "ANDROID",
+        "afterVerifyInsertWait": true,
+        "mutationWaitsForUser": true,
+        "oldSessionRevoked": true
+      },
+      {
+        "kind": "status",
+        "clientType": "WEB",
+        "afterVerifyInsertWait": true,
+        "mutationWaitsForUser": true,
+        "oldSessionRevoked": true
+      },
+      {
+        "kind": "status",
+        "clientType": "ANDROID",
+        "afterVerifyInsertWait": true,
+        "mutationWaitsForUser": true,
+        "oldSessionRevoked": true
+      },
+      {
+        "kind": "reset",
+        "clientType": "WEB",
+        "afterVerifyInsertWait": true,
+        "mutationWaitsForUser": true,
+        "oldSessionRevoked": true
+      },
+      {
+        "kind": "reset",
+        "clientType": "ANDROID",
+        "afterVerifyInsertWait": true,
+        "mutationWaitsForUser": true,
+        "oldSessionRevoked": true
+      },
+      {
+        "kind": "reset",
+        "clientType": "WEB",
+        "mutationFirst": true,
+        "waitBeforeUserRead": true
+      },
+      {
+        "kind": "reset",
+        "clientType": "ANDROID",
+        "mutationFirst": true,
+        "waitBeforeUserRead": true
+      }
+    ],
+    "resetScope": "atomic PHC/mustChangePassword/User-fence protocol, FEAT004 authorization/quota not exercised",
+    "mutationFirstPause": "before User read and crypto, User lock spans verification through commit",
+    "loginFirstPause": "session INSERT after successful crypto, mutation blocked on same User"
+  },
+  "limiterBoundary": {
+    "correctPasswordAtThreshold": true,
+    "alternateLoopbackSource": true,
+    "blockedRequestsPreserveWindow": true,
+    "lastSecondRetryOne": true,
+    "expiredOwnedBucketSuccess": true,
+    "exactExpiryBoundary": "DOMAIN_UNIT_TEST_REQUIRED",
+    "clockScope": "owned bucket DB timestamp only"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-15",
+  "timezone": "Asia/Bangkok",
+  "scope": "Android main login, workspace picker, process stop, secure-storage resume and logout against PostgreSQL auth-lab fixture",
+  "result": "PASS_SCOPED_NATIVE_FULL_SESSION_AND_PRESELECTION_ORACLE_READY_FOR_QA",
+  "repository": {
+    "branch": "dev",
+    "head": "ba425ad9e5576ed3261f6df5b4a4731c96d98850",
+    "dirty_entries_before_docs": 98,
+    "source_ui_changed": false
+  },
+  "runtime": {
+    "avd": "Nexa_Auth_API24",
+    "device_id": "emulator-5554",
+    "android_api": 24,
+    "architecture": "x86_64",
+    "flutter": "3.47.5",
+    "dart": "3.13.4",
+    "backend": "auth-lab on canonical PostgreSQL",
+    "transport": "owned HTTPS local proxy"
+  },
+  "command": "node ops/auth/run_native_e2e.mjs --full-session",
+  "exit_code": 0,
+  "markers": [
+    "NATIVE_SDK_FIXTURE_ACK_MALFORMED_REPLAY_PASS",
+    "NATIVE_PRESELECTION_REQUEST_ORACLE_PASS",
+    "NATIVE_INTEGRATION_TARGET_FULL_PASS",
+    "NATIVE_SDK_APP_STOP_CHILD_EXIT_PASS",
+    "NATIVE_INTEGRATION_TARGET_RESUME_PASS",
+    "NATIVE_ACTUAL_MAIN_FULL_RESUME_LOGOUT_ORACLES_PASS",
+    "NATIVE_OWNED_PROXY_FIXTURE_CLEANUP_PASS",
+    "NATIVE_ACTUAL_MAIN_FIXTURE_CLEANUP_PASS"
+  ],
+  "verified": [
+    "App main logs in and loads both expected workspace roles",
+    "First app process exits before the resume process",
+    "Resume uses existing secure session without a second login",
+    "Database session delta and logout revocation oracle pass",
+    "At picker boundary before first selection: one login, profile read present, one workspace list, zero password/logout/OTHER requests",
+    "Owned proxy and fixture cleanup markers pass",
+    "AVD is stopped and adb reports no connected devices after the run",
+    "Auth and proxy listeners on ports 3000 and 8443 are closed after the run"
+  ],
+  "not_verified": [
+    "E2E-AUTH-003 and AT-WF-001-03 remain PARTIAL: no cross-workspace device rows were seeded although the exact Android preselection OTHER counter is zero",
+    "E2E-AUTH-001: no simultaneous Web and App same-run audit oracle",
+    "E2E-AUTH-006: no committed response-loss scenario",
+    "WEB-AUTH-013/014: no full Chrome process reopen or delayed logout clear-cookie race"
+  ],
+  "secrets_recorded": false,
+  "note": "An initial sandbox attempt failed before fixture startup because Docker API access was denied. The approved outside-sandbox rerun passed; the failed attempt created no listener or new ownership journal."
+}

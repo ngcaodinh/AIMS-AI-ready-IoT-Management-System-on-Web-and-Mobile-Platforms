@@ -1,6 +1,7 @@
 """Kiểm semantic coverage, quote SQL và snapshot chú thích mà không kết nối DB."""
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -15,6 +16,17 @@ import schema_documentation as documentation
 
 class SchemaDocumentationTests(unittest.TestCase):
     """Không cho trường mới bị chú thích chung chung hoặc báo đủ khi comment thực tế sai."""
+
+    def test_ios_client_comments_match_forward_migration(self):
+        """Dictionary và audit history phải giữ đúng comment0020 để native verification không từ chối schema đã migrate."""
+        source = (ROOT / "backend/migrations/platform/0020_auth_ios_client.sql").read_text(encoding="utf-8")
+        expected = dict(re.findall(r"COMMENT ON COLUMN public\.(\w+)\.client_type IS '([^']*)';", source))
+        self.assertEqual(set(expected), {"sessions", "audit_events", "audit_history"})
+        manifest = {"tables": [{"name": name, "columns": [{"name": "client_type"}]} for name in ("sessions", "audit_events")]}
+        relations = documentation.documented_relations(manifest)
+        for name, description in expected.items():
+            with self.subTest(table=name):
+                self.assertEqual(relations["public." + name]["columns"]["client_type"], description)
 
     # Phủ schema thật và ledger, giữ description cho cả view projection.
     def test_covers_every_canonical_table_and_attribute(self):

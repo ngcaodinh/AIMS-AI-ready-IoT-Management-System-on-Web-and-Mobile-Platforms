@@ -54,7 +54,8 @@ where
     ) -> Result<IssuedMemberCreation, ApplicationError> {
         self.authorize_member_creation(proof, workspace_id).await?;
         // Preflight đã đóng: request không có quyền không chiếm Argon2; hash vẫn ngoài mutation transaction.
-        let (password, _) = self.security.issue_token();
+        // Mật khẩu mới/tạm phải đạt composition; không thay định dạng token phiên hoặc giảm random suffix.
+        let password = self.security.issue_temporary_password()?;
         let verifier = self
             .security
             .hash_password(SecretString::new(password.expose().to_owned()))

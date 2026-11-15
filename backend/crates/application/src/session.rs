@@ -8,7 +8,7 @@ use crate::{
 use iot_domain::audit_write::AuditDetail;
 use iot_domain::{
     identity::{AuditRecord, LoginAdmission, SecretString, SessionProof, SessionRevocation},
-    input::validate_password,
+    input::{validate_current_password, validate_new_password},
 };
 use uuid::Uuid;
 
@@ -65,8 +65,8 @@ where
      * Xác minh password hiện hành dưới bucket→User fence rồi thay PHC/revoke mọi phiên/audit cùng commit.
      * Input
      * Param: proof — session chính chủ, limited được dùng cho phục hồi nhưng phải còn hiệu lực.
-     * Param: `current_password` — credential nguyên bản cần kiểm và tính vào limiter khi sai.
-     * Param: `new_password` — credential mới12–128 scalar; không trim hoặc đưa raw value vào storage.
+     * Param: `current_password` — credential nguyên bản1–128 cần verify và tính vào limiter khi sai.
+     * Param: `new_password` — credential mới9–128 scalar có hoa/thường/số; không trim hoặc đưa raw value vào storage.
      * Param: `correlation_id` — identity audit không secret, không tự replay khi commit ACK unknown.
      * Output: hoàn thành sau commit; caller phải đăng nhập mới, không nâng limited session tại chỗ.
      * # Errors
@@ -79,10 +79,18 @@ where
         new_password: String,
         correlation_id: Uuid,
     ) -> Result<(), ApplicationError> {
-        validate_password(&current_password, "/currentPassword")
-            .map_err(|_| ApplicationError::InvalidInput)?;
-        validate_password(&new_password, "/newPassword")
-            .map_err(|_| ApplicationError::InvalidInput)?;
+        validate_current_password(&current_password, "/currentPassword").map_err(
+            // Giữ lỗi domain an toàn cho caller ngoài HTTP, không phản chiếu credential hiện tại.
+            |_| ApplicationError::InvalidInput,
+        )?;
+        validate_new_password(&new_password, "/newPassword").map_err(
+            // Chặn credential mới sai policy trước transaction, không đưa raw password vào lỗi.
+            |_| ApplicationError::InvalidInput,
+        )?;
+        // Service vẫn giữ invariant khi được gọi ngoài HTTP; không chiếm transaction/hash cho giá trị không đổi.
+        if current_password == new_password {
+            return Err(ApplicationError::InvalidInput);
+        }
         let mut transaction = self.store.begin().await?;
         let email = transaction.session_email(proof).await?;
         let digest = self.security.bucket_digest(&email)?;

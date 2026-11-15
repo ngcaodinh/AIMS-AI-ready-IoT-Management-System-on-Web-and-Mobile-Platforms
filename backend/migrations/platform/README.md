@@ -6,12 +6,14 @@
 
 | Artifact | Cách dùng |
 | --- | --- |
-| [../platform.sql](../platform.sql) | Một file psql đầy đủ19 migration, target guard, ledger/checksum và transaction từng version |
-| `0001_identity.sql`…`0019_device_registration.sql` | 0001–0006 là bản comment chi tiết để đọc; SQL đã áp giữ byte gốc ở [applied_sql](applied_sql/README.md); runner so token và dùng checksum gốc, không rewrite ledger |
+| [../platform.sql](../platform.sql) | Một file psql đầy đủ20 migration, target guard, ledger/checksum và transaction từng version |
+| `0001_identity.sql`…`0020_auth_ios_client.sql` | 0001–0006 là bản comment chi tiết để đọc; SQL đã áp giữ byte gốc ở [applied_sql](applied_sql/README.md); runner so token và dùng checksum gốc, không rewrite ledger |
 | [schema.sql](schema.sql) | Schema-only snapshot có mục đích tiếng Việt trước từng bảng và công dụng từng cột; không chứa row/credential hoặc ledger history; chỉ dựng DB trống thay cho numbered migration |
 | [manifest.json](manifest.json) |91 bảng public, description bảng/cột và mọi null/default/PK/UK/FK/CHECK/index lấy từ engine, phủ87 relation catalog và4 bảng enum/capability chuẩn hóa |
 
 Không dùng snapshot auth ở thư mục cha làm baseline này. `platform.sql` là artifact sinh từ source, không sửa tay. Snapshot không có các hàng applied_migrations; không đưa DB dựng từ snapshot vào runner apply nếu chưa có adoption ledger được kiểm chứng.
+
+Ngày13/11/2026,0020 đã áp forward trên DB canonical sau khi đối chiếu19version/checksum trước. Migration mở CHECK sessions/audit_events cho IOS và cập nhật metadata comment, không sửa row. Bundle giữ target/transaction/ledger/advisory-lock guards. Snapshot/manifest/relations đã refresh từ catalog20versions, exact native comments đạt92tables/5views. Lượt này không chạy empty-database rebuild suite của CLI verify. [Evidence và giới hạn](../../../docs/test-reports/FEAT-TN-001-ios-provider-and-policy-2026-11-13.md).
 
 ## Áp và kiểm trực tiếp
 

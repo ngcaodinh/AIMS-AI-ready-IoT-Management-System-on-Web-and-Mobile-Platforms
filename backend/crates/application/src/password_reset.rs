@@ -133,7 +133,8 @@ where
             .recent_password_resets(workspace_id, principal.user_id(), target_id, now)
             .await?;
         admit_reset(&recent, now)?;
-        let (temporary_password, _) = self.security.issue_token();
+        // Reset cũng tạo password đạt9–128/hoa/thường/số, tách khỏi chính sách capability phiên.
+        let temporary_password = self.security.issue_temporary_password()?;
         let verifier = self
             .security
             .hash_password(SecretString::new(temporary_password.expose().to_owned()))

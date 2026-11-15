@@ -40,6 +40,23 @@ pub trait IdentitySecurity: Clone + Send + Sync {
     fn bucket_digest(&self, email: &str) -> Result<[u8; 32], ApplicationError>;
     /// Sinh capability256 bit và digest của nó; raw token chỉ đi tới client sau commit.
     fn issue_token(&self) -> (SecretString, [u8; 32]);
+    /**
+     * Sinh mật khẩu tạm từ một capability CSPRNG mới, dùng riêng với token phiên.
+     * Prefix chỉ bảo đảm thành phần hoa/thường/số, không được tính là entropy hoặc credential độc lập.
+     * # Output
+     * Password có toàn bộ random suffix nguyên vẹn, chỉ được phát sau commit của caller.
+     * # Errors
+     * Unavailable nếu adapter sinh output không đáp ứng policy9–128; không băm/phát mật khẩu yếu.
+     */
+    fn issue_temporary_password(&self) -> Result<SecretString, ApplicationError> {
+        let (random, _) = self.issue_token();
+        let password = SecretString::new(format!("Aa1{}", random.expose()));
+        iot_domain::input::validate_new_password(password.expose(), "/temporaryPassword").map_err(
+            // Lỗi của adapter không được phản chiếu password hoặc phát credential không đạt policy.
+            |_| ApplicationError::Unavailable,
+        )?;
+        Ok(password)
+    }
     /// Chuyển raw token thành lookup digest trước khi gửi vào storage, không tự xác thực session.
     fn token_digest(&self, token: &str) -> [u8; 32];
     /// Hash request canonical bytes để same key/different body không được nhận cached result khác intent.

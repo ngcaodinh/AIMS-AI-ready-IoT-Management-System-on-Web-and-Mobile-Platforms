@@ -8,6 +8,19 @@ use iot_domain::{
 };
 use uuid::Uuid;
 
+/** Giữ ranh giới cookie/bearer theo contract; metadata IOS/Android không làm bearer trở thành cookie Web. */
+#[test]
+fn client_metadata_matches_only_its_credential_transport() {
+    for stored in [ClientType::Web, ClientType::Android, ClientType::Ios] {
+        for transport in [ClientType::Web, ClientType::Android, ClientType::Ios] {
+            assert_eq!(
+                stored.matches_transport(transport),
+                (stored == ClientType::Web) == (transport == ClientType::Web)
+            );
+        }
+    }
+}
+
 /// Kiểm ranh giới failure5/6 và expiry đúng900 giây để rule không phụ thuộc PostgreSQL.
 #[test]
 fn limiter_preserves_five_failures_and_reopens_at_exact_expiry() {

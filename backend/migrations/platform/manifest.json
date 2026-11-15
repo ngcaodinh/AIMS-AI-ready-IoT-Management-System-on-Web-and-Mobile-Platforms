@@ -806,7 +806,7 @@
           "type": "text",
           "default": null,
           "nullable": "NO",
-          "description": "Loại client khởi tạo phiên/thao tác; enum của từng bảng phân biệt WEB, ANDROID và UNKNOWN khi được phép."
+          "description": "Metadata client WEB/ANDROID/IOS hoặc UNKNOWN khi không nhận diện được. Nhãn hữu hạn phục vụ audit, không cấp quyền hoặc tiết lộ credential."
         },
         {
           "name": "created_at",
@@ -874,7 +874,7 @@
         {
           "name": "audit_events_client_type_check",
           "type": "c",
-          "definition": "CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'UNKNOWN'::text])))"
+          "definition": "CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'IOS'::text, 'UNKNOWN'::text])))"
         },
         {
           "name": "audit_events_pkey",
@@ -8530,7 +8530,7 @@
           "type": "text",
           "default": null,
           "nullable": "NO",
-          "description": "Loại client khởi tạo phiên/thao tác; enum của từng bảng phân biệt WEB, ANDROID và UNKNOWN khi được phép."
+          "description": "Metadata client WEB/ANDROID/IOS; WEB dùng cookie còn ANDROID/IOS dùng bearer. Không chứng thực platform hoặc cấp quyền; session vẫn có TTL 24 giờ và guard hiện hành."
         },
         {
           "name": "issued_at",
@@ -8594,7 +8594,7 @@
         {
           "name": "sessions_client_type_check",
           "type": "c",
-          "definition": "CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text])))"
+          "definition": "CHECK ((client_type = ANY (ARRAY['WEB'::text, 'ANDROID'::text, 'IOS'::text])))"
         },
         {
           "name": "sessions_pkey",

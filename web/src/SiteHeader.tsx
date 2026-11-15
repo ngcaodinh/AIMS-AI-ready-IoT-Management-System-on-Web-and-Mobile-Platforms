@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { BrandLink } from './BrandLink';
 
 type Theme = 'light' | 'dark';
 
@@ -39,6 +40,7 @@ export function SiteHeader() {
     }
     handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
+    /** Gỡ listener khi rời trang để header không giữ cập nhật thừa. */
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
@@ -51,6 +53,7 @@ export function SiteHeader() {
       menuRef.current?.focus();
     }
     document.addEventListener('keydown', handleEscape);
+    /** Bỏ listener cũ trước khi menu đổi trạng thái hoặc header bị hủy. */
     return () => document.removeEventListener('keydown', handleEscape);
   }, [menuOpen]);
 
@@ -61,12 +64,18 @@ export function SiteHeader() {
 
   /** Đảo theme khi người dùng nhấn nút trong thanh điều hướng. */
   function toggleTheme(): void {
-    setTheme((current) => current === 'dark' ? 'light' : 'dark');
+    setTheme(
+      /** Đảo từ lựa chọn mới nhất khi React gộp nhiều cập nhật trong cùng lượt. */
+      (current) => current === 'dark' ? 'light' : 'dark',
+    );
   }
 
   /** Mở menu di động và chuyển tiêu điểm tới liên kết đầu tiên. */
   function toggleMenu(): void {
-    setMenuOpen((current) => !current);
+    setMenuOpen(
+      /** Đảo trạng thái menu hiện hành, không phụ thuộc giá trị render trước. */
+      (current) => !current,
+    );
   }
 
   /** Thu menu sau khi người dùng chọn một mục điều hướng. */
@@ -78,11 +87,7 @@ export function SiteHeader() {
     <>
       <header className={`nav sticky top-0 z-50 border-b border-transparent [background:color-mix(in_srgb,var(--surface)_62%,transparent)] backdrop-blur-[16px] backdrop-saturate-[1.4] transition-[border-color] duration-300${scrolled ? ' scrolled' : ''}`} id="nav">
           <div className="wrap mx-auto flex h-[72px] w-[min(1200px,calc(100%-48px))] items-center justify-between gap-4">
-            <a href="#top" className="logo flex items-center gap-[.65rem] font-display text-[1.3rem] leading-normal font-extrabold tracking-[-.03em]" aria-label="Nexa IoT — trang chủ">
-              <span className="logo-mark grid size-[34px] place-items-center rounded-[11px] text-white [background:var(--grad)]"><svg className="i" aria-hidden="true" style={{ strokeWidth: 2.2 }}>
-                  <use href="#i-radio" />
-                </svg></span>Nexa IoT
-            </a>
+            <BrandLink href="#top" />
             <nav className={`links flex gap-8 text-[.95rem] font-medium text-muted${menuOpen ? ' open' : ''}`} id="links" aria-label="Điều hướng chính" ref={linksRef} onClick={closeMenu}>
               <a href="#features">Tính năng</a>
               <a href="#automation">Tự động hóa</a>
@@ -95,7 +100,7 @@ export function SiteHeader() {
                   id="theme-i">
                   <use href={theme === 'dark' ? '#i-sun' : '#i-moon'} />
                 </svg></button>
-              <a href="#" className="btn btn-ghost">Đăng nhập</a>
+              <a href="/login" className="btn btn-ghost">Đăng nhập</a>
               <button className="icon-btn menu-btn grid size-11 place-items-center rounded-full border-[1.5px] border-line bg-surface text-ink cursor-pointer transition-all duration-[250ms] hover:rotate-[18deg] hover:border-teal hidden max-[760px]:grid" id="menu" type="button" ref={menuRef}
                 aria-label={menuOpen ? 'Đóng menu' : 'Mở menu'} aria-controls="links" aria-expanded={menuOpen}
                 onClick={toggleMenu}><svg className="i" aria-hidden="true">

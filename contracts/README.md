@@ -17,7 +17,17 @@ This directory is the versioned source of truth shared by backend, web, mobile, 
 - `schemas/`: device, dashboard and rule JSON schemas.
 - `fixtures/`: shared API and messaging examples with synthetic values only.
 
-## Authentication/bootstrap contract 0.2.0 (draft)
+## Authentication/bootstrap contract 0.2.1 (draft)
+
+Password validation addendum2026-10-26 (explicit user change): login accepts
+9–128Unicode codepoints; currentPassword remains1–128. New and generated
+temporary passwords require9–128, Unicode Uppercase +Lowercase and an ASCII
+digit0–9. No special character is required; no trim/normalization. Existing
+credentials remain usable for login without the new composition check.
+`fixtures/auth/password-policy.json` policyVersion1 is the cross-runtime oracle
+used by Rust/Web/Dart tests. This supersedes the old12minimum in this unreleased
+draft; JSON fields/version stay0.2.1, but this validation change requires
+coordinated provider/client deployment and is not a backward-compatibility claim.
 
 `openapi/auth.v1.json` is the P1 contract artifact for FEAT-TN-001 with the
 minimal logout, password, profile preference and workspace-create boundaries
@@ -27,11 +37,19 @@ examples. Run the static check:
 
     python -B -m unittest discover -s contracts/tests -p validate_auth_contract.py -v
     python -B -m unittest discover -s contracts/tests -p test_auth_qa_coverage.py -v
+    python -B -m unittest discover -s contracts/tests -p test_logout_contract.py -v
+
+Or run all static checks with `python -B -m unittest discover -s contracts/tests -p '*.py' -v`.
 
 These checks cover references, fixture/status alignment, Web/Android full and
 limited login examples, 413/415 request boundaries, Web auth-context mismatch
 fixtures and selected security invariants. These static checks do not establish provider
 behavior, browser flow, Android secure storage or G1 acceptance.
+
+Latest local execution on 2026-10-24: the full discovery command above ran
+36/36 checks and passed. This is static contract evidence only; CP-01 owner
+review, provider behavior, browser flow and Android secure-storage evidence
+remain outstanding.
 
 For `CT-AUTH-BODY-TOO-LARGE`, `rawBodyGenerator` avoids storing a 65 KiB
 literal. `jsonWithTrailingAsciiWhitespace` means UTF-8 encode `prefix`, then
@@ -83,4 +101,66 @@ and storage/hash PoC are prerequisites for their respective backend, Web or
 Android BUILD tasks at START-03. Provider/security measurements are created
 during backend BUILD and checked at CP-02; provider/client compatibility and
 browser/device evidence are created during client BUILD and checked at CP-03.
+
+### Login001 validation matrix
+
+`fixtures/auth/login-validation-scenarios.json` adds 33 synthetic login cases
+under the unchanged draft version `0.2.1`. The shared validator includes this
+file in version, operation/status, error-code and transport checks. Run
+`python -B -m unittest discover -s contracts/tests -p test_login_contract.py -v`
+for six focused checks, or the full discovery command above for regressions.
+No dependency was added for these checks.
+
+The examples cover missing/null/type per field, empty values, malformed or
+non-object JSON, invalid client enum, authority injection, ASCII email limits
+and normalization, and password scalar/whitespace boundaries. Successful
+cases require a separate disposable account seeded with exactly the request
+password (`given.storedPasswordEqualsRequest`); reset that account between
+cases, using the declared synthetic clock only in a test clock adapter.
+`given`, `issuedAt` and `assertions` describe setup/expectations, not HTTP fields
+or observed state. Send `rawBody` as bytes without JSON reserialization.
+These fixtures preserve the wire; provider tests, real Web cookies and Android
+storage remain separate checkpoints.
+
+### Logout002 completion of the draft contract
+
+Version `0.2.1` completes logout semantics already selected in feature002
+section22 and retains the `0.2.0` login/auth-context wire. It does not indicate a
+provider release or change the historical FEAT001 QA results. All three fixture
+files use the current artifact version. CP-01 owner review remains pending.
+
+`fixtures/auth/logout-scenarios.json` describes Web/Android active, limited,
+revoked and expired sessions; absent/unknown/malformed credentials; body,
+mixed-credential, CSRF/context, DB-failure and commit-unknown boundaries; and
+expected S1/S2 isolation, idempotent audit and push-binding compare-and-set.
+`request.credentialSession`/`credentialAliases` are per-scenario setup aliases,
+not HTTP fields or client authority. A provider runner must create isolated lab
+sessions, resolve each alias through its real transport and redact credentials.
+`given`, `expectedEffects` and `assertions` are requirements, never observed DB
+state. No fixture status means a runtime test has passed.
+
+- Logout alone includes an empty security requirement `{}` because no
+  credential must produce a side-effect-free 204. This representation follows
+  [OpenAPI 3.1 Operation Object security](https://spec.openapis.org/oas/v3.1.0.html#operation-object).
+  A supplied unknown/malformed credential still receives 401; protected routes
+  keep required authentication. The extension `x-logout-policy` records these
+  conditional rules, which standard OpenAPI security alternatives cannot express.
+- Request body is absent or zero bytes. `{}`, `null` and `[]` are nonempty
+  JSON and receive 422; malformed/duplicate JSON 400, over 64 KiB 413 and
+  unsupported nonempty media type 415 follow the existing strict boundary.
+  The existing shared rate policy can return 429/Retry-After; the example
+  value 5 is synthetic, not a new quota or retry budget.
+- Recognized Web success sends the exact cookie deletion scope with no Domain.
+  Anonymous/App success and every error omit Set-Cookie. Both fresh and inactive
+  Web sessions still require context, exact origin and bound CSRF. A mismatched
+  context returns 409 before CSRF processing so intent A cannot revoke cookie B.
+- A lost commit ACK is UNKNOWN even when HTTP 503 is received; retain local
+  lock and reconcile the same session. 204 does not by itself prove every
+  socket has closed; that requires per-instance realtime evidence at L3/L6.
+- `rawBodyGenerator` uses the encoding defined above; 204 `response.body=null`
+  means zero HTTP response bytes, never a JSON `null` payload.
+
+Run the static suite for artifact consistency; then API/Web/Mobile owners
+review CP-L1/CP-01. Backend transaction/guards and real browser/Android tests
+remain blocked by FEAT001/START-03 and must not be replaced by these fixtures.
 

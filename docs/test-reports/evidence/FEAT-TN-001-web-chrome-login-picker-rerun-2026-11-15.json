@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "testId": "FEAT-TN-001-web-chrome-login-picker-logout-rerun",
+  "executedDate": "2026-11-15",
+  "codeState": {
+    "branch": "dev",
+    "head": "ba425ad",
+    "dirtyEntriesBeforeDocs": 98,
+    "sourceChangedThisRun": false,
+    "committed": false
+  },
+  "environment": {
+    "os": "Windows local",
+    "browser": "Google Chrome through attached browser extension",
+    "webOrigin": "http://localhost:5173",
+    "authApiPort": 3000,
+    "database": "iot_platform_lab",
+    "fixture": {
+      "kind": "synthetic auth-lab",
+      "accounts": 5,
+      "workspaces": 2,
+      "deviceRowsSeeded": false
+    }
+  },
+  "browserFlow": {
+    "scopedStatus": "PASS_SCOPED_BROWSER_FLOW",
+    "wholeFeatureStatus": "VERIFY_IN_PROGRESS",
+    "initialRecovery": {
+      "priorState": "loginUnknown/recovery",
+      "action": "explicit Đăng nhập lại",
+      "result": "login form became available",
+      "networkRequestsObservedDuringReset": []
+    },
+    "login": {
+      "payloadKeysOnly": [
+        "clientType",
+        "email",
+        "password"
+      ],
+      "payloadValuesRecorded": false,
+      "exchanges": [
+        {
+          "method": "POST",
+          "path": "/api/v1/auth/login",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/me",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/workspaces",
+          "status": 200
+        }
+      ],
+      "picker": [
+        "Phòng vận hành A / Admin",
+        "Nhà kính B / Member"
+      ],
+      "deviceOrResourceRequestsBeforePicker": []
+    },
+    "selectWorkspaceA": {
+      "method": "GET",
+      "path": "/api/v1/workspaces/{workspaceId}",
+      "status": 200,
+      "ui": "Phòng vận hành A; quyền quản trị viên đã xác minh"
+    },
+    "switchToPicker": [
+      {
+        "method": "GET",
+        "path": "/api/v1/me",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/workspaces",
+        "status": 200
+      }
+    ],
+    "selectWorkspaceB": {
+      "method": "GET",
+      "path": "/api/v1/workspaces/{workspaceId}",
+      "status": 200,
+      "ui": "Nhà kính B; quyền thành viên đã xác minh"
+    },
+    "logout": {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "status": 204,
+      "ui": "returned to /login",
+      "passwordLengthAfterLogout": 0,
+      "emailFieldPresent": true
+    }
+  },
+  "cleanup": {
+    "authLabSessionExitCode": 1,
+    "reason": "Ctrl+C did not stop the detached auth-lab child; the verified owned child was stopped, then ownership recovery was run.",
+    "recoveryCommandExitCode": 0,
+    "recoveryResult": "AUTH_LAB_ACCOUNT_FIXTURES_REMOVED",
+    "applicationFixtureRows": "REMOVED",
+    "limiterBucketCleanup": "NOT_DELETED_RECOVERY_NO_INDEPENDENT_OWNERSHIP",
+    "anonymousFailureAudit": "MAY_REMAIN_UNTIL_RETENTION",
+    "afterRunListeners": {
+      "port3000": "closed",
+      "port8443": "closed",
+      "port5173": "preexisting [::1] listener PID 25904; left untouched"
+    }
+  },
+  "acceptance": {
+    "E2E-AUTH-003": "NOT_RUN",
+    "reason": "Web preselection request and login payload-key evidence is captured, but different device rows per workspace and the Android exact request oracle were not run."
+  },
+  "limitations": [
+    "No Android emulator was booted in this run.",
+    "Console error count was not collected.",
+    "No request body values, cookies, tokens, passwords, email addresses, or raw responses were saved."
+  ]
+}

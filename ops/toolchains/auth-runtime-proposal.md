@@ -1,5 +1,20 @@
 # FEAT001 — dependency và kế hoạch runtime Web/backend
 
+## Cập nhật hiện hành 2026-10-24
+
+GNU Rust1.99.1 hiện chạy được64 workspace tests, fmt và clippy `-D warnings`.
+Axum0.8.6 và dev-only Tower0.5.2 đã được pin/tải qua Cargo registry và lockfile;
+HTTP adapter/auth-lab đã build. Không dùng đề nghị `subtle` hoặc migrate feature
+khi code hiện tại không cần. DB đích của launcher là canonical
+`iot_platform_lab`, không tạo DB mới. Chạy provider bị auto-review từ chối vì
+role grants/fixture trên DB chung; chờ phê duyệt cụ thể, chưa có provider PASS.
+Topology lab localhost5173→loopback3000 là cấu hình hiện thực, chưa là browser
+evidence. [Handoff](../../docs/test-reports/FEAT-TN-001-runtime-handoff-2026-10-24.md)
+ghi trạng thái hiện tại. Các đoạn thiếu GNU/linker/Docker bên dưới là nhật ký
+lịch sử 2026-10-23, không phải inventory hiện hành.
+
+## Đề xuất và nhật ký lịch sử 2026-10-23
+
 Ngày: 2026-10-23. Theo chỉ đạo tiếp tục code FE/BE để chạy luồng thật.
 Không coi chỉ đạo này là evidence owner review CP-01 hoặc nghiệm thu G1.
 

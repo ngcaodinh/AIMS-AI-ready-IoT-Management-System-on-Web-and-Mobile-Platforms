@@ -133,6 +133,7 @@
       transform: translateY(0)
     }
 
+    /* Ẩn nội dung khỏi mắt nhưng giữ nó trong cây trợ năng cho trình đọc màn hình. */
     .sr {
       position: absolute;
       width: 1px;
@@ -229,6 +230,7 @@
       inset: 0;
       background-image: radial-gradient(var(--line) 1.2px, transparent 1.2px);
       background-size: 26px 26px;
+      /* Giữ bản WebKit song song để mặt nạ trang trí hoạt động trên Safari. */
       mask-image: radial-gradient(ellipse 75% 70% at 70% 40%, #000 20%, transparent 75%);
       -webkit-mask-image: radial-gradient(ellipse 75% 70% at 70% 40%, #000 20%, transparent 75%);
       opacity: .9
@@ -1076,6 +1078,7 @@
       inset: 0;
       background-image: radial-gradient(rgba(255, 255, 255, .14) 1.2px, transparent 1.2px);
       background-size: 24px 24px;
+      /* Mặt nạ chuẩn và tiền tố WebKit giữ hiệu ứng vùng sáng trên Safari. */
       mask-image: radial-gradient(circle at 50% 0, #000, transparent 70%);
       -webkit-mask-image: radial-gradient(circle at 50% 0, #000, transparent 70%)
     }
@@ -1303,6 +1306,7 @@
       height: 3px;
       width: 0;
       background: linear-gradient(90deg, var(--teal), var(--sky), var(--iris));
+      /* Nằm trên header để chỉ báo cuộn luôn thấy được khi thanh điều hướng sticky. */
       z-index: 100;
       box-shadow: 0 0 12px var(--teal)
     }
@@ -1410,6 +1414,7 @@
 
     .hero h1 {
       background: linear-gradient(115deg, var(--ink) 25%, var(--teal-deep) 62%, var(--sky) 100%);
+      /* Tiền tố WebKit giữ hiệu ứng chữ chuyển sắc trên Safari; thuộc tính chuẩn phục vụ trình duyệt khác. */
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
@@ -1574,6 +1579,7 @@
     }
 
     .marq .mask {
+      /* Cặp thuộc tính chuẩn/WebKit tạo viền mờ hai đầu cho dải cuộn ngang. */
       mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
       -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent)
     }
@@ -1612,6 +1618,7 @@
       content: "";
       position: absolute;
       inset: 0;
+      /* Lớp âm nằm dưới nội dung trong stacking context riêng của thẻ. */
       z-index: -1;
       opacity: 0;
       transition: opacity .4s;
@@ -1702,6 +1709,7 @@
       inset: 0;
       background-image: linear-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, .035) 1px, transparent 1px);
       background-size: 44px 44px;
+      /* Làm mờ lưới về rìa khối; bản WebKit hỗ trợ Safari. */
       mask-image: radial-gradient(ellipse at 50% 30%, #000, transparent 75%);
       -webkit-mask-image: radial-gradient(ellipse at 50% 30%, #000, transparent 75%);
       pointer-events: none
@@ -1772,6 +1780,7 @@
 
     .trust h2 {
       background: linear-gradient(120deg, var(--ink) 40%, var(--teal-deep));
+      /* Cắt nền theo nét chữ để giữ màu chữ chuyển sắc trên cả Safari và trình duyệt chuẩn. */
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;

@@ -1,0 +1,23 @@
+name: nexa_iot
+description: "Nexa IoT Android client — FEAT-TN-001 authentication."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.13.4 <4.0.0'
+  flutter: '>=3.47.5'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Dependency đã được duyệt cho PoC; lockfile giữ các phiên bản transitive sau resolve.
+  flutter_secure_storage: 11.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-15",
+  "timezone": "Asia/Bangkok",
+  "branch": "dev",
+  "head": "ba425ad9e5576ed3261f6df5b4a4731c96d98850",
+  "result": "PASS_HOST_REGRESSION_READY_FOR_QA",
+  "full_feature_status": "VERIFY_IN_PROGRESS",
+  "source_ui_changed_in_host_rerun": false,
+  "commands": [
+    {
+      "cwd": "repository-root",
+      "command": "node ops/auth/test_native_e2e_protocol.mjs",
+      "exit_code": 0,
+      "marker_count": 15,
+      "markers": [
+        "NATIVE_DAEMON_PROTOCOL_6_GROUPS_PASS",
+        "NATIVE_FULL_PRESELECTION_CHECKPOINT_AND_REQUEST_ORACLE_PASS",
+        "NATIVE_CLEANUP_ONLY_RPC_ALLOWANCE_PASS",
+        "NATIVE_POST_SPAWN_ERROR_NOT_TERMINAL_PASS",
+        "NATIVE_BOUNDARY_FAILURE_CLEANUP_COMMANDS_PASS",
+        "NATIVE_NEVER_EXIT_BOUNDED_FAILURE_PASS",
+        "NATIVE_EXACT_SESSION_DELTA_LOGIN_LOGOUT_PASS",
+        "NATIVE_ACCESS_SESSION_DELTA_PASS",
+        "NATIVE_ACCESS_ORDERED_CHECKPOINTS_PASS",
+        "NATIVE_FIXTURE_EIGHT_COUNT_CLEANUP_PASS",
+        "NATIVE_RATE_ARM_FAILURE_OWNED_CLOSE_PASS",
+        "NATIVE_RATE_ARM_FACTORY_OWNED_CLOSE_PASS",
+        "NATIVE_ARM_FAILURE_HOOK_BEFORE_OWNED_TERMINAL_PASS",
+        "NATIVE_RATE_ARM_ANCHOR_DEADLINE_FRAME_PASS",
+        "NATIVE_PASSWORD_ORDER_SESSION_BUDGET_SECRET_PASS"
+      ]
+    },
+    {
+      "cwd": "repository-root",
+      "command": "python -X utf8 -B -m unittest discover -s ops/auth/tests -q",
+      "exit_code": 0,
+      "tests_passed": 133,
+      "tests_failed": 0
+    },
+    {
+      "cwd": "web",
+      "command": "npm.cmd run test:auth",
+      "exit_code": 0,
+      "tests_passed": 36,
+      "tests_failed": 0,
+      "warning": "Node experimental type stripping warning"
+    },
+    {
+      "cwd": "web",
+      "command": "npx.cmd tsc --noEmit",
+      "exit_code": 0
+    },
+    {
+      "cwd": "repository-root",
+      "command": "git diff --check",
+      "exit_code": 0,
+      "warning": "Existing LF-to-CRLF worktree warnings; untracked files are not checked"
+    }
+  ],
+  "acceptance": {
+    "E2E-AUTH-003": "PARTIAL",
+    "AT-WF-001-03": "PARTIAL",
+    "reason": "Exact Web/Android preselection request oracle passes; device fixtures in workspaces A/B are not seeded."
+  },
+  "secrets_recorded": false
+}

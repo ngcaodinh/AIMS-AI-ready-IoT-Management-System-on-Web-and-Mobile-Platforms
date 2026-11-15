@@ -29,6 +29,7 @@ SOURCE_NAMES = (
     "0017_outbox_lease_clock.sql",
     "0018_channel_kind.sql",
     "0019_device_registration.sql",
+    "0020_auth_ios_client.sql",
 )
 # Các view/check dùng cùng search_path để regclass/regprocedure không drift do pg_dump reset.
 FINGERPRINT = "SET search_path=public,pg_catalog;\n" + (

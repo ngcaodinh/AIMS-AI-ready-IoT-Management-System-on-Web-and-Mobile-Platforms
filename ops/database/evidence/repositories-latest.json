@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-10-24T10:52:29.005807+00:00",
+  "recordedAt": "2026-10-24T12:04:17.994459+00:00",
   "database": "iot_platform_lab",
   "engine": "PostgreSQL17.11",
   "driver": "sqlx0.8.6",

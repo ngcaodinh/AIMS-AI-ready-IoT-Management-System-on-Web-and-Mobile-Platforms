@@ -1,0 +1,289 @@
+/* Dùng nhận diện trang chủ Nexa, giới hạn hiệu ứng để form đăng nhập vẫn là tác vụ chính. */
+.auth-page {
+  /* Đường cong easing dùng chung để mọi chuyển cảnh có cùng nhịp "nảy nhẹ" như trang chủ. */
+  --auth-ease: cubic-bezier(.2, .8, .2, 1);
+  --auth-ring: 0 0 0 4px color-mix(in srgb, var(--teal) 20%, transparent);
+  /* Giữ nền lỗi gần surface Nexa; accent pha mực để đủ tương phản ở cả hai theme. */
+  --auth-error-surface: color-mix(in srgb, var(--coral) 8%, var(--surface));
+  --auth-error-accent: color-mix(in srgb, var(--coral) 75%, var(--ink));
+  position: relative;
+  isolation: isolate;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+  background:
+    radial-gradient(1200px 700px at 85% -10%, color-mix(in srgb, var(--teal) 14%, transparent), transparent 60%),
+    radial-gradient(900px 600px at -10% 30%, color-mix(in srgb, var(--sky) 10%, transparent), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+}
+.auth-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  opacity: .7;
+  background-image: radial-gradient(var(--line) 1.2px, transparent 1.2px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse at 50% 35%, #000, transparent 75%);
+  /* Cùng fallback WebKit với nền hero để chấm trang trí không phủ kín màn trên Safari. */
+  -webkit-mask-image: radial-gradient(ellipse at 50% 35%, #000, transparent 75%);
+}
+
+/* Blob ánh sáng trôi chậm giống hero; chỉ animate transform để chạy trên compositor, không gây reflow. */
+.auth-aurora { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.auth-aurora span { position: absolute; border-radius: 50%; will-change: transform; animation: auth-drift 16s ease-in-out infinite alternate; }
+.auth-aurora span:nth-child(1) { width: 560px; height: 560px; top: -180px; right: -60px; background: radial-gradient(circle, var(--teal) 0%, transparent 68%); opacity: .26; }
+.auth-aurora span:nth-child(2) { width: 460px; height: 460px; bottom: -140px; left: -120px; background: radial-gradient(circle, var(--amber) 0%, transparent 68%); opacity: .16; animation-duration: 20s; }
+.auth-aurora span:nth-child(3) { width: 420px; height: 420px; top: 38%; left: 42%; background: radial-gradient(circle, var(--iris) 0%, transparent 68%); opacity: .14; animation-duration: 24s; animation-direction: alternate-reverse; }
+@keyframes auth-drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(40px, -30px, 0) scale(1.12); } }
+
+.auth-icon { display: block; width: 20px; height: 20px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform .3s var(--auth-ease), color .2s; }
+.auth-icon-back { transform: rotate(180deg); }
+.auth-page :focus-visible { outline: 3px solid var(--amber); outline-offset: 3px; }
+.auth-page button, .auth-page a { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.auth-skip-link { position: absolute; z-index: 20; top: 12px; left: 24px; padding: 12px 18px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); transform: translateY(-200%); transition: transform .2s; }
+.auth-skip-link:focus { transform: translateY(0); }
+
+/* Header */
+/* z-index 10 giữ header kính mờ nằm trên aurora và card khi cuộn trên màn thấp. */
+.auth-header { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); background: color-mix(in srgb, var(--surface) 62%, transparent); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4); }
+.auth-header-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: min(1200px, calc(100% - 48px)); min-height: 72px; margin-inline: auto; }
+.auth-header .logo { white-space: nowrap; }
+.auth-header-actions { display: flex; align-items: center; gap: .6rem; }
+.auth-home-link { min-height: 44px; }
+.auth-home-link:hover .auth-icon-back { transform: rotate(180deg) translateX(3px); }
+.auth-theme-toggle { display: grid; place-items: center; width: 44px; height: 44px; border: 1.5px solid var(--line); border-radius: 50%; color: var(--ink); background: color-mix(in srgb, var(--surface) 75%, transparent); backdrop-filter: blur(8px); cursor: pointer; transition: border-color .25s, transform .4s var(--auth-ease), box-shadow .25s; }
+.auth-theme-toggle:hover { border-color: var(--teal); transform: rotate(24deg); box-shadow: 0 8px 20px -10px var(--teal); }
+
+/* Bố cục */
+/* Không cố định chiều cao card: form vẫn cuộn được khi zoom hoặc mở bàn phím mobile. */
+.auth-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 40px 24px 56px; }
+.auth-main:focus { outline: none; }
+.auth-layout { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; align-items: center; gap: 64px; width: min(1200px, 100%); }
+
+/* Card kính */
+.auth-card {
+  position: relative;
+  width: min(100%, 30rem);
+  min-width: 0;
+  padding: 40px;
+  border: 1px solid transparent;
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  box-shadow: 0 40px 80px -36px rgba(12, 34, 51, .35), 0 0 0 6px color-mix(in srgb, var(--surface) 40%, transparent);
+  animation: auth-rise .7s var(--auth-ease) both;
+  transition: width .45s var(--auth-ease);
+}
+/* Viền gradient bằng mask: chỉ giữ dải 1px quanh card, nền kính bên trong vẫn trong suốt. */
+.auth-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--teal) 55%, transparent), var(--line) 38%, var(--line) 62%, color-mix(in srgb, var(--sky) 45%, transparent));
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+}
+/* Vệt sáng mảnh ở mép trên tạo chiều sâu kính, không cạnh tranh với nội dung form. */
+.auth-card::after { content: ''; position: absolute; top: -1px; left: 18%; right: 18%; height: 1px; pointer-events: none; background: linear-gradient(90deg, transparent, var(--teal), var(--sky), transparent); opacity: .8; }
+[data-theme="dark"] .auth-card { box-shadow: 0 40px 90px -36px rgba(0, 0, 0, .75), 0 0 0 6px color-mix(in srgb, var(--surface) 30%, transparent); }
+.auth-card-wide { width: min(100%, 39rem); }
+@keyframes auth-rise { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes auth-fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.auth-card-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+.auth-state-icon { position: relative; display: grid; place-items: center; flex-shrink: 0; width: 48px; height: 48px; border-radius: 14px; background: var(--grad); color: #fff; box-shadow: 0 10px 24px -8px var(--teal), inset 0 1px 0 rgba(255, 255, 255, .4); }
+/* Vòng sóng lan tỏa gợi ý tín hiệu thiết bị; dùng opacity/transform để không ảnh hưởng layout. */
+.auth-state-icon::after { content: ''; position: absolute; inset: 0; border-radius: inherit; border: 2px solid var(--teal); opacity: 0; animation: auth-ping 2.8s var(--auth-ease) infinite; }
+.auth-state-icon .auth-icon { width: 23px; height: 23px; animation: auth-fade-up .4s var(--auth-ease) both; }
+@keyframes auth-ping { 0% { opacity: .55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(1.45); } }
+.auth-eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .6875rem; line-height: 1.5; letter-spacing: .14em; font-weight: 700; }
+.auth-eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 22%, transparent); }
+
+.auth-card h1 { font-family: var(--ff-display); font-size: clamp(1.875rem, 4vw, 2.375rem); line-height: 1.15; letter-spacing: -.03em; margin: 0 0 12px; text-wrap: balance; overflow-wrap: anywhere; background: linear-gradient(115deg, var(--ink) 25%, var(--teal-deep) 70%, var(--sky) 100%); background-clip: text; -webkit-background-clip: text; color: transparent; padding-bottom: .08em; border-radius: 8px; }
+[data-theme="dark"] .auth-card h1 { background: linear-gradient(115deg, #fff 25%, var(--teal) 70%, var(--sky)); background-clip: text; -webkit-background-clip: text; }
+/* Heading tabIndex=-1 chỉ nhận focus bằng script để screen reader đọc màn mới; không phải control thao tác nên ẩn khung focus. */
+.auth-card h1:focus { outline: none; }
+.auth-description { color: var(--muted); line-height: 1.75; margin: 0 0 24px; font-size: .9375rem; overflow-wrap: anywhere; }
+
+/* Nội dung từng phase mount mới sẽ trượt lên nhẹ, tạo chuyển cảnh mà không cần thay đổi logic render. */
+.auth-card > :is(.auth-description, .auth-form, .auth-loading, .auth-recovery, .auth-workspaces, .auth-success-panel, .auth-empty, .auth-breadcrumb) { animation: auth-fade-up .5s var(--auth-ease) both; animation-delay: .08s; }
+.auth-card > h1 { animation: auth-fade-up .5s var(--auth-ease) both; }
+
+/* Form */
+.auth-form { display: flex; flex-direction: column; gap: 9px; margin-top: 28px; }
+/* Stagger nhẹ cho các dòng form đầu tiên; giới hạn 8 phần tử để tổng thời gian dưới 0,5 giây. */
+.auth-form > * { animation: auth-fade-up .45s var(--auth-ease) both; }
+.auth-form > :nth-child(2) { animation-delay: .04s; }
+.auth-form > :nth-child(3) { animation-delay: .08s; }
+.auth-form > :nth-child(4) { animation-delay: .12s; }
+.auth-form > :nth-child(5) { animation-delay: .16s; }
+.auth-form > :nth-child(6) { animation-delay: .2s; }
+.auth-form > :nth-child(7) { animation-delay: .24s; }
+.auth-form > :nth-child(n + 8) { animation-delay: .28s; }
+.auth-form label { font-weight: 600; font-size: .875rem; margin-top: 10px; }
+.auth-form label:first-child { margin-top: 0; }
+/* Viền muted giúp nhận biết vùng nhập ở cả hai theme; line chỉ đủ cho đường chia trang trí. */
+.auth-form input { width: 100%; min-width: 0; min-height: 52px; padding: 14px 16px; border: 1.5px solid var(--muted); border-radius: 12px; color: var(--ink); background: color-mix(in srgb, var(--surface-2) 85%, transparent); font: inherit; font-size: 1rem; line-height: 1.4; transition: border-color .2s, background-color .2s, box-shadow .25s var(--auth-ease); }
+.auth-form input::placeholder { color: var(--muted); opacity: .85; }
+/* Hover không ghi đè viền lỗi, để trạng thái validation luôn nhất quán với thông báo. */
+.auth-form input:hover:enabled:not([aria-invalid="true"]) { border-color: var(--teal-deep); }
+/* Thay outline amber bằng viền teal đậm + quầng sáng: vẫn đạt tương phản 3:1 cho trạng thái focus. */
+.auth-form input:focus { outline: none; border-color: var(--teal-deep); background: var(--surface); box-shadow: var(--auth-ring); }
+.auth-form input[aria-invalid="true"] { border-color: var(--coral); }
+.auth-form input[aria-invalid="true"]:focus { box-shadow: 0 0 0 4px color-mix(in srgb, var(--coral) 18%, transparent); }
+.auth-form input:disabled { opacity: .6; cursor: not-allowed; }
+.auth-input-field { position: relative; display: flex; }
+.auth-input-field > .auth-icon { position: absolute; top: 16px; left: 16px; color: var(--muted); pointer-events: none; }
+.auth-input-field:focus-within > .auth-icon { color: var(--teal-deep); transform: scale(1.08); }
+.auth-input-field input { padding-left: 48px; }
+.auth-password-field input { padding-right: 58px; }
+.auth-reveal { position: absolute; right: 4px; top: 4px; display: grid; place-items: center; min-height: 44px; min-width: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; transition: color .2s, background-color .2s; }
+.auth-reveal:hover { color: var(--teal-deep); background: var(--teal-soft); }
+.auth-reveal:active .auth-icon { transform: scale(.88); }
+
+/* Nút */
+.auth-primary, .auth-secondary { position: relative; display: inline-flex; justify-content: center; align-items: center; gap: .6rem; min-height: 46px; padding: .85rem 1.4rem; border: 1.5px solid var(--line); border-radius: 999px; font: inherit; font-size: .95rem; font-weight: 600; line-height: 1.5; cursor: pointer; text-align: center; transition: box-shadow .3s var(--auth-ease), border-color .25s, background-color .25s, transform .3s var(--auth-ease); }
+/* Giữ gradient CTA trang chủ; navy cố định đảm bảo chữ đủ tương phản ở cả ba điểm màu. */
+.auth-primary { min-height: 54px; overflow: hidden; background: var(--grad); color: #05221C; border-color: transparent; margin-top: 16px; box-shadow: 0 12px 28px -12px var(--teal), inset 0 1px 0 rgba(255, 255, 255, .35); }
+/* Dải sáng quét qua khi rê chuột, cùng hiệu ứng với .btn-primary ở trang chủ. */
+.auth-primary::after { content: ''; position: absolute; top: 0; left: -70%; width: 50%; height: 100%; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .55), transparent); transform: skewX(-20deg); transition: left .7s; pointer-events: none; }
+.auth-primary:hover:enabled::after { left: 130%; }
+.auth-form > .auth-primary { width: 100%; }
+.auth-login-submit { justify-content: space-between; padding-inline: 1.6rem; }
+.auth-login-submit:hover:enabled > .auth-icon { transform: translateX(4px); }
+.auth-secondary { background: color-mix(in srgb, var(--surface) 70%, transparent); backdrop-filter: blur(8px); color: var(--ink); }
+.auth-primary:hover:enabled { box-shadow: var(--glow); transform: translateY(-1px); }
+.auth-primary .auth-spinner { border-color: currentColor; border-top-color: transparent; }
+.auth-secondary:hover:enabled { background: var(--teal-soft); border-color: var(--teal); transform: translateY(-1px); }
+.auth-primary:active:enabled, .auth-secondary:active:enabled { transform: translateY(1px) scale(.99); }
+.auth-primary:disabled, .auth-secondary:disabled { opacity: .6; cursor: not-allowed; }
+
+/* Thông báo & gợi ý */
+.auth-field-error { color: var(--ink); font-size: .8125rem; line-height: 1.6; margin: 0; border-left: 3px solid var(--coral); padding-left: 8px; animation: auth-fade-up .3s var(--auth-ease) both; }
+.auth-field-error:empty { display: none; }
+.auth-hint { color: var(--muted); font-size: .8125rem; line-height: 1.7; margin: 8px 0 0; }
+.auth-account-help { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: start; gap: 12px; margin-top: 24px; padding: 16px; border: 1px dashed color-mix(in srgb, var(--teal) 30%, var(--line)); border-radius: var(--r-md); background: color-mix(in srgb, var(--teal-soft) 45%, transparent); color: var(--muted); }
+.auth-account-help > .auth-icon { width: 36px; height: 36px; padding: 8px; border-radius: 10px; background: var(--surface); color: var(--teal-deep); box-shadow: 0 1px 2px rgba(12, 34, 51, .06); }
+.auth-account-help p { margin: 0; font-size: .8125rem; line-height: 1.65; }
+.auth-account-help strong, .auth-account-help p > span { display: block; }
+.auth-account-help strong { color: var(--ink); margin-bottom: 2px; font-weight: 600; }
+.auth-notice { display: flex; align-items: flex-start; gap: 10px; border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--line)); border-radius: 12px; padding: 14px 16px; background: var(--amber-soft); margin: 20px 0; font-size: .8125rem; line-height: 1.7; overflow-wrap: anywhere; animation: auth-notice-in .45s var(--auth-ease) both; }
+@keyframes auth-notice-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+.auth-notice > .auth-icon { width: 18px; height: 18px; margin-top: 2px; }
+.auth-notice:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 55%, transparent); }
+.auth-notice-content { min-width: 0; }
+.auth-notice p, .auth-notice ul { margin: 0; }
+.auth-notice ul { padding-left: 18px; }
+.auth-notice p + ul { margin-top: 8px; }
+.auth-notice a { text-decoration: underline; text-underline-offset: 3px; font-weight: 500; }
+.auth-error { color: var(--ink); background: var(--auth-error-surface); border-color: color-mix(in srgb, var(--auth-error-accent) 32%, var(--line)); }
+.auth-error > .auth-icon { color: var(--auth-error-accent); }
+/* Summary được focus sau submit; viền đặc giữ dấu focus rõ trên nền tối. */
+.auth-error:focus { outline: 2px solid var(--auth-error-accent); outline-offset: 3px; box-shadow: none; }
+.auth-success { background: var(--teal-soft); border-color: color-mix(in srgb, var(--teal) 45%, var(--line)); }
+.auth-success > .auth-icon { color: var(--teal-deep); }
+
+/* Loading */
+.auth-loading { margin-top: 28px; }
+.auth-skeleton { display: grid; gap: 16px; }
+/* Shimmer chạy bằng background-position để báo đang tải mà không đổi kích thước phần tử. */
+.auth-skeleton span { height: 52px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(90deg, var(--surface-2) 0%, color-mix(in srgb, var(--teal-soft) 80%, var(--surface-2)) 50%, var(--surface-2) 100%); background-size: 220% 100%; animation: auth-shimmer 1.6s ease-in-out infinite; }
+.auth-skeleton span:nth-child(2) { animation-delay: .15s; }
+.auth-skeleton span:last-child { height: 12px; width: 65%; margin-top: 8px; animation-delay: .3s; }
+@keyframes auth-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.auth-progress { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .8125rem; line-height: 1.7; margin: 24px 0 0; }
+.auth-spinner { flex-shrink: 0; width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--teal-deep); border-radius: 50%; animation: auth-spin .9s linear infinite; }
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+
+/* Workspace picker */
+.auth-workspaces { display: grid; gap: 10px; padding: 0; margin: 24px 0; list-style: none; }
+.auth-workspaces li { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-md); background: color-mix(in srgb, var(--surface-2) 70%, transparent); transition: border-color .25s, transform .3s var(--auth-ease), box-shadow .3s var(--auth-ease); animation: auth-fade-up .45s var(--auth-ease) both; }
+.auth-workspaces li:nth-child(2) { animation-delay: .05s; }
+.auth-workspaces li:nth-child(3) { animation-delay: .1s; }
+.auth-workspaces li:nth-child(n + 4) { animation-delay: .15s; }
+.auth-workspaces li:hover { border-color: color-mix(in srgb, var(--teal) 45%, var(--line)); transform: translateY(-2px); box-shadow: 0 14px 28px -18px rgba(12, 34, 51, .35); }
+.auth-workspace-icon { display: grid; place-items: center; flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px; background: var(--teal-soft); color: var(--teal-deep); border: 1px solid color-mix(in srgb, var(--teal) 25%, var(--line)); transition: transform .3s var(--auth-ease); }
+.auth-workspaces li:hover .auth-workspace-icon { transform: rotate(-6deg) scale(1.05); }
+.auth-workspaces li > div { min-width: 0; flex: 1; }
+.auth-workspaces h2, .auth-empty h2 { font-size: 1rem; line-height: 1.5; margin: 0 0 2px; overflow-wrap: anywhere; }
+.auth-workspaces p { color: var(--muted); margin: 0; font-size: .8125rem; }
+.auth-workspaces button { flex-shrink: 0; min-height: 40px; padding: .5rem 1.1rem; }
+.auth-card > .auth-secondary { width: 100%; margin-top: 10px; }
+.auth-logout { margin-top: 28px; width: 100%; }
+.auth-card > .auth-logout { margin-top: 24px; }
+.auth-empty { padding: 24px; border: 1px dashed var(--line); border-radius: var(--r-md); background: color-mix(in srgb, var(--surface-2) 70%, transparent); margin-block: 24px; }
+
+/* Selected & recovery */
+.auth-success-panel { padding-top: 8px; }
+.auth-success-panel > .auth-secondary { width: 100%; }
+.auth-recovery { display: flex; flex-direction: column; gap: 14px; margin-top: 24px; }
+.auth-recovery p, .auth-empty p, .auth-success-panel p { margin: 0 0 12px; font-size: .875rem; line-height: 1.75; overflow-wrap: anywhere; }
+.auth-recovery > .auth-primary { margin-top: 4px; }
+.auth-breadcrumb { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; color: var(--muted); font-size: .8125rem; overflow-wrap: anywhere; }
+.auth-breadcrumb [aria-current] { color: var(--teal-deep); font-weight: 600; }
+.auth-access-status { display: flex; align-items: center; gap: 10px; border: 1px solid color-mix(in srgb, var(--teal) 35%, var(--line)); padding: 12px 16px; background: var(--teal-soft); border-radius: 12px; }
+.auth-access-status::before { content: ''; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 4px color-mix(in srgb, var(--teal) 25%, transparent); }
+.auth-session-summary { margin: 24px 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.auth-session-summary > div { padding: 14px 16px; background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.auth-session-summary > div + div { border-top: 1px solid var(--line); }
+.auth-session-summary dt { color: var(--muted); font-size: .75rem; letter-spacing: .02em; }
+.auth-session-summary dd { margin: 4px 0 0; font-size: .9375rem; font-weight: 600; overflow-wrap: anywhere; }
+
+/* Showcase desktop */
+.auth-showcase { display: none; }
+.auth-showcase-pill { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 24px; padding: 6px 14px 6px 6px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface) 75%, transparent); backdrop-filter: blur(10px); color: var(--muted); font-size: .875rem; }
+.auth-showcase-pill b { padding: 3px 12px; border-radius: 999px; background: var(--grad); color: #fff; font-weight: 700; }
+.auth-showcase-title { max-width: 14ch; margin: 0 0 20px; font-family: var(--ff-display); font-size: clamp(2.5rem, 4.2vw, 3.5rem); line-height: 1.05; letter-spacing: -.035em; background: linear-gradient(115deg, var(--ink) 25%, var(--teal-deep) 62%, var(--sky) 100%); background-clip: text; -webkit-background-clip: text; color: transparent; padding-bottom: .08em; }
+[data-theme="dark"] .auth-showcase-title { background: linear-gradient(115deg, #fff 20%, var(--teal) 65%, var(--sky)); background-clip: text; -webkit-background-clip: text; }
+.auth-showcase-text { max-width: 44ch; margin: 0 0 36px; color: var(--muted); font-size: 1.0625rem; line-height: 1.75; }
+.auth-showcase-list { display: grid; gap: 14px; max-width: 26rem; margin: 0; padding: 0; list-style: none; }
+.auth-showcase-list li { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--line)); border-radius: var(--r-md); background: color-mix(in srgb, var(--surface) 78%, transparent); backdrop-filter: blur(14px); box-shadow: var(--shadow); animation: auth-fade-up .6s var(--auth-ease) both, auth-float 6s ease-in-out infinite; }
+/* Lệch pha nổi của từng chip để chuyển động tự nhiên, không đồng loạt như máy. */
+.auth-showcase-list li:nth-child(1) { animation-delay: .25s, .9s; }
+.auth-showcase-list li:nth-child(2) { animation-delay: .35s, 2.4s; margin-left: 36px; }
+.auth-showcase-list li:nth-child(3) { animation-delay: .45s, 3.6s; }
+@keyframes auth-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.auth-showcase-list strong { display: block; font-size: .9375rem; font-weight: 600; }
+.auth-showcase-list li span:not(.auth-showcase-icon) { display: block; color: var(--muted); font-size: .8125rem; }
+.auth-showcase-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(145deg, var(--teal-soft), color-mix(in srgb, var(--teal) 22%, var(--teal-soft))); color: var(--teal-deep); }
+.auth-showcase-icon-amber { background: linear-gradient(145deg, var(--amber-soft), color-mix(in srgb, var(--amber) 30%, var(--amber-soft))); color: color-mix(in srgb, var(--amber) 70%, var(--ink)); }
+.auth-showcase-icon-sky { background: linear-gradient(145deg, color-mix(in srgb, var(--sky) 14%, var(--surface)), color-mix(in srgb, var(--sky) 28%, var(--surface))); color: color-mix(in srgb, var(--sky) 75%, var(--ink)); }
+
+/* Footer */
+.auth-footer { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; padding: 16px 24px max(28px, env(safe-area-inset-bottom)); color: var(--muted); font-size: .75rem; text-align: center; }
+.auth-footer-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--muted); }
+
+/* Chỉ form login dùng hai cột trên desktop; card nghiệp vụ giữ một cột và thứ tự focus tự nhiên. */
+@media (min-width: 1024px) {
+  .auth-main { padding-top: 48px; }
+  .auth-layout-login { grid-template-columns: minmax(0, 1fr) auto; justify-items: stretch; gap: clamp(48px, 6vw, 96px); }
+  .auth-showcase { display: block; order: -1; animation: auth-fade-up .7s var(--auth-ease) both; }
+}
+@media (max-width: 760px) {
+  .auth-main { padding-top: 24px; padding-bottom: 40px; }
+  .auth-aurora span:nth-child(3) { display: none; }
+}
+@media (max-width: 480px) {
+  .auth-home-link { justify-content: center; width: 44px; padding: 0; }
+  .auth-home-link > span { display: none; }
+  .auth-main { padding: 16px 16px 32px; }
+  .auth-card { padding: 28px 22px; box-shadow: 0 30px 60px -30px rgba(12, 34, 51, .35); }
+  .auth-card-heading { gap: 12px; margin-bottom: 24px; }
+  .auth-eyebrow { font-size: .625rem; letter-spacing: .1em; }
+  .auth-workspace-icon { display: none; }
+  .auth-empty { padding: 18px; }
+}
+/* Giảm chuyển động vẫn giữ nội dung status để người dùng biết request đang xử lý. */
+@media (prefers-reduced-motion: reduce) {
+  .auth-page *, .auth-page *::before, .auth-page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

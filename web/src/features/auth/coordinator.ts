@@ -1,5 +1,5 @@
 import {
-  AuthError, getMe, isUuid, listWorkspaces, login, mutateSession, selectWorkspace,
+  assertAuthApiReady, AuthError, getMe, isUuid, listWorkspaces, login, mutateSession, selectWorkspace,
   type MeResult, type Profile, type SessionMetadata, type Workspace,
 } from './api.ts';
 
@@ -190,17 +190,40 @@ export class AuthCoordinator {
   }
 
   /**
-   * Gửi intent đã được public signIn giữ chỗ; body mất hoặc sai schema giữ loginUnknown qua reload.
+   * Chặn login nếu API chưa sẵn sàng, đồng thời bỏ thao tác đã invalidate sau mọi điểm chờ bất đồng bộ.
    * Input
-   * Param: email — địa chỉ chuyển tới boundary API trong intent đang giữ Web Lock.
-   * Param: password — credential của lần submit đã được giữ chỗ, không trim hoặc persist.
-   * Side effects: ghi marker trước POST; chỉ confirmation đúng context mới mở picker.
+   * Param: email — địa chỉ chuyển tới boundary API sau khi readiness probe thành công.
+   * Param: password — credential của lần submit; không trim hoặc persist.
+   * Output: cập nhật state sang login, recovery hoặc luồng bootstrap theo response quan sát được.
+   * Errors: outage trước POST về form với `SERVICE_UNAVAILABLE`; lỗi sau POST có thể giữ `loginUnknown`.
+   * Side effects: probe GET không cookie; sau đó ghi marker trước mutation POST để reload không tự phát lại login.
    */
   private async executeSignIn(email: string, password: string): Promise<void> {
+    const generation = this.generation;
     let intentId = '';
     let credentialIssued = false;
     try {
       if (this.readMarker()?.phase === 'logoutPending') throw new AuthError('LOGOUT_PENDING');
+      this.update({ ...INITIAL_STATE, phase: 'loading', busy: true });
+      await assertAuthApiReady();
+    } catch (error) {
+      if (generation !== this.generation) return;
+      if (error instanceof AuthError && error.code === 'LOGOUT_PENDING') {
+        this.fail(error, true);
+      } else if (error instanceof AuthError && error.code === 'SERVICE_UNAVAILABLE') {
+        // Probe lỗi xảy ra trước marker và POST nên form có thể thử lại mà không cần đối soát intent UNKNOWN.
+        this.update({ phase: 'login' });
+        this.fail(error);
+      } else {
+        this.fail(error, true);
+      }
+      return;
+    }
+
+    // Probe là điểm chờ bất đồng bộ; cleanup/focus resume phải hủy intent cũ trước mọi marker hoặc POST credential.
+    if (generation !== this.generation) return;
+
+    try {
       intentId = crypto.randomUUID();
       this.writeMarker({ intentId, phase: 'loginPending' });
       this.currentIntent = intentId;

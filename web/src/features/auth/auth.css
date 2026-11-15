@@ -192,6 +192,8 @@
 .auth-error:focus { outline: 2px solid var(--auth-error-accent); outline-offset: 3px; box-shadow: none; }
 .auth-success { background: var(--teal-soft); border-color: color-mix(in srgb, var(--teal) 45%, var(--line)); }
 .auth-success > .auth-icon { color: var(--teal-deep); }
+/* Giữ viền focus màu teal đậm đồng bộ với nhóm trạng thái hoàn tất khi thông báo nhận tiêu điểm tự động. */
+.auth-success:focus { outline: 2px solid var(--teal-deep); outline-offset: 3px; box-shadow: none; }
 
 /* Loading */
 .auth-loading { margin-top: 28px; }

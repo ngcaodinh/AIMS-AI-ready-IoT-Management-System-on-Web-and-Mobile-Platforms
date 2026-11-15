@@ -35,6 +35,9 @@ export class AuthError extends Error {
   }
 }
 
+// Giới hạn thời gian chờ probe trước login (ms); đủ cho loopback nhưng không giữ form ở trạng thái loading lâu.
+const AUTH_API_READINESS_TIMEOUT_MS = 5000;
+
 /** Kiểm object JSON ở biên mạng trước khi đọc field không đáng tin. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -58,6 +61,43 @@ function parseMetadata(response: Response): SessionMetadata {
   const csrfToken = response.headers.get('X-CSRF-Token');
   if (!isUuid(contextId) || !csrfToken) throw new AuthError('PROTOCOL_ERROR');
   return { contextId, csrfToken };
+}
+
+/** Kiểm tra dependency trước khi tạo login intent để outage proxy không bị nhầm với credential bị từ chối.
+ * Output: hoàn tất khi `/me` trả đúng HTTP 401 `application/json`; nếu không thì không cho caller tiếp tục.
+ * Errors: ném `SERVICE_UNAVAILABLE` khi timeout, mất kết nối, redirect hoặc status/media type khác contract.
+ * Side effects: chỉ gửi GET `/api/v1/me` với cookie bị bỏ qua; không đọc body hoặc thay đổi phiên.
+ */
+export async function assertAuthApiReady(): Promise<void> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    /** Hủy probe treo để người dùng có thể thử lại mà không chờ vô hạn. */
+    () => controller.abort(), AUTH_API_READINESS_TIMEOUT_MS,
+  );
+  try {
+    // Probe bỏ cookie cũ để readiness luôn dựa trên response unauthenticated của cùng API route.
+    const response = await fetch('/api/v1/me', {
+      method: 'GET',
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get('content-type')
+      ?.split(';', 1)[0]
+      .trim()
+      .toLowerCase();
+
+    // Chỉ coi API sẵn sàng khi route xác thực trả đúng trạng thái unauthenticated; mọi proxy/fallback khác đều chặn POST.
+    if (response.status !== 401 || contentType !== 'application/json') {
+      throw new AuthError('SERVICE_UNAVAILABLE', response.status);
+    }
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    throw new AuthError('SERVICE_UNAVAILABLE');
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 /** Gửi request có timeout hữu hạn, giữ UNKNOWN khi mutation mất response và nhận diện 5xx không có JSON là dịch vụ gián đoạn. */

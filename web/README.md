@@ -42,6 +42,10 @@ The check sends only an unauthenticated `GET /api/v1/me` through the same-origin
 proxy and passes only on `401 application/json`. If it fails, do not submit login:
 the auth dependency is not ready, so a password attempt cannot diagnose that
 startup failure. Open `http://localhost:5173/login` only after the check passes.
+The Web coordinator also repeats this no-cookie probe on every login submit,
+before it writes an intent or sends the password. If the probe fails, the form
+shows service unavailable without sending a login POST; if the API drops after
+the probe, the existing recovery state stays UNKNOWN and does not replay POST.
 Android main now wires the real API/store/coordinator and passes128root widget/
 unit tests. Independent test design/review passes; runtime execution is by root.
 Independent runtime and native HTTPS E2E remain pending.

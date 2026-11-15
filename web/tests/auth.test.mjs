@@ -16,10 +16,23 @@ function response(body, status = 200, headers = metadata) {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers });
 }
 
-/** Cô lập storage, fetch và browser lock cho mỗi test bằng thư viện chuẩn Node. */
-function setup(replies) {
+/** Cô lập storage, readiness probe và API responses để kiểm state machine không cần provider thật.
+ * Input
+ * Param: replies — danh sách phản hồi synthetic theo thứ tự của các request có credential hoặc bootstrap.
+ * Param: readinessReply — phản hồi unauthenticated `/me` tách riêng; mặc định mô phỏng HTTP 401 JSON.
+ * Output: coordinator cùng snapshot, request logs đã lọc metadata và storage memory của test.
+ * Errors: assertion thất bại nếu request nghiệp vụ không có response đã khai trong kịch bản.
+ * Side effects: thay thế các browser globals trong phạm vi tiến trình test; không gửi request ra ngoài.
+ */
+function setup(replies, readinessReply) {
   const storage = new Map();
   const calls = [];
+  const readinessCalls = [];
+  const readinessStarted = deferred();
+  const readyReply = readinessReply ?? new Response('', {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' },
+  });
   let state;
   let lockTail = Promise.resolve();
   globalThis.window = { setTimeout, clearTimeout };
@@ -42,8 +55,14 @@ function setup(replies) {
       return result;
     },
   } } });
-  /** Chỉ phát response theo thứ tự đã khai; request ngoài kịch bản là lỗi test. */
-  globalThis.fetch = async (path, init) => {
+  /** Tách probe không cookie khỏi kịch bản API để assert readiness không tiêu thụ login response. */
+  globalThis.fetch = async (path, init = {}) => {
+    if (path === '/api/v1/me' && init.credentials === 'omit') {
+      readinessCalls.push({ path, method: init.method, credentials: init.credentials, cache: init.cache });
+      readinessStarted.resolve();
+      if (readyReply instanceof Error) throw readyReply;
+      return readyReply;
+    }
     calls.push({ path, init });
     const reply = replies.shift();
     assert.notEqual(reply, undefined, `Unexpected request: ${path}`);
@@ -55,7 +74,7 @@ function setup(replies) {
     (next) => { state = next; },
   );
   return {
-    coordinator, calls, storage,
+    coordinator, calls, readinessCalls, readinessStarted: readinessStarted.promise, storage,
     /** Lấy snapshot mới nhất sau callback bất đồng bộ. */
     getState() { return state; },
   };
@@ -509,9 +528,12 @@ test('malformed login200 remains unknown across restore without protected data o
 );
 
 test('unreadable login 5xx is reported as service unavailable and remains unknown',
-  /** Proxy có thể trả 5xx rỗng khi auth API chưa sẵn sàng; không được gọi sai là lỗi contract hay xác nhận login thất bại. */
+  /** Proxy từng trả 500 text/plain khi auth API dừng; lỗi sau lúc gửi POST vẫn phải giữ outcome UNKNOWN. */
   async () => {
-    const harness = setup([new Response('', { status: 500 })]);
+    const harness = setup([new Response('upstream unavailable', {
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' },
+    })]);
     await harness.coordinator.restore();
     await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
     assert.equal(harness.getState().phase, 'recovery');
@@ -519,6 +541,67 @@ test('unreadable login 5xx is reported as service unavailable and remains unknow
     assert.equal(harness.getState().profile, undefined);
     assert.equal(JSON.parse(harness.storage.get('nexa-auth-intent')).phase, 'loginUnknown');
     assert.equal(harness.calls.length, 1);
+  },
+);
+
+test('auth API outage is detected before the login mutation is created',
+  /** Auth API không sẵn sàng phải chặn POST credential và không để lại intent UNKNOWN khi chưa gửi mutation. */
+  async () => {
+    const harness = setup([], new Response('upstream unavailable', {
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' },
+    }));
+    await harness.coordinator.restore();
+    await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+    assert.equal(harness.getState().phase, 'login');
+    assert.equal(harness.getState().error, 'SERVICE_UNAVAILABLE');
+    assert.equal(harness.storage.size, 0);
+    assert.equal(harness.calls.length, 0);
+    assert.deepEqual(harness.readinessCalls, [{
+      path: '/api/v1/me', method: 'GET', credentials: 'omit', cache: 'no-store',
+    }]);
+  },
+);
+
+test('login invalidated during readiness check does not persist intent or send credentials',
+  /** Invalidation khi probe đang chờ phải ngăn operation cũ tiếp tục sau khi response đến. */
+  async () => {
+    const readiness = deferred();
+    const harness = setup([], readiness.promise);
+    await harness.coordinator.restore();
+    const pendingLogin = harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+    await harness.readinessStarted;
+    harness.coordinator.invalidate();
+    readiness.resolve(new Response('', {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    await pendingLogin;
+    assert.equal(harness.calls.length, 0);
+    assert.equal(harness.storage.size, 0);
+    assert.equal(harness.getState().phase, 'recovery');
+    assert.equal(harness.getState().error, 'AUTH_INTENT_CHANGED');
+  },
+);
+
+test('login invalidated during failed readiness check preserves the newer recovery state',
+  /** Probe lỗi trả muộn không được đổi recovery đã phát sinh từ cleanup hoặc resume. */
+  async () => {
+    const readiness = deferred();
+    const harness = setup([], readiness.promise);
+    await harness.coordinator.restore();
+    const pendingLogin = harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+    await harness.readinessStarted;
+    harness.coordinator.invalidate();
+    readiness.resolve(new Response('upstream unavailable', {
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' },
+    }));
+    await pendingLogin;
+    assert.equal(harness.calls.length, 0);
+    assert.equal(harness.storage.size, 0);
+    assert.equal(harness.getState().phase, 'recovery');
+    assert.equal(harness.getState().error, 'AUTH_INTENT_CHANGED');
   },
 );
 

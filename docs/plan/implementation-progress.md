@@ -434,9 +434,10 @@ không thay manifest/regression mới. [Audittoànfeature](../test-reports/FEAT-
 | FEAT-TN-002/L1b | 30 logout fixtures synthetic; current checkout dirty/uncommitted | READY_FOR_QA tĩnh | Contract suite 39/39 PASS trước source changes. [Report](../test-reports/FEAT-TN-002-contract-2026-10-23.md); CP-L1/CP-01 còn chờ owner review |
 | FEAT-TN-002/L2 | Logout route, transaction, ticket/push invalidation và audit đã có từ FEAT-TN-001; native main app hiện chạy qua PostgreSQL fixture | RUNTIME_PARTIAL | App online resume/logout và Web one-session 204 đã chạy; TN-002 two-session, repeat/logout isolation, push binding chưa có evidence đủ |
 | FEAT-TN-002/L3 | Không có socket-owning server/consumer callsite cho close intent | BLOCKED_DEPENDENCY | Runtime WS close/lost-signal/multi-instance NOT_RUN; không thêm dependency/infrastructure |
-| FEAT-TN-002/L4 | Web coordinator/cookie/logout online flow hiện có; UI recovery follow-up chưa chạy | BLOCKED_ACCEPTANCE; partial evidence | Browser one-session 204→login đã có 15/11; Web mock 36/36. Chưa có recovery-state/multi-session browser evidence; `agy` và model 4 Argon/Hydrogen chưa xác minh |
+| FEAT-TN-002/L4 | Web coordinator/cookie/logout online flow; UI recovery được cập nhật bằng `agy` với Gemini 4 Argon · medium | BLOCKED_ACCEPTANCE; partial evidence | Chrome fixture run: login/me/workspaces và chọn workspace trả 200; logout trả UI về login với success notice. CDP không giữ logout status trong lượt mới; 204 còn ở report 15/11. Chưa có recovery-state/multi-session browser evidence. |
 | FEAT-TN-002/L5 | Android secure outbox/retry source, parser legacy fix source, recorded Flutter results and API24 online resume/logout | BLOCKED_ACCEPTANCE; partial evidence | Flutter results predate parser fix and no AGENTS-compliant lane is documented; probes cover active-session adapter, not durable `logout_intent`. Source does not enforce TTL after retry quota; trusted expiry/elapsed-time mechanism remains unresolved |
-| FEAT-TN-002/L6 | Web one-session logout và Android main full/resume/logout chạy được trên fixture thật | BLOCKED_ACCEPTANCE; partial E2E evidence | Hai-session, offline/restart, push-late và socket close chưa có evidence; AT-WF-002-01 BLOCKED (partial evidence), -02 BLOCKED, -03 NOT_RUN |
+| FEAT-TN-002/L6 | Web one-user login/select/logout trên PostgreSQL fixture có browser evidence; Android main full/resume/logout evidence thuộc lượt FEAT-TN-001 | BLOCKED_ACCEPTANCE; partial E2E evidence | Chrome: login/me/workspaces/select trả 200; empty fixture đạt empty state; logout UI success notice. Logout status receipt mới chưa capture; không gộp evidence Android 001 thành `logout_intent` proof. Hai-session, offline/restart, push-late và socket close còn thiếu; AT-WF-002-01 BLOCKED (partial evidence), -02 BLOCKED, -03 NOT_RUN |
+| FEAT-TN-001 Web login outage guard (supporting fix during TN-002) | `dev@af7153c` + dirty Web auth source/tests; Gemini 4 Argon medium via `agy` updated loading and phase-specific outage copy | SOURCE_VERIFIED; live readiness PASS; credential E2E NOT_RUN | Auth coordinator requires unauthenticated `GET /api/v1/me` → 401 JSON before intent or credential POST; outage stays on login with `SERVICE_UNAVAILABLE`, no marker/POST; post-probe failure retains UNKNOWN/no replay. Generation check drops stale probe success/error after invalidate. RED 38/39; late-error regression RED 39/40 with catch guard removed → GREEN `npm.cmd run test:auth` 40/40; `npm.cmd exec -- tsc --noEmit` PASS; `npm.cmd run check:auth-api` PASS. Chrome `/login` form visible; no credential POST submitted. Senior Tester recheck found no critical gap. Does not advance TN-002 acceptance. |
 
 FEAT-TN-001 direct DB attempt 2026-10-24: `python -B ops/database/verify_repositories.py` was refused by `EMPTY_GUARD` because canonical DB has application rows; it stopped before writing fixtures. No reset/deletion was performed and this run is not a DB PASS. See [readiness report](../test-reports/FEAT-TN-001-readiness-2026-10-24.md).
 
@@ -456,3 +457,40 @@ task/dependency/rollback, evidence và hướng dẫn Tester. Browser/Android/DB
 đánh `(x)` và không có nghiệm thu toàn002. Docs và report bị `.gitignore` hiện
 hành bỏ qua; vẫn nằm trong working directory, cần đưa vào quy trình bàn giao
 tài liệu của dự án khi review/commit, không tự sửa ignore hoặc stage file.
+
+### FEAT-TN-002 Web runtime tiếp nối — 16/11/2026
+
+Vite proxy `/api/v1` cần Auth API ở `127.0.0.1:3000`; lần tái hiện lỗi trước đó
+chỉ có Web server. Sau khi auth-lab được khởi chạy, Chrome thật xác nhận login,
+`/me`, `/workspaces` và chọn workspace đều trả HTTP200, Admin summary hiển thị;
+account fixture không workspace vào đúng empty state. Logout trả UI về form
+login với success notice. Capture mới không có HTTP receipt của logout; status
+204 được giữ là evidence từ report 15/11, không ghi thành kết quả mới.
+
+Kiểm tra mới chạy: `node --experimental-transform-types --test
+web/tests/auth.test.mjs web/tests/password_policy.test.mjs` → 37/37 PASS;
+`git diff --check` → exit0 (cảnh báo line ending trên các file source dirty).
+Login retry sau nhiều thao tác test gặp 429/Retry-After 581s, do đó không gửi
+thêm mutation login. Auth lab vẫn đang chạy ở session terminal để tiếp tục kiểm
+thử; fixture phải được cleanup qua launcher khi kết thúc lượt E2E.
+
+Senior Tester subagent GPT-6-luna max verdict: Web scope `PARTIAL`, keep
+`VERIFY_IN_PROGRESS`. Test suite 37/37 PASS; login/bootstrap/select là setup
+evidence. Logout success UI được quan sát, nhưng status HTTP mới chưa capture;
+historical 204 không chứng minh session isolation hoặc repeat logout. AT-WF-002-01
+chỉ partial vì chưa có post-logout `401`/socket-close evidence; AT-WF-002-02/03,
+two-session, App offline/restart/outbox và browser recovery còn NOT_RUN.
+
+### FEAT-TN-002 auth readiness continuation — 16/11/2026
+
+Login root cause đã xác định là Auth API chưa chạy ở `127.0.0.1:3000` trong khi Vite còn hoạt động. Để ngăn test nhầm trạng thái này, Web có `npm run check:auth-api` dùng unauthenticated `GET /api/v1/me`, yêu cầu `401 application/json` trước khi tester nhập fixture credential. README chỉ rõ hai dịch vụ và lệnh preflight.
+
+Evidence: `npm.cmd run check:auth-api` PASS trên runtime hiện có; Playwright 1.61.0/Chrome xác nhận `/login` 200, `/me` 401 JSON, và mock proxy `500 text/plain` hiển thị service-unavailable/unknown thay vì credential error. Live unauthenticated logout trả `204` body 0; đây không phải bằng chứng revoke phiên đăng nhập. Web tests 37/37 PASS. Feature vẫn `VERIFY_IN_PROGRESS`; không gửi login bổ sung do limiter của account fixture đã trả 429.
+
+### FEAT-TN-002 checkpoint — 16/11/2026
+
+Commit `af7153c` (auth API readiness guard) đã được push lên `origin/dev`. Existing uncommitted App/Web UI source vẫn giữ nguyên. Rà soát L5 cho thấy outbox fail-closed tới server terminal 204/401 nhưng chưa có trusted monotonic deadline qua process/device restart; giữ `BLOCKED_ACCEPTANCE`, không thêm expiry dựa trên wall clock. Không chạy Flutter command vì `.dart_tool`/`.gradle`/build artifacts bị cấm.
+
+### FEAT-TN-002 L3/readiness recheck — 16/11/2026
+
+Rechecked current source: Axum has no `ws` feature and no WebSocket upgrade/socket registry/close-intent consumer callsite exists; only the close-outbox application kernel and repository probe are present. Therefore DB intent still cannot prove a real socket close and L3 remains `BLOCKED_DEPENDENCY`. The current readiness gate still passes (`/me` 401 JSON); no login POST was sent. Feature remains `VERIFY_IN_PROGRESS`.

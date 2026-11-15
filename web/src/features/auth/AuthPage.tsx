@@ -16,7 +16,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   STORAGE_ERROR: 'Không thể lưu trạng thái phiên. Hãy cho phép storage và thử lại.',
   PROTOCOL_ERROR: 'Phản hồi chưa hợp lệ. Chưa thể xác nhận phiên đăng nhập.',
   CSRF_INVALID: 'Thông tin bảo vệ phiên đã thay đổi. Vui lòng đối soát lại phiên.',
-  LOGOUT_PENDING: 'Đang chờ xác nhận đăng xuất. Hãy đối soát trước khi đăng nhập mới.',
+  LOGOUT_PENDING: 'Đang chờ xác nhận đăng xuất. Hãy đối soát và hoàn tất đăng xuất trước khi đăng nhập mới.',
   PASSWORD_CHANGED: 'Đã đổi mật khẩu và thu hồi các phiên. Hãy đăng nhập bằng mật khẩu mới.',
   LOGOUT_TERMINAL: 'Phiên hiện tại không còn hiệu lực. Bạn có thể đăng nhập lại.',
   VALIDATION_ERROR: 'Dữ liệu chưa hợp lệ. Kiểm tra email và mật khẩu.',
@@ -24,6 +24,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   RESOURCE_NOT_FOUND: 'Workspace không còn khả dụng hoặc bạn không còn quyền truy cập.',
   CURSOR_INVALID: 'Danh sách đã thay đổi. Vui lòng tải lại từ đầu.',
 };
+
+// Thông báo chỉ hiển thị khi luồng signOut trong phiên trình duyệt chuyển từ logoutPending về login thành công.
+const LOGOUT_SUCCESS_MESSAGE = 'Đã đăng xuất khỏi phiên hiện tại. Bạn có thể đăng nhập lại.';
 
 const EMPTY_FIELD_ERRORS: Record<string, string> = {};
 
@@ -71,6 +74,8 @@ export function AuthPage() {
   const [offline, setOffline] = useState(!navigator.onLine);
   const [now, setNow] = useState(Date.now());
   const [dark, setDark] = useState(getInitialDark);
+  const [logoutSuccess, setLogoutSuccess] = useState(false);
+  const wasLogoutPendingRef = useRef(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const coordinatorRef = useRef<AuthCoordinator | null>(null);
@@ -83,9 +88,16 @@ export function AuthPage() {
   // Lỗi field của lần submit hiện tại thay lỗi credential cũ; vẫn giữ rate/storage/recovery để không che hướng xử lý.
   const outdatedCredentialError = formErrors.length > 0
     && (state.error === 'AUTH_INVALID' || state.error === 'VALIDATION_ERROR');
-  const message = state.error && !outdatedCredentialError
-    ? ERROR_MESSAGES[state.error] ?? 'Không thể hoàn tất thao tác. Vui lòng đối soát lại phiên.' : '';
-  const isSuccessNotice = state.error === 'PASSWORD_CHANGED' || state.error === 'LOGOUT_TERMINAL';
+  // Khi readiness probe thất bại ở màn login trước lúc gửi credential, cho phép kiểm tra kết nối và thử lại trực tiếp mà không yêu cầu đối soát phiên.
+  const serverMessage = state.error && !outdatedCredentialError
+    ? (state.error === 'SERVICE_UNAVAILABLE' && state.phase === 'login'
+      ? 'Dịch vụ xác thực chưa sẵn sàng. Hãy kiểm tra kết nối và thử lại.'
+      : ERROR_MESSAGES[state.error] ?? 'Không thể hoàn tất thao tác. Vui lòng đối soát lại phiên.') : '';
+  const hasConfirmedLogoutNotice = !serverMessage && logoutSuccess && state.phase === 'login' && formErrors.length === 0;
+  const message = serverMessage || (hasConfirmedLogoutNotice ? LOGOUT_SUCCESS_MESSAGE : '');
+  const isSuccessNotice = state.error === 'PASSWORD_CHANGED'
+    || state.error === 'LOGOUT_TERMINAL'
+    || hasConfirmedLogoutNotice;
 
   /**
    * Bỏ dữ liệu và lỗi của form cũ khi coordinator chuyển phase để logout/recovery không mang
@@ -100,6 +112,31 @@ export function AuthPage() {
     setConfirmation('');
     setShowPassword(false);
   }, [state.phase]);
+
+  /**
+   * Theo dõi chuyển tiếp thực tế từ logoutPending sang login để xóa email của phiên vừa thoát
+   * và chỉ công bố thông báo đăng xuất thành công khi coordinator đã kết thúc đăng xuất an toàn.
+   * Side effects
+   * Xóa email khi hoàn tất đăng xuất về màn login; bật hoặc tắt cờ thông báo đăng xuất thành công.
+   */
+  useEffect(() => {
+    if (state.logoutPending) {
+      wasLogoutPendingRef.current = true;
+      setLogoutSuccess(false);
+      return;
+    }
+    if (wasLogoutPendingRef.current) {
+      wasLogoutPendingRef.current = false;
+      if (state.phase === 'login' && !state.busy && (!state.error || state.error === 'LOGOUT_TERMINAL')) {
+        setEmail('');
+        setLogoutSuccess(!state.error);
+        return;
+      }
+    }
+    if (state.phase !== 'login' || state.busy || state.error) {
+      setLogoutSuccess(false);
+    }
+  }, [state.phase, state.busy, state.logoutPending, state.error]);
 
   /** Đồng bộ theme lúc mở trực tiếp /login; token gốc áp cho cả native form control sáng/tối. */
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
@@ -161,6 +198,7 @@ export function AuthPage() {
    */
   async function handleLogin(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    setLogoutSuccess(false);
     const errors: Record<string, string> = {};
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = 'Nhập địa chỉ email hợp lệ.';
     const passwordError = validatePassword(password, 'login');
@@ -206,8 +244,12 @@ export function AuthPage() {
   }
 
   const title = {
-    login: 'Đăng nhập', loading: 'Đang xác minh phiên', limited: 'Đổi mật khẩu để tiếp tục',
-    picker: 'Chọn workspace', selected: state.selected?.name ?? 'Workspace', recovery: 'Xác nhận trạng thái phiên',
+    login: 'Đăng nhập',
+    loading: state.logoutPending ? 'Đang đăng xuất' : 'Đang xác minh phiên',
+    limited: 'Đổi mật khẩu để tiếp tục',
+    picker: 'Chọn workspace',
+    selected: state.selected?.name ?? 'Workspace',
+    recovery: state.logoutPending ? 'Hoàn tất đăng xuất' : 'Xác nhận trạng thái phiên',
   }[state.phase];
   const stateIcon = { login: 'lock', loading: 'clock', limited: 'key', picker: 'grid', selected: 'check', recovery: 'shield' }[state.phase];
 
@@ -246,7 +288,7 @@ export function AuthPage() {
               </div>
             </div>
           )}
-          {state.phase === 'loading' && <div className="auth-loading"><div className="auth-skeleton" aria-hidden="true"><span /><span /><span /></div><p className="auth-progress" role="status"><span className="auth-spinner" aria-hidden="true" />Đang kiểm tra phiên và quyền truy cập…</p></div>}
+          {state.phase === 'loading' && <div className="auth-loading"><div className="auth-skeleton" aria-hidden="true"><span /><span /><span /></div><p className="auth-progress" role="status"><span className="auth-spinner" aria-hidden="true" />{state.logoutPending ? 'Đang thu hồi phiên và khóa dữ liệu trên trình duyệt…' : 'Đang kết nối dịch vụ xác thực và xác minh phiên…'}</p></div>}
           {state.phase === 'login' && (
             <form onSubmit={handleLogin} noValidate className="auth-form" aria-busy={state.busy}>
               <label htmlFor="email">Email</label>
@@ -340,8 +382,8 @@ export function AuthPage() {
             }>Chuyển workspace</button></div>}
           {state.phase === 'recovery' && (
             <div className="auth-recovery">
-              <p>Chưa xác nhận trạng thái phiên. Nội dung workspace đang được khóa.</p>
-              {state.candidate ? <><p>{state.candidate.kind === 'full' ? `Phiên hiện tại: ${state.candidate.me.email}` : 'Phiên hiện tại yêu cầu đổi mật khẩu.'}</p><button className="auth-primary" type="button" disabled={state.busy || offline}
+              <p>{state.logoutPending ? 'Chưa xác nhận kết quả đăng xuất với máy chủ. Nội dung workspace đang được khóa trên trình duyệt.' : 'Chưa xác nhận trạng thái phiên. Nội dung workspace đang được khóa.'}</p>
+              {state.candidate && !state.logoutPending ? <><p>{state.candidate.kind === 'full' ? `Phiên hiện tại: ${state.candidate.me.email}` : 'Phiên hiện tại yêu cầu đổi mật khẩu.'}</p><button className="auth-primary" type="button" disabled={state.busy || offline}
                 onClick={
                   /** Bắt buộc xác nhận chủ động sau discovery, không tự nhận account từ cookie. */
                   () => void coordinator.acceptCandidate()
@@ -349,7 +391,7 @@ export function AuthPage() {
                 onClick={
                   /** GET discovery chỉ đưa ra ứng viên hoặc đối soát logoutPending. */
                   () => void coordinator.discover()
-                }>{state.busy ? 'Đang đối soát…' : state.logoutPending ? 'Đối soát và tiếp tục đăng xuất' : 'Đối soát phiên hiện tại'}</button>}
+                }>{state.busy ? (state.logoutPending ? 'Đang đối soát đăng xuất…' : 'Đang đối soát…') : state.logoutPending ? 'Đối soát và tiếp tục đăng xuất' : 'Đối soát phiên hiện tại'}</button>}
               {!state.logoutPending && <button className="auth-secondary" type="button" disabled={state.busy}
                 onClick={
                   /** Người dùng quyết định bỏ intent login UNKNOWN để gửi lần đăng nhập mới. */
@@ -361,8 +403,8 @@ export function AuthPage() {
             onClick={
               /** Logout luôn qua coordinator để khóa cache và giữ marker khi kết quả chưa rõ. */
               () => void coordinator.signOut()
-            }>Đăng xuất</button>}
-          {state.busy && state.phase !== 'loading' && <p className="auth-progress" role="status"><span className="auth-spinner" aria-hidden="true" />Đang xử lý…</p>}
+            }>{state.busy && state.logoutPending ? 'Đang đăng xuất…' : 'Đăng xuất'}</button>}
+          {state.busy && state.phase !== 'loading' && <p className="auth-progress" role="status"><span className="auth-spinner" aria-hidden="true" />{state.logoutPending ? 'Đang xử lý đăng xuất…' : 'Đang xử lý…'}</p>}
         </div>
         {/* Chỉ giới thiệu tại form login; picker/recovery/selected dành toàn bộ bố cục cho tác vụ và thông báo. */}
         {state.phase === 'login' && <aside className="auth-showcase" aria-label="Giới thiệu Nexa IoT">

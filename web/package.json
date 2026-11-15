@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test:auth": "node --experimental-transform-types --test tests/auth.test.mjs tests/password_policy.test.mjs",
+    "check:auth-api": "node scripts/check-auth-api-readiness.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },

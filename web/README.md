@@ -24,6 +24,24 @@ execution policy, outside-sandbox canonical provider176assertions/163distinct
 and cleanup readback0 pass. That verify run exited and cleaned its fixture;
 there is no interactive backend from that run. CUA browser/native hosts are
 currently unavailable for further browser execution.
+
+### FEAT-TN-002 login E2E readiness
+
+Before entering any fixture credentials, start the approved Auth API fixture
+workflow from the repository root and keep its terminal open:
+
+```powershell
+python -X utf8 -B ops/auth/run_local.py --port 3000
+```
+
+The fixture launcher may build `auth-lab` into `backend/target`; run it only
+where the applicable build artifact policy permits that write, and use only the
+synthetic fixture account/password it provides. Then start Vite from `web/` with
+`npm.cmd run dev`; in another `web/` terminal, run `npm.cmd run check:auth-api`.
+The check sends only an unauthenticated `GET /api/v1/me` through the same-origin
+proxy and passes only on `401 application/json`. If it fails, do not submit login:
+the auth dependency is not ready, so a password attempt cannot diagnose that
+startup failure. Open `http://localhost:5173/login` only after the check passes.
 Android main now wires the real API/store/coordinator and passes128root widget/
 unit tests. Independent test design/review passes; runtime execution is by root.
 Independent runtime and native HTTPS E2E remain pending.

@@ -39,7 +39,8 @@ where the applicable build artifact policy permits that write, and use only the
 synthetic fixture account/password it provides. Then start Vite from `web/` with
 `npm.cmd run dev`; in another `web/` terminal, run `npm.cmd run check:auth-api`.
 The check sends only an unauthenticated `GET /api/v1/me` through the same-origin
-proxy and passes only on `401 application/json`. If it fails, do not submit login:
+proxy and passes only on `401 application/json` with a valid `SESSION_EXPIRED` or
+`SESSION_REVOKED` error envelope. If it fails, do not submit login:
 the auth dependency is not ready, so a password attempt cannot diagnose that
 startup failure. Open `http://localhost:5173/login` only after the check passes.
 The Web coordinator also repeats this no-cookie probe on every login submit,

@@ -16,10 +16,25 @@ function response(body, status = 200, headers = metadata) {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers });
 }
 
+/** Tạo ErrorEnvelope 401 hợp lệ để kiểm readiness theo contract Auth API.
+ * Output: response synthetic SESSION_EXPIRED, không chạm network hoặc credential.
+ */
+function readinessResponse() {
+  return new Response(JSON.stringify({ error: {
+    code: 'SESSION_EXPIRED',
+    message: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.',
+    details: {},
+    correlationId: 'corr_auth_readiness',
+  } }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 /** Cô lập storage, readiness probe và API responses để kiểm state machine không cần provider thật.
  * Input
  * Param: replies — danh sách phản hồi synthetic theo thứ tự của các request có credential hoặc bootstrap.
- * Param: readinessReply — phản hồi unauthenticated `/me` tách riêng; mặc định mô phỏng HTTP 401 JSON.
+ * Param: readinessReply — response/promise/lỗi synthetic của `/me`; response gốc được clone cho từng probe.
  * Output: coordinator cùng snapshot, request logs đã lọc metadata và storage memory của test.
  * Errors: assertion thất bại nếu request nghiệp vụ không có response đã khai trong kịch bản.
  * Side effects: thay thế các browser globals trong phạm vi tiến trình test; không gửi request ra ngoài.
@@ -29,10 +44,6 @@ function setup(replies, readinessReply) {
   const calls = [];
   const readinessCalls = [];
   const readinessStarted = deferred();
-  const readyReply = readinessReply ?? new Response('', {
-    status: 401,
-    headers: { 'Content-Type': 'application/json' },
-  });
   let state;
   let lockTail = Promise.resolve();
   globalThis.window = { setTimeout, clearTimeout };
@@ -60,8 +71,10 @@ function setup(replies, readinessReply) {
     if (path === '/api/v1/me' && init.credentials === 'omit') {
       readinessCalls.push({ path, method: init.method, credentials: init.credentials, cache: init.cache });
       readinessStarted.resolve();
-      if (readyReply instanceof Error) throw readyReply;
-      return readyReply;
+      if (readinessReply instanceof Error) throw readinessReply;
+      // Response có stream một lần; clone từ fixture gốc để mỗi lần login nhận body độc lập.
+      if (readinessReply instanceof Response) return readinessReply.clone();
+      return readinessReply ?? readinessResponse();
     }
     calls.push({ path, init });
     const reply = replies.shift();
@@ -563,6 +576,68 @@ test('auth API outage is detected before the login mutation is created',
   },
 );
 
+test('readiness rejects an unrelated 401 JSON response before login',
+  /** 401 chỉ xác nhận đúng Auth API khi body khớp ErrorEnvelope và mã phiên hết hạn. */
+  async () => {
+    const harness = setup([], new Response(JSON.stringify({ error: {
+      code: 'AUTH_INVALID', message: 'unrelated response', details: {}, correlationId: 'corr_wrong_api',
+    } }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    await harness.coordinator.restore();
+    await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+    assert.equal(harness.getState().phase, 'login');
+    assert.equal(harness.getState().error, 'SERVICE_UNAVAILABLE');
+    assert.equal(harness.storage.size, 0);
+    assert.equal(harness.calls.length, 0);
+  },
+);
+
+test('readiness rejects an incomplete 401 ErrorEnvelope before login',
+  /** Thiếu field bắt buộc trong ErrorEnvelope không được xem là API đã sẵn sàng. */
+  async () => {
+    const harness = setup([], new Response(JSON.stringify({ error: { code: 'SESSION_EXPIRED' } }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    await harness.coordinator.restore();
+    await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+    assert.equal(harness.getState().phase, 'login');
+    assert.equal(harness.getState().error, 'SERVICE_UNAVAILABLE');
+    assert.equal(harness.storage.size, 0);
+    assert.equal(harness.calls.length, 0);
+  },
+);
+
+test('readiness rejects details outside the ErrorEnvelope schema before login',
+  /** Details và từng FieldError là schema đóng; trường thừa không được thông qua readiness. */
+  async () => {
+    const invalidDetails = [
+      { unexpected: true },
+      { fieldErrors: [{ path: '/email', code: 'FORMAT', unexpected: true }] },
+      { fieldErrors: [{ path: '/email', code: 'NOT_ALLOWED' }] },
+    ];
+    for (const details of invalidDetails) {
+      const harness = setup([], new Response(JSON.stringify({ error: {
+        code: 'SESSION_EXPIRED',
+        message: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.',
+        details,
+        correlationId: 'corr_invalid_details',
+      } }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      await harness.coordinator.restore();
+      await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+      assert.equal(harness.getState().phase, 'login');
+      assert.equal(harness.getState().error, 'SERVICE_UNAVAILABLE');
+      assert.equal(harness.storage.size, 0);
+      assert.equal(harness.calls.length, 0);
+    }
+  },
+);
+
 test('login invalidated during readiness check does not persist intent or send credentials',
   /** Invalidation khi probe đang chờ phải ngăn operation cũ tiếp tục sau khi response đến. */
   async () => {
@@ -572,10 +647,7 @@ test('login invalidated during readiness check does not persist intent or send c
     const pendingLogin = harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
     await harness.readinessStarted;
     harness.coordinator.invalidate();
-    readiness.resolve(new Response('', {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    readiness.resolve(readinessResponse());
     await pendingLogin;
     assert.equal(harness.calls.length, 0);
     assert.equal(harness.storage.size, 0);

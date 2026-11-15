@@ -43,6 +43,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// Mã FieldError lấy từ OpenAPI; allowlist ngăn proxy sai schema được coi là Auth API sẵn sàng.
+const READINESS_FIELD_ERROR_CODES = new Set<string>([
+  'REQUIRED', 'TYPE', 'FORMAT', 'LENGTH', 'ENUM', 'UNKNOWN_FIELD', 'MALFORMED_JSON',
+  'DUPLICATE_FIELD', 'BODY_TOO_LARGE', 'CONTENT_TYPE', 'SAME_AS_CURRENT',
+]);
+
+/** Xác thực object details theo schema đóng để readiness không chấp nhận body giả dạng.
+ * Input
+ * Param: value — `details` JSON chưa tin cậy trong error response của Auth API.
+ * Output: true chỉ khi các key và từng FieldError khớp cấu trúc OpenAPI.
+ */
+function isReadinessErrorDetails(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const detailKeys = Object.keys(value);
+  if (detailKeys.length === 0) return true;
+  if (detailKeys.length !== 1 || detailKeys[0] !== 'fieldErrors' || !Array.isArray(value.fieldErrors)) return false;
+  for (const fieldError of value.fieldErrors) {
+    if (!isRecord(fieldError) || Object.keys(fieldError).length !== 2
+      || typeof fieldError.path !== 'string' || typeof fieldError.code !== 'string'
+      || !READINESS_FIELD_ERROR_CODES.has(fieldError.code)) return false;
+  }
+  return true;
+}
+
 /** Xác minh UUID context/identity; UUID chỉ là định danh, không là quyền. */
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -64,9 +88,9 @@ function parseMetadata(response: Response): SessionMetadata {
 }
 
 /** Kiểm tra dependency trước khi tạo login intent để outage proxy không bị nhầm với credential bị từ chối.
- * Output: hoàn tất khi `/me` trả đúng HTTP 401 `application/json`; nếu không thì không cho caller tiếp tục.
- * Errors: ném `SERVICE_UNAVAILABLE` khi timeout, mất kết nối, redirect hoặc status/media type khác contract.
- * Side effects: chỉ gửi GET `/api/v1/me` với cookie bị bỏ qua; không đọc body hoặc thay đổi phiên.
+ * Output: hoàn tất khi `/me` trả HTTP 401 cùng ErrorEnvelope SESSION_EXPIRED/REVOKED hợp lệ.
+ * Errors: ném `SERVICE_UNAVAILABLE` khi timeout, mất kết nối, redirect hoặc status/body khác contract.
+ * Side effects: chỉ gửi GET `/api/v1/me` với cookie bị bỏ qua; chỉ đọc schema error, không lưu hay hiển thị body.
  */
 export async function assertAuthApiReady(): Promise<void> {
   const controller = new AbortController();
@@ -88,8 +112,22 @@ export async function assertAuthApiReady(): Promise<void> {
       .trim()
       .toLowerCase();
 
-    // Chỉ coi API sẵn sàng khi route xác thực trả đúng trạng thái unauthenticated; mọi proxy/fallback khác đều chặn POST.
+    // Status/media type phải đúng trước khi đọc body; mọi phản hồi proxy/fallback khác đều bị chặn.
     if (response.status !== 401 || contentType !== 'application/json') {
+      throw new AuthError('SERVICE_UNAVAILABLE', response.status);
+    }
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new AuthError('SERVICE_UNAVAILABLE', response.status);
+    }
+    const error = isRecord(body) && isRecord(body.error) ? body.error : undefined;
+    // Chỉ ErrorEnvelope SessionInvalid đầy đủ, kể cả schema details đóng, mới xác nhận đúng Auth API.
+    if (!error || typeof error.code !== 'string'
+      || !['SESSION_EXPIRED', 'SESSION_REVOKED'].includes(error.code)
+      || typeof error.message !== 'string' || !isReadinessErrorDetails(error.details)
+      || typeof error.correlationId !== 'string') {
       throw new AuthError('SERVICE_UNAVAILABLE', response.status);
     }
   } catch (error) {

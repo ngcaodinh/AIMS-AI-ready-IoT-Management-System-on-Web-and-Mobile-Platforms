@@ -60,7 +60,7 @@ function parseMetadata(response: Response): SessionMetadata {
   return { contextId, csrfToken };
 }
 
-/** Gửi một request có timeout hữu hạn; không tự replay mutation auth khi mất response. */
+/** Gửi request có timeout hữu hạn, giữ UNKNOWN khi mutation mất response và nhận diện 5xx không có JSON là dịch vụ gián đoạn. */
 async function request(path: string, init: RequestInit = {}): Promise<{ response: Response; body: unknown }> {
   const controller = new AbortController();
   // Đây là deadline UX, không thay thế timeout/transaction guard phía backend.
@@ -73,7 +73,16 @@ async function request(path: string, init: RequestInit = {}): Promise<{ response
       ...init, credentials: 'include', cache: 'no-store', signal: controller.signal,
     });
     if (response.status === 204) return { response, body: null };
-    const body: unknown = await response.json();
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      if (!response.ok && response.status >= 500) {
+        // Proxy có thể trả body rỗng hoặc HTML khi auth upstream dừng; caller vẫn giữ mutation ở UNKNOWN và báo dịch vụ gián đoạn.
+        return { response, body: { error: { code: 'SERVICE_UNAVAILABLE' } } };
+      }
+      throw error;
+    }
     return { response, body };
   } catch (error) {
     if (error instanceof AuthError) throw error;

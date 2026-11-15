@@ -508,6 +508,20 @@ test('malformed login200 remains unknown across restore without protected data o
   },
 );
 
+test('unreadable login 5xx is reported as service unavailable and remains unknown',
+  /** Proxy có thể trả 5xx rỗng khi auth API chưa sẵn sàng; không được gọi sai là lỗi contract hay xác nhận login thất bại. */
+  async () => {
+    const harness = setup([new Response('', { status: 500 })]);
+    await harness.coordinator.restore();
+    await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+    assert.equal(harness.getState().phase, 'recovery');
+    assert.equal(harness.getState().error, 'SERVICE_UNAVAILABLE');
+    assert.equal(harness.getState().profile, undefined);
+    assert.equal(JSON.parse(harness.storage.get('nexa-auth-intent')).phase, 'loginUnknown');
+    assert.equal(harness.calls.length, 1);
+  },
+);
+
 test('missing cookie confirmation401 allows only explicit discovery and safe GET acceptance',
   /** Cookie không đọc được bằng JS; me401 mô phỏng thiếu credential sau POST200 và recovery không replay POST. */
   async () => {

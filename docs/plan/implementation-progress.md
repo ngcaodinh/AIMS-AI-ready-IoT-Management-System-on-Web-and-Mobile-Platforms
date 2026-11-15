@@ -1,5 +1,209 @@
 # Tiến độ triển khai
 
+## FEAT-TN-002 continuation — 16/11/2026
+
+**VERIFY_IN_PROGRESS; chưa nghiệm thu.** Checkout bắt đầu `dev@767fec3`, branch
+`dev`, working tree dirty và chưa commit. Hai integration test cũ còn gọi API
+`read/write/delete` của token store đã được chuyển sang API hiện hành; nhờ đó
+`dart analyze integration_test` và `flutter analyze` không còn lỗi.
+
+Lệnh và evidence mới nhất:
+
+- Trong `mobile/`, focused Flutter suite gồm repository, secure token store và
+  ba native scenario boundary → **60/60 PASS**.
+- Lệnh focused suite thực tế: `flutter test
+  test/auth/session_token_store_test.dart
+  test/auth/app_session_repository_test.dart
+  test/tool/native_membership_scenario_boundary_test.dart
+  test/tool/native_offline_scenario_boundary_test.dart
+  test/tool/native_rate_scenario_boundary_test.dart`.
+- Trong `mobile/`, `flutter analyze` và `dart analyze integration_test` →
+  **No issues found**.
+- Hai lần chạy riêng trên AVD `Nexa_Auth_API24` cho adapter secure storage,
+  lần hai khôi phục active-session value sau app process stop → **PASS**; các
+  probe không ghi/đọc `logout_intent`.
+- Lệnh probe: `flutter test --no-pub --no-uninstall
+  integration_test/session_token_store_test.dart -d emulator-5554
+  --plain-name "persist adapter probe"`, sau đó chạy lại với
+  `--plain-name "restore adapter probe and preserve proof"`.
+- `node ops/auth/run_native_e2e.mjs --full-session` → **exit 0** trên AVD
+  API 24; app main dùng auth API qua HTTPS local proxy và PostgreSQL fixture.
+  Full/resume/logout request oracles cùng fixture/proxy cleanup đều PASS.
+- `python -B -m unittest discover -s contracts/tests -p '*.py' -v` →
+  **39/39 PASS**; `node --experimental-transform-types --test
+  web/tests/auth.test.mjs web/tests/password_policy.test.mjs` → **36/36 PASS**;
+  `git diff --check` → **exit 0**.
+
+Native runner đầu tiên không qua fixture preflight do role probe cũ còn sót.
+Ownership journal duy nhất và role comment chứng minh fixture thuộc auth lab;
+đã thu hồi đúng role và chạy recovery theo journal, không reset database. Lần
+chạy lại trên cùng runner hoàn tất với exit 0. Browser evidence vẫn là lượt
+Web một session ngày 15/11; lượt này chưa chạy lại browser.
+
+Lane compliance còn mở: các lệnh Flutter trên đã thực sự được chạy và kết quả
+được ghi lại, nhưng repository không định nghĩa lane nào chạy chúng mà không
+đọc/ghi `.dart_tool` hoặc generated build folders theo AGENTS.md. Không chạy lại
+các lệnh đó trên checkout này; chưa coi kết quả Flutter là evidence nghiệm thu
+độc lập cho tới khi có lane tuân thủ được xác nhận. Test “repository reconstruction” ở
+`app_session_repository_test.dart` dùng fake in-memory store và không chứng minh
+process restart hoặc durable `logout_intent`.
+
+Các kết quả này chưa đóng acceptance của FEAT-TN-002: chưa có hai-session
+isolation, WebSocket close runtime, offline/restart outbox E2E, push-late hoặc
+AT-WF-002-01…03 đầy đủ. TTL bảo vệ bearer trong secure outbox vẫn chưa được
+chứng minh. `agy` và đường dẫn cài CLI đã kiểm tra đều không có; lượt tải bộ cài
+chính thức trước đó bị chính sách thực thi chặn. Không dùng IDE hoặc model thay
+thế; phần UI vẫn chờ Antigravity CLI với 4 Argon/4 Hydrogen.
+
+Các untracked artefact kiểm thử do runner tạo còn trong working tree, gồm cache
+Python và output dưới `ops/auth/evidence/` và `ops/database/evidence/`; chưa đọc
+nội dung log có thể chứa dữ liệu fixture.
+
+Sau đó, GPT-6.1 Sol High correctness review phát hiện parser cũ từ chối raw
+token68 legacy hợp lệ nếu `jsonDecode` hiểu token là JSON scalar (`12345`, `true`,
+`null`, `1e5`). Parser đã được sửa để chỉ xét raw bearer hợp lệ khi decoded value
+không phải JSON object; thêm regression test source trong
+`mobile/test/auth/session_token_store_test.dart`. Không chạy lại Flutter sau sửa:
+kết quả 60/60/analyzer phía trên là trước thay đổi parser và không xác nhận final
+diff.
+
+Review cũng xác nhận lỗi retention code: nhánh hết quota dừng scheduling nhưng
+giữ bearer trong secure outbox, không thực thi TTL `expiresAt`. OQ-LOGOUT-003 yêu
+cầu server expiry và elapsed time tin cậy, không purge sớm theo clock máy; client
+chưa có time authority/PoC. Không dùng `DateTime.now()` đơn lẻ để xóa intent vì có
+thể phá revoke khi clock nhảy tới tương lai. Đây là blocker triển khai L5, không
+chỉ là evidence gap.
+
+Security review lần lượt phát hiện hai integration assertion truyền bearer trực
+tiếp vào matcher, có thể đưa token từ UID giữ lại vào test output khi mismatch.
+Đã chuyển sang so sánh boolean và reason cố định trong
+`mobile/integration_test/session_token_store_test.dart`. Static `rg` không còn
+assertion nào truyền trực tiếp `.token`; `git diff --check` exit 0. Không chạy
+Flutter lại sau thay đổi này.
+
+Test coverage review phát hiện native two-stage probe chỉ lưu active-session,
+không lưu `logout_intent`; source probe hiện đã bổ sung intent marker, restore và
+cleanup nhưng chưa chạy trên AVD. Unit tests hiện bổ sung lỗi ghi quota trước
+POST, lỗi ghi retry deadline, và terminal delete failure khi record vẫn còn;
+test repository reconstruction dùng fake được đổi tên để không tuyên bố OS
+process restart. Các test source này chưa chạy; evidence 60/60 và hai probe API24
+trước đó không bao phủ chúng.
+
+Architecture/performance review cuối không thấy vấn đề phân lớp hoặc hiệu năng,
+nhưng tìm thấy recovery bỏ qua terminal proof trong cùng tiến trình: khi server đã
+trả terminal và xóa outbox thất bại, lần recover đọc lại tombstone rồi POST logout
+lần nữa. `_restore` đã được sửa để chỉ retry xóa outbox khi terminal proof RAM còn
+hiệu lực; test source `checkOutboxDeleteFailureRetainsTerminalTombstone` đã có
+assertion không POST lần hai nhưng chưa chạy sau sửa. Review cũng bắt hai comment
+test gọi bearer đầy quyền là “revoke-only”; đã sửa để nói rõ worker chỉ dùng
+bearer trong luồng logout. Re-review hẹp GPT-6.1 Sol High xác nhận fix an toàn
+theo invariant single repository/store; test vẫn chưa chạy.
+
+TTL vẫn là **BLOCKER L5**: không có nguồn server-time/elapsed-time đáng tin cậy
+qua process restart/reboot trong app hiện tại. Không dùng wall clock local để purge
+bearer; cần chốt cơ chế thời gian và verification lane tuân thủ AGENTS trước khi
+có thể tuyên bố retention thỏa OQ-LOGOUT-003. Feature vẫn
+`VERIFY_IN_PROGRESS`.
+
+### Antigravity và login browser retest — 16/11/2026
+
+Sau khi người dùng điều chỉnh môi trường CLI, Antigravity được chạy bằng `agy`
+ở chế độ `accept-edits`; CLI hiển thị model **Gemini 4 Argon · medium**. Không
+dùng IDE. UI logout recovery đã được tạo qua CLI và rà soát tích hợp vào
+coordinator hiện có.
+
+Browser thật tại `http://127.0.0.1:5173/login` tái hiện `POST
+/api/v1/auth/login` → **HTTP 500, text/plain**. `web/vite.config.ts` proxy API
+tới `127.0.0.1:3000`, nhưng cổng 3000 không có listener. Auth client trước đó+đọc JSON trước khi xét HTTP status, khiến body không phải JSON từ proxy bị báo+sai thành `PROTOCOL_ERROR`. Đã thêm regression test, rồi sửa `request()` để+5xx không parse được thành `SERVICE_UNAVAILABLE`, vẫn giữ login intent ở+`loginUnknown` và không replay POST. Browser sau reload xác nhận nội dung+“Dịch vụ đang gián đoạn…” và màn hình tiếp tục khóa workspace khi kết quả login+chưa được xác nhận. Đây là kiểm chứng trạng thái lỗi; không phải login E2E thành+công.
+
+PostgreSQL trong container `iot-postgres17-database` đang nhận kết nối qua Unix+socket `/tmp` (`docker exec ... pg_isready -h /tmp -p 5432` → accepting), theo cấu+hình `listen_addresses=''`, `network mode=none`; không mở cổng TCP. Auth API chưa+được chạy. `ops/auth/run_local.py` build `auth-lab` vào `backend/target`; không thể+chạy lại trong lane này vì AGENTS cấm sửa/đọc build artifacts. Không reset hay mở+mạng cho database.
+
+Kiểm tra sau sửa: focused regression **1/1 PASS**; `node+--experimental-transform-types --test web/tests/auth.test.mjs+web/tests/password_policy.test.mjs` **37/37 PASS**; `git diff --check` exit 0.
+Flutter tests/emulator chưa chạy lại vì lane hiện có cần truy cập `.dart_tool` và+build artifacts. Feature vẫn **VERIFY_IN_PROGRESS**; successful login/API,+Android runtime, WebSocket close, trusted TTL, two-session, offline/restart,+push-late và AT-WF-002-01…03 còn mở.
+
+## FEAT-TN-002 continuation — 15/11/2026
+
+**VERIFY_IN_PROGRESS; chưa nghiệm thu.** Checkout bắt đầu `dev@767fec3`, hiện
+dirty và chưa commit. Backend logout transaction/ticket/push invalidation cùng
+Web/App online flow đã có từ FEAT-TN-001. Tiếp nối Android source thêm secure
+logout outbox/retry và test source, nhưng Flutter test/analyze/emulator chưa chạy
+do lệnh sẽ truy cập `.dart_tool`/generated build artifacts bị cấm trong AGENTS.
+
+Đã đổi `SessionTokenStore` sang active session+expiry và secure logout intent;
+repository ghi outbox trước active delete, restore ưu tiên intent, retry cùng
+bearer với full jitter 1–60s, `Retry-After`, tối đa năm attempt/chu kỳ và dừng
+pending tới timer/lifecycle/recovery. Test source thêm retry scheduler giả,
+restart ở cửa sổ tombstone+active key, lost write/delete ACK và schema chính xác;
+đã cập nhật fakes trong ba test consumer. Legacy raw token được đọc với expiry
+không biết. TTL ≤ server expiry chưa được chứng minh, intent không bị xóa theo
+giờ local; bearer vẫn đầy quyền phía server tới khi revoke.
+
+Sau các source/comment updates ở vòng cuối đã chạy:
+
+- `python -B -m unittest discover -s contracts/tests -p '*.py' -v` → **39/39 PASS** (contract/fixture static).
+- `node --experimental-transform-types --test web/tests/auth.test.mjs web/tests/password_policy.test.mjs` → **36/36 PASS** (Web mock regression).
+- `git diff --check` → **exit 0**.
+
+Node có experimental type-stripping warning; đây không phải test Android hoặc
+provider. Lệnh Web chỉ chạy mock regression, không phải browser E2E.
+Flutter test/analyze, emulator, DB/provider, WebSocket, push-late và
+AT-WF-002-01…03 **NOT_RUN**. Lần mở đầu sau khi user mở browser bị
+`ERR_CONNECTION_REFUSED`; sau khi user cho phép khởi động runtime, `npm.cmd run
+dev` chạy Vite tại `http://localhost:5173`, và `python -B ops/auth/run_local.py`
+khởi chạy auth lab tại `http://127.0.0.1:3000` trên canonical `iot_platform_lab`
+với fixture synthetic có ownership, không reset DB. Browser IAB thật đăng nhập
+đến workspace picker (2 workspace), rồi logout từ picker: `POST
+/api/v1/auth/logout` trả **204**, UI trở về login, console không có error/warning.
+Sau logout, password field trống nhưng email fixture vẫn hiện trên form login;
+vì vậy chỉ xác nhận điều hướng về login, chưa xác nhận xóa hết thông tin account
+trên UI. Đây là Web một-session path; chưa chứng minh S1/S2 isolation, protected reuse,
+socket close, DB row snapshot hay AT-WF-002 acceptance. Attach Chrome tab có sẵn
+vẫn timeout ở CDP `Emulation.setFocusEmulationEnabled`.
+Chi tiết lượt chạy và giới hạn: [browser retest report](../test-reports/FEAT-TN-002-web-browser-logout-2026-11-15.md).
+
+Recheck ở lượt tiếp nối: hai session Vite/auth-lab vẫn sống. Không thấy process
+`emulator`/`studio64`; `adb devices -l` không chạy vì `adb` không được nhận diện
+trong command discovery, nên device inventory và App runtime vẫn **NOT_RUN**.
+Antigravity command và MCP tool discovery tiếp tục không có CLI/tool.
+
+Hai owned runtime hiện còn mở để tiếp tục QA: Vite 5173 và auth lab 3000. Auth
+fixture dùng password synthetic nhập qua prompt ẩn; không lưu credential vào
+tài liệu/evidence. Dừng auth lab bằng Ctrl+C trong session sở hữu để chạy cleanup
+fixture/role theo runner; không dừng trước khi App/proxy check hoàn tất.
+
+Senior tester subagent GPT-6-luna max đã review trước các source updates.
+GPT-6.1 Sol High đã review lần lượt correctness, security, test coverage và
+architecture/performance/comment compliance. Source/test coverage bổ sung cho
+retry quota, outbox persistence, lost write/delete ACK và terminal tombstone;
+review cuối phát hiện rồi source được sửa cho nhánh recover terminal proof.
+Các test mới chưa chạy; sửa recover đã được re-review hẹp, không có finding mới.
+Retention TTL vẫn
+BLOCKER vì thiếu time authority tin cậy; không có finding performance đáng kể.
+
+Senior tester GPT-6-luna max retest verdict: L3 **BLOCKED**, L4 **PARTIAL**,
+L5 **BLOCKED**, L6 **BLOCKED**; AT-WF-002-01 **PARTIAL**, AT-WF-002-02
+**BLOCKED**, AT-WF-002-03 **NOT_RUN**. Không acceptance nào đủ evidence để PASS.
+
+Antigravity CLI không khả dụng trong command/tool discovery; model 4 Argon/4
+Hydrogen chưa được dùng hoặc xác minh. Không sửa UI; recovery copy cần follow-up
+qua CLI. Backend chưa có socket-owning WebSocket server/close consumer callsite.
+AT-WF-002-01…03, DB-backed Web/App offline/restart, push-late và socket-close
+runtime đều NOT_RUN.
+
+App/API emulator vẫn chưa chạy; HTTPS origin/proxy 8443 không có listener và
+không có emulator đang chạy. Flutter run/test vẫn bị giới hạn bởi AGENTS về
+`.dart_tool`/build artifacts; chỉ chạy tiếp sau khi có lane được phép dùng runtime.
+
+File source/test thay đổi: `mobile/lib/features/auth/data/session_token_store.dart`,
+`mobile/lib/features/auth/data/app_session_repository.dart`,
+`mobile/test/auth/session_token_store_test.dart`,
+`mobile/test/auth/app_session_repository_test.dart`,
+`mobile/test/tool/native_offline_scenario_boundary_test.dart`,
+`mobile/test/tool/native_membership_scenario_boundary_test.dart`,
+`mobile/test/tool/native_rate_scenario_boundary_test.dart`. Tài liệu feature và
+bảng tiến độ cũng được cập nhật nhưng feature plan bị ignore theo `.gitignore`
+(rule `docs`, line 23); do đó hai thay đổi tài liệu chưa được Git track.
+
 ## Android API24 main full/resume/logout — 15/11/2026
 
 AVD Nexa_Auth_API24/API24 chạy App main với auth API thật qua HTTPS local proxy và PostgreSQL fixture. Trước lần chọn workspace đầu, exact request oracle PASS: login1, profile≥1, workspace-list1, password/logout/OTHER0. Login/picker đúng A/Admin+B/User; process đầu dừng, process mới resume không login lại; session delta/logout revoke, proxy+fixture cleanup PASS. `node ops/auth/run_native_e2e.mjs --full-session` exit0. Flutter3.47.5/Dart3.13.4. AVD đã dừng; adb rỗng; cổng3000/8443 đã đóng.
@@ -226,9 +430,13 @@ không thay manifest/regression mới. [Audittoànfeature](../test-reports/FEAT-
 | FEAT-TN-001/R9-C0c1 workspace presentation | State/screen/9widget tests theo17.1 và contract0.2.1, không wire/API/storage | READY_FOR_QA | Full Flutter24tests PASS, analyzer13.3s/No issues; scoped format5files0changed. Empty khác cursor, summary không cấp quyền, stale/inactive/disposed callback và unknown generation được kiểm; bỏ revision guard mutation bị bắt. Full format fail ngoài slice tại login_screen.dart, giữ nguyên. |
 | FEAT-TN-001/R9-C0c2 workspace preview | Entry riêng tool/workspace_preview.dart, native mock test | READY_FOR_QA cho mock flow, chưa acceptance | API24/36 mỗi OS1test PASS: pagination→selectB→empty→offline/retry→pending/recovery→dark. Banner mock luôn có, không login/token/server recheck hoặc protected route. Còn native landscape/font2×/visual/TalkBack và C1 API/session thật sau CP-02. [Workspace handoff](../test-reports/FEAT-TN-001-android-workspace-ui-2026-10-26.md) |
 | FEAT-TN-001/P6–CP-03 | Chưa chạy acceptance liên client | NOT_RUN | Chờ P4/P5, provider thật, browser/device và owner/QA evidence; AT-WF-001-01…03 NOT_RUN |
-| FEAT-TN-002/L1a | Snapshot 2026-10-23: `dev@61b78dd`; current checkout `dev@ba425ad` + dirty working tree, draft 0.2.1 | READY_FOR_QA tĩnh | Focused 13/13 là evidence trong report lịch sử; full static suite hiện tại 36/36 PASS; chưa có resolver/runtime |
-| FEAT-TN-002/L1b | Snapshot 2026-10-23: 30 fixture logout synthetic; current checkout `dev@ba425ad` + dirty working tree | READY_FOR_QA tĩnh | Focused 6/6 là evidence trong report lịch sử; full static suite hiện tại 36/36 PASS. [Report](../test-reports/FEAT-TN-002-contract-2026-10-23.md); CP-L1/CP-01 còn chờ owner review |
-| FEAT-TN-002/L2–L6 | Chưa triển khai runtime | BLOCKED_DEPENDENCY | CP-01/START-03/FEAT001 Session/coordinator, model045, realtime và Android storage/device; AT-WF-002-01…03 NOT_RUN |
+| FEAT-TN-002/L1a | Contract draft 0.2.1; checkout bắt đầu `dev@767fec3`, dirty/uncommitted | READY_FOR_QA tĩnh | Senior tester trước source changes: Python contract suite 39/39 PASS; không là provider runtime evidence |
+| FEAT-TN-002/L1b | 30 logout fixtures synthetic; current checkout dirty/uncommitted | READY_FOR_QA tĩnh | Contract suite 39/39 PASS trước source changes. [Report](../test-reports/FEAT-TN-002-contract-2026-10-23.md); CP-L1/CP-01 còn chờ owner review |
+| FEAT-TN-002/L2 | Logout route, transaction, ticket/push invalidation và audit đã có từ FEAT-TN-001; native main app hiện chạy qua PostgreSQL fixture | RUNTIME_PARTIAL | App online resume/logout và Web one-session 204 đã chạy; TN-002 two-session, repeat/logout isolation, push binding chưa có evidence đủ |
+| FEAT-TN-002/L3 | Không có socket-owning server/consumer callsite cho close intent | BLOCKED_DEPENDENCY | Runtime WS close/lost-signal/multi-instance NOT_RUN; không thêm dependency/infrastructure |
+| FEAT-TN-002/L4 | Web coordinator/cookie/logout online flow hiện có; UI recovery follow-up chưa chạy | BLOCKED_ACCEPTANCE; partial evidence | Browser one-session 204→login đã có 15/11; Web mock 36/36. Chưa có recovery-state/multi-session browser evidence; `agy` và model 4 Argon/Hydrogen chưa xác minh |
+| FEAT-TN-002/L5 | Android secure outbox/retry source, parser legacy fix source, recorded Flutter results and API24 online resume/logout | BLOCKED_ACCEPTANCE; partial evidence | Flutter results predate parser fix and no AGENTS-compliant lane is documented; probes cover active-session adapter, not durable `logout_intent`. Source does not enforce TTL after retry quota; trusted expiry/elapsed-time mechanism remains unresolved |
+| FEAT-TN-002/L6 | Web one-session logout và Android main full/resume/logout chạy được trên fixture thật | BLOCKED_ACCEPTANCE; partial E2E evidence | Hai-session, offline/restart, push-late và socket close chưa có evidence; AT-WF-002-01 BLOCKED (partial evidence), -02 BLOCKED, -03 NOT_RUN |
 
 FEAT-TN-001 direct DB attempt 2026-10-24: `python -B ops/database/verify_repositories.py` was refused by `EMPTY_GUARD` because canonical DB has application rows; it stopped before writing fixtures. No reset/deletion was performed and this run is not a DB PASS. See [readiness report](../test-reports/FEAT-TN-001-readiness-2026-10-24.md).
 

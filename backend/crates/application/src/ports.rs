@@ -9,6 +9,7 @@ use iot_domain::{
     },
     workspace::{WorkspaceDraft, WorkspaceSnapshot, WorkspaceSummary},
 };
+use std::collections::HashSet;
 use std::future::Future;
 use uuid::Uuid;
 
@@ -180,20 +181,62 @@ pub trait AuditReadTransaction: WorkspaceTransaction {
     ) -> impl Future<Output = Result<Vec<iot_domain::audit::AuditEntry>, ApplicationError>> + Send;
 }
 
-/// Ticket consume cùng unit of work; application không được mở socket trước khi commit winner.
+/// Ticket issuance nằm cùng workspace authorization/audit unit of work.
 pub trait RealtimeTransaction: WorkspaceTransaction {
-    /// Persist ticket digest/binding đã tạo từ current session và workspace admission.
+    /**
+     * Lưu digest và binding của ticket trong cùng unit of work để capability chỉ được trả sau commit.
+     * # Input
+     * Param: ticket — digest không thể đảo ngược cùng session/workspace/authz version đã được application admit.
+     * # Output
+     * Hoàn tất khi ticket được ghi trong transaction hiện hành.
+     * # Errors
+     * Lỗi constraint hoặc storage được adapter chuẩn hóa; transaction không được commit ticket dở dang.
+     */
     fn insert_ticket(
         &mut self,
         ticket: &iot_domain::realtime::NewWebSocketTicket,
     ) -> impl Future<Output = Result<(), ApplicationError>> + Send;
-    /// CAS consume một lần, recheck Session/User/Workspace/Membership/grant/version dưới cùng fence.
-    fn consume_ticket(
-        &mut self,
+}
+
+/// Read port theo dõi session đang mở socket; kết quả chỉ dùng để đóng local connection đã cũ.
+pub trait RealtimeSessionStore: Clone + Send + Sync {
+    /**
+     * Consume ticket nguyên tử và chỉ trả khi kết quả commit hoặc rollback đã xác định.
+     * Input
+     * Param: digest — SHA-256 digest của capability, không chứa ticket thô.
+     * Output: binding đã commit nếu ticket còn hiệu lực; None nếu ticket không tồn tại hoặc đã dùng.
+     * Errors: lỗi storage/commit đã chuẩn hóa; adapter phải hoàn tất hoặc loại checkout trước khi trả.
+     */
+    fn consume_realtime_ticket(
+        &self,
         digest: [u8; 32],
     ) -> impl Future<
         Output = Result<Option<iot_domain::realtime::RealtimeBinding>, ApplicationError>,
     > + Send;
+
+    /**
+     * Trả các session trong danh sách còn active theo clock DB, không cấp quyền nghiệp vụ.
+     * Input
+     * Param: session_ids — tập ID lấy từ registry cục bộ, không đến từ request hoặc client.
+     * Output: subset chưa revoke, chưa hết hạn và account còn active.
+     * Errors: lỗi storage đã được adapter lọc; caller đóng local sockets fail-closed.
+     */
+    fn active_realtime_sessions(
+        &self,
+        session_ids: Vec<Uuid>,
+    ) -> impl Future<Output = Result<HashSet<Uuid>, ApplicationError>> + Send;
+
+    /**
+     * Kiểm tra một session trước ACK và chỉ trả sau khi adapter hoàn tất checkout riêng.
+     * Input
+     * Param: session_id — session lấy từ binding vừa consume, không đến từ frame hoặc query client.
+     * Output: true nếu session/account còn active theo clock DB; false nếu đã revoke/hết hạn.
+     * Errors: lỗi storage đã chuẩn hóa; adapter phải trả hoặc loại checkout trước khi caller nhả quota.
+     */
+    fn active_realtime_session_for_handshake(
+        &self,
+        session_id: Uuid,
+    ) -> impl Future<Output = Result<bool, ApplicationError>> + Send;
 }
 
 /// Kết quả lưu trữ receipt; application quyết định mismatch/pending/replay và current authorization.

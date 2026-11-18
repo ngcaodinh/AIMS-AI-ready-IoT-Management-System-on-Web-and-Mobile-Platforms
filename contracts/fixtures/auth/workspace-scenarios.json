@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.2.1",
+  "contractVersion": "0.2.2",
   "fixtureKind": "synthetic-contract-example",
   "note": "Các scenario mô tả contract; không là bản ghi người dùng hoặc provider evidence.",
   "scenarios": [

@@ -111,6 +111,8 @@ class _AppAuthApplicationState extends State<AppAuthApplication>
     final epoch = _coordinator.generation;
     final page = _coordinator.page;
     final state = _coordinator.session;
+    // Phân nhánh recovery của thao tác đăng xuất từ trạng thái pending của coordinator để giữ ngữ cảnh qua recover/resume và outbox khôi phục.
+    final logoutRequested = _coordinator.logoutPending;
     final canReturn =
         page == AppAuthPage.summary ||
         (page == AppAuthPage.password && state.phase == AppSessionPhase.full);
@@ -232,20 +234,36 @@ class _AppAuthApplicationState extends State<AppAuthApplication>
         AppAuthPage.recovery => AuthStatusScreen(
           key: const ValueKey('app-recovery'),
           title: state.phase == AppSessionPhase.storageFailure
-              ? 'Chưa thể bảo vệ phiên'
+              ? (logoutRequested
+                    ? 'Chưa thể hoàn tất đăng xuất'
+                    : 'Chưa thể bảo vệ phiên')
               : state.phase == AppSessionPhase.offline
-              ? 'Không có kết nối'
-              : 'Cần xác minh trạng thái',
+              ? (logoutRequested
+                    ? 'Không có kết nối khi đăng xuất'
+                    : 'Không có kết nối')
+              : (logoutRequested
+                    ? 'Cần xác minh đăng xuất'
+                    : 'Cần xác minh trạng thái'),
           description: state.phase == AppSessionPhase.storageFailure
-              ? 'Chưa thể đọc hoặc dọn phiên an toàn trên thiết bị. Kiểm tra trạng thái trước khi tiếp tục.'
+              ? (logoutRequested
+                    ? 'Chưa xác nhận kết quả đăng xuất vì chưa thể ghi hoặc dọn phiên an toàn trên thiết bị. Kiểm tra đăng xuất trước khi tiếp tục.'
+                    : 'Chưa thể đọc hoặc dọn phiên an toàn trên thiết bị. Kiểm tra trạng thái trước khi tiếp tục.')
               : state.phase == AppSessionPhase.offline
-              ? 'Kiểm tra kết nối rồi chủ động kiểm tra lại trạng thái phiên.'
-              : 'Chưa xác nhận kết quả yêu cầu. Kiểm tra trạng thái hoặc đăng xuất phiên hiện tại; yêu cầu không được tự gửi lại.',
+              ? (logoutRequested
+                    ? 'Chưa xác nhận kết quả đăng xuất do mất kết nối. Kiểm tra kết nối rồi chủ động kiểm tra lại trạng thái đăng xuất.'
+                    : 'Kiểm tra kết nối rồi chủ động kiểm tra lại trạng thái phiên.')
+              : (logoutRequested
+                    ? 'Chưa xác nhận kết quả đăng xuất. Kiểm tra đăng xuất hoặc thực hiện đăng xuất phiên hiện tại trước khi tiếp tục.'
+                    : 'Chưa xác nhận kết quả yêu cầu. Kiểm tra trạng thái hoặc đăng xuất phiên hiện tại trước khi tiếp tục.'),
           error: state.phase == AppSessionPhase.storageFailure,
           waiting: state.phase != AppSessionPhase.storageFailure,
           onToggleTheme: _toggleTheme,
           actions: [
-            _action('app-recover', 'Kiểm tra trạng thái', recover),
+            _action(
+              'app-recover',
+              logoutRequested ? 'Kiểm tra đăng xuất' : 'Kiểm tra trạng thái',
+              recover,
+            ),
             if (_coordinator.canLogout)
               _action('recovery-logout', 'Đăng xuất', logout),
           ],

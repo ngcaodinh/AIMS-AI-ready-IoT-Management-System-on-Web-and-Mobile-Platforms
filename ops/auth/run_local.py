@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from functools import partial
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -28,7 +29,13 @@ DATABASE = "iot_platform_lab"
 
 # Chỉ cấp quyền IAM/bootstrap cần cho lab, không cấp DDL, worker retention hoặc feature thiết bị/template.
 def provision(password, run_id):
-    """Input: password CSPRNG và run_id do launcher sinh; Side effects: role SCRAM tạm hết hạn sau1giờ."""
+    """Cấp role SCRAM tạm một giờ với quyền tối thiểu để fixture chạy đủ Auth HTTP và consume ticket.
+
+    Input
+    Param: password — credential CSPRNG của role tạm, chỉ dùng trong câu lệnh provision.
+    Param: run_id — UUID do launcher sở hữu, dùng đánh dấu provenance của role kiểm thử.
+    Side effects: tạo role test, giới hạn quyền theo bảng/function cần cho Auth Lab và cập nhật HBA scoped.
+    """
     if len(password) != 64 or any(character not in "0123456789abcdef" for character in password):
         raise ValueError("Invalid generated credential")
     expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -45,11 +52,38 @@ GRANT SELECT,INSERT,UPDATE ON users,sessions,login_attempt_buckets,workspaces,me
 GRANT SELECT,INSERT ON audit_events,outbox_events,outbox_consumptions TO {ROLE};
 GRANT SELECT,INSERT,UPDATE,DELETE ON global_idempotency_records TO {ROLE};
 GRANT EXECUTE ON FUNCTION public.assert_workspace_capable_admin(uuid) TO {ROLE};
+-- Chỉ cấp hàm consume ticket cho role Auth Lab tạm; không mở quyền function cho PUBLIC hoặc role runtime.
+GRANT EXECUTE ON FUNCTION public.consume_websocket_ticket(bytea) TO {ROLE};
 COMMIT;"""
     # Không truyền stderr psql có thể phản chiếu SQL chứa credential vào exception/log.
     if lab.sql(statement, role=lab.ADMIN, database=DATABASE, check=False).returncode:
         raise RuntimeError("Temporary auth role provisioning failed")
     repository.scoped_hba(True)
+
+
+def set_fixture_session_read_access(run_id, enabled):
+    """Tạm đổi SELECT trên sessions của đúng role fixture để kiểm nhánh DB fail-closed.
+
+    Input
+    Param: run_id — UUID phải khớp ownership marker trước khi sửa ACL.
+    Param: enabled — true cấp lại SELECT, false thu hồi trong cửa sổ probe có finally restore.
+    Errors: RuntimeError cố định nếu role không thuộc lượt chạy hoặc ACL không đạt trạng thái dự kiến.
+    Side effects: đổi quyền đọc đúng bảng public.sessions của role fixture; caller luôn phải khôi phục.
+    """
+    if type(enabled) is not bool or not repository.owns_probe(run_id):
+        raise RuntimeError('Auth lab realtime ACL ownership check failed')
+    action, direction, expected = (
+        ('GRANT', 'TO', 't') if enabled else ('REVOKE', 'FROM', 'f')
+    )
+    # Chỉ fault một quyền SELECT của principal tổng hợp đã xác minh; transaction/Auth API không bị sửa schema.
+    statement = f"{action} SELECT ON TABLE public.sessions {direction} {ROLE};"
+    changed = lab.sql(statement, role=lab.ADMIN, database=DATABASE, check=False)
+    permission = lab.sql(
+        f"SELECT has_table_privilege('{ROLE}', 'public.sessions', 'SELECT');",
+        role=lab.ADMIN, database=DATABASE, check=False,
+    )
+    if changed.returncode or permission.returncode or permission.stdout.strip() != expected:
+        raise RuntimeError('Auth lab realtime ACL state could not be confirmed')
 
 
 # Mỗi identity/digest là giá trị do launcher sinh, không nối input password/email người dùng vào SQL.
@@ -64,6 +98,7 @@ def cleanup(run_id, user_ids, email_digests):
     if email_digests:
         digests = ",".join("decode('" + value + "','hex')" for value in email_digests)
         bucket_statement = "DELETE FROM login_attempt_buckets WHERE email_digest IN (" + digests + ");"
+    # SQL teardown chỉ dùng UUID đã parse; installation gắn active_user_id cần xóa trước session do khóa ngoại.
     statement = f"""BEGIN;
 DO $$ BEGIN IF EXISTS(SELECT 1 FROM users WHERE user_id IN ({identities}) AND
 (email_normalized NOT LIKE 'probe-{run_id}-%@example.invalid' OR activation_provenance NOT IN ('AUTH_HTTP_LAB:{run_id}','SELF_PASSWORD_CHANGE')))
@@ -73,6 +108,8 @@ DELETE FROM outbox_consumptions WHERE outbox_event_id IN (SELECT outbox_event_id
 DELETE FROM outbox_events WHERE event_type='SESSION_REVOKED' AND payload->>'userId' IN (SELECT user_id::text FROM users WHERE user_id IN ({identities}));
 DELETE FROM global_idempotency_records WHERE user_id IN ({identities});
 DELETE FROM websocket_tickets WHERE user_id IN ({identities});
+-- Push installation tham chiếu cả user/session; dọn theo owner còn tồn tại trước khi xóa session.
+DELETE FROM push_installations WHERE active_user_id IN ({identities});
 DELETE FROM sessions WHERE user_id IN ({identities});
 DELETE FROM membership_grants WHERE user_id IN ({identities});
 DELETE FROM memberships WHERE user_id IN ({identities});
@@ -88,7 +125,7 @@ COMMIT;"""
 
 # Không chiếm role cũ; chỉ đóng role đã kiểm marker lượt chạy trước khi thao tác.
 def revoke(run_id):
-    """Thu hồi role và luôn thử gỡ HBA sau khi đã xác minh provenance, tránh mở gateway khi SQL lỗi.
+    """Thu hồi role sau khi trả hết quyền bảng và function, đồng thời đóng đúng session/HBA của lượt chạy.
 
     Input
     Param: run_id — UUID lượt chạy dùng đối chiếu marker sở hữu role trước mọi mutation.
@@ -102,6 +139,8 @@ def revoke(run_id):
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='{ROLE}' AND pid<>pg_backend_pid();
 REVOKE ALL ON {TABLES},audit_events FROM {ROLE};
 REVOKE ALL ON FUNCTION public.assert_workspace_capable_admin(uuid) FROM {ROLE};
+-- Thu hồi capability consume ticket vừa cấp cho fixture trước DROP ROLE để PostgreSQL không giữ grant phụ thuộc.
+REVOKE ALL ON FUNCTION public.consume_websocket_ticket(bytea) FROM {ROLE};
 REVOKE ALL ON SCHEMA public FROM {ROLE};
 REVOKE ALL ON DATABASE {DATABASE} FROM {ROLE};
 DROP ROLE {ROLE};"""
@@ -151,6 +190,74 @@ def close_bridge(server, timeout_seconds=5):
         except (RuntimeError, OSError):
             completed.append(False)
     return all(completed)
+
+
+def verify_realtime_sqlx_checkout(database_port, database_password, checks):
+    """Chạy test SQLx/PostgreSQL thật bằng credential chỉ qua stdin, không lưu hoặc in cấu hình.
+
+    Input
+    Param: database_port — cổng bridge loopback do chính lượt Auth Lab sở hữu.
+    Param: database_password — token CSPRNG của role fixture, truyền riêng cho process test qua stdin.
+    Param: checks — danh sách marker nội bộ chỉ nhận tên test đã xác minh.
+    Errors: RuntimeError cố định khi test lỗi, timeout hoặc không chạy đúng một test đích.
+    Side effects: mở test runner Rust giới hạn 1 connection; test chỉ truy vấn PostgreSQL và đóng checkout lỗi.
+    """
+    payload = json.dumps({
+        "database_port": database_port,
+        "database_password": database_password,
+    }).encode("utf-8")
+    # Credential fixture chỉ qua pipe dành riêng cho process này, không đi theo argument, file hoặc log.
+    command = [
+        "cargo", "test", "--locked", "--offline", "-p", "iot-platform-backend",
+        "--features", "http-server", "--lib",
+        "http::realtime::tests::sqlx_canceled_query_closes_checkout_before_permit_release",
+        "--", "--ignored", "--exact", "--nocapture",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT / "backend",
+            input=payload,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=180,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("REALTIME_SQLX_TEST_RUNNER_TIMEOUT") from None
+
+    expected = (
+        b"test http::realtime::tests::sqlx_canceled_query_closes_checkout_before_permit_release ... ok"
+    )
+    if result.returncode != 0 or expected not in result.stdout:
+        output = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+        # Chỉ phát marker allowlist để chẩn đoán; output thô có thể chứa dữ liệu xác thực từ runner.
+        if "running 1 test" not in output:
+            reason = "REALTIME_SQLX_TEST_BUILD_OR_DISCOVERY_FAILED"
+        else:
+            failure_markers = (
+                ("REALTIME_SQLX_STAGE_CONFIG_VALID", "REALTIME_SQLX_TEST_AUTH_LAB_CONNECT_FAILED"),
+                ("REALTIME_SQLX_STAGE_POOL_CONNECTED", "REALTIME_SQLX_TEST_CHECKOUT_FAILED"),
+                ("REALTIME_SQLX_STAGE_QUERY_STARTED", "REALTIME_SQLX_TEST_CALLER_DID_NOT_DETACH"),
+                ("REALTIME_SQLX_STAGE_CALLER_DETACHED", "REALTIME_SQLX_TEST_QUERY_NOT_CANCELED"),
+                ("REALTIME_SQLX_STAGE_QUERY_CANCELED", "REALTIME_SQLX_TEST_EXPLICIT_CLOSE_NOT_STARTED"),
+                ("REALTIME_SQLX_STAGE_CHECKOUT_CLOSE_PENDING", "REALTIME_SQLX_TEST_EXPLICIT_CLOSE_FAILED"),
+                ("REALTIME_SQLX_STAGE_CHECKOUT_CLOSED", "REALTIME_SQLX_TEST_POOL_RECOVERY_FAILED"),
+                ("REALTIME_SQLX_STAGE_POOL_RECOVERED", "REALTIME_SQLX_TEST_PERMIT_RELEASED_EARLY"),
+                ("REALTIME_SQLX_STAGE_PERMIT_HELD_AFTER_RECOVERY", "REALTIME_SQLX_TEST_PERMIT_NOT_RELEASED"),
+                ("REALTIME_SQLX_STAGE_PERMIT_REACQUIRED", "REALTIME_SQLX_TEST_FOLLOWUP_HANDSHAKE_FAILED"),
+                ("REALTIME_SQLX_STAGE_FOLLOWUP_HANDSHAKE_PASSED", "REALTIME_SQLX_TEST_FAILED_DURING_POOL_CLOSE"),
+                ("REALTIME_SQLX_STAGE_ADAPTER_CALLER_DETACHED", "REALTIME_SQLX_TEST_ADAPTER_CALLER_DID_NOT_DETACH"),
+                ("REALTIME_SQLX_STAGE_ADAPTER_CHECKOUT_CLOSED", "REALTIME_SQLX_TEST_ADAPTER_CHECKOUT_NOT_CLOSED"),
+                ("REALTIME_SQLX_STAGE_ADAPTER_POOL_RECOVERED", "REALTIME_SQLX_TEST_ADAPTER_POOL_NOT_RECOVERED"),
+                ("REALTIME_SQLX_STAGE_ADAPTER_PERMIT_REACQUIRED", "REALTIME_SQLX_TEST_ADAPTER_PERMIT_NOT_RELEASED"),
+                ("REALTIME_SQLX_STAGE_ADAPTER_PROBE_PASSED", "REALTIME_SQLX_TEST_FAILED_AFTER_ADAPTER_PROBE"),
+            )
+            completed = [marker for stage, marker in failure_markers if stage in output]
+            reason = completed[-1] if completed else "REALTIME_SQLX_TEST_FAILED_BEFORE_CONFIG_VALIDATION"
+        raise RuntimeError(reason)
+    checks.append("realtime-sqlx-canceled-checkout-before-permit-release")
+    checks.append("realtime-adapter-session-denial-checkout-close-before-permit-release")
 
 
 def validate_fixture_password(password):
@@ -330,6 +437,13 @@ def run(verify=False, port=3000, operation_holders=None):
             process = start_lab(config)
         processes.append(process)
         if verify:
+            try:
+                # Từ chối đúng quyền SELECT của role fixture để adapter production đi qua nhánh lỗi DB thật.
+                set_fixture_session_read_access(run_id, False)
+                verify_realtime_sqlx_checkout(server.server_address[1], database_password, checks)
+            finally:
+                # Phục hồi ACL kể cả khi test compile, query, close hoặc assertion thất bại.
+                set_fixture_session_read_access(run_id, True)
             from verify_provider import verify_provider
             from verify_concurrency import verify_concurrency
             from verify_audit_faults import verify_audit_faults
@@ -351,7 +465,10 @@ def run(verify=False, port=3000, operation_holders=None):
             security_scope = begin_security_bucket_scope(emails, user_ids, digests, run_id, signing_key)
             security_evidence = verify_security_evidence(port, emails, fixture_password, user_ids, digests, run_id, measurement_key, checks)
             security_evidence['bucketRestore'] = restore_security_buckets(security_scope)
-            checks.extend(verify_provider(port, emails, fixture_password, run_id, user_ids))
+            checks.extend(verify_provider(
+                port, port + 1, emails, fixture_password, run_id, user_ids,
+                partial(set_fixture_session_read_access, run_id),
+            ))
             # Window chỉ có hai login success account0; kết thúc trước UF/MI/AF, không reset limiter/fixture.
             measurements = verify_measurements(port, port + 1, emails[0], fixture_password, measurement_key, checks)
             # Baseline lặp cần account0/3/4 chưa chịu fault/limiter; mỗi window chỉ có login được đo.
@@ -494,7 +611,8 @@ def main():
         else:
             run(args.verify, args.port)
     except (RuntimeError, ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
-        if isinstance(error, RuntimeError) and str(error).startswith("Provider check failed: "):
+        if isinstance(error, RuntimeError) and str(error).startswith((
+                "Provider check failed: ", "REALTIME_SQLX_TEST_")):
             print(str(error), file=sys.stderr)
         print("AUTH_LAB_FAILED: check toolchain/container/schema or retained ownership journal; no reset performed.", file=sys.stderr)
         raise SystemExit(1) from None

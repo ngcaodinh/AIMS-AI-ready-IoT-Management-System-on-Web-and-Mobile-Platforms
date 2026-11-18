@@ -47,6 +47,19 @@ The Web coordinator also repeats this no-cookie probe on every login submit,
 before it writes an intent or sends the password. If the probe fails, the form
 shows service unavailable without sending a login POST; if the API drops after
 the probe, the existing recovery state stays UNKNOWN and does not replay POST.
+
+Auth browser E2E uses Playwright and the owned synthetic fixture handoff. After
+installing the lockfile with `npm ci`, run `npm.cmd run test:e2e:auth` from
+`web/`; Playwright starts Vite when needed and the test owns its Auth API fixture.
+Stop any separately launched Auth Lab first so its exclusive DB role and port
+3000 are released through the launcher's normal cleanup. The E2E logs in,
+selects a real fixture workspace, logs out, checks the
+204 response and verifies the old session is rejected. A second case intercepts
+one login POST with a synthetic 503 to verify the UNKNOWN recovery message and
+that the UI does not resend the mutation; that case is UI regression evidence,
+not a backend E2E result. The runner uses installed Chrome and disables
+screenshots, video, and traces so credential input is not persisted.
+
 Android main now wires the real API/store/coordinator and passes128root widget/
 unit tests. Independent test design/review passes; runtime execution is by root.
 Independent runtime and native HTTPS E2E remain pending.

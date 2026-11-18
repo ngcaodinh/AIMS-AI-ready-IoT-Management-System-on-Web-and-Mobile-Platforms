@@ -4,14 +4,21 @@ import { EventEmitter } from 'node:events';
 import { createNativeMembershipFixture } from './native_membership_fixture.mjs';
 import { startFixture } from './run_native_e2e.mjs';
 
-/** Output: namespace READY synthetic, không đọc account hoặc credential ngoài test. */
-function readyFrame() {
+/** Output: namespace READY synthetic, không đọc account hoặc credential ngoài test.
+ * Param: expired — bật metadata hết hạn chỉ cho profile offline expired.
+ */
+function readyFrame(expired = false) {
   const runId = randomUUID();
-  return { kind: 'READY', runId, userIds: Array.from({ length: 5 },
+  const frame = { kind: 'READY', runId, userIds: Array.from({ length: 5 },
     /** Mỗi vị trí là UUID public riêng để không có alias account trong fixture. */
     () => randomUUID()), emails: Array.from({ length: 5 },
     /** Param: index — vị trí account synthetic trong namespace của run. */
-    (_, index) => `probe-${runId}-${index}@example.invalid`) };
+      (_, index) => `probe-${runId}-${index}@example.invalid`) };
+  if (expired) {
+    frame.expiredSessionId = randomUUID();
+    frame.expiredSessionExpiresAt = new Date(Date.now() - 3_600_000).toISOString();
+  }
+  return frame;
 }
 
 /** Output: target B public tại baseline, các version có chỗ tăng an toàn trong Number. */
@@ -28,13 +35,14 @@ function targetFrame() {
  */
 function harness(overrides = {}) {
   const state = { now: 10, available: true, commands: [], closes: 0 };
-  const ready = readyFrame(); const target = targetFrame(); let control;
+  const ready = readyFrame(overrides.profile === 'offline-expired'); const target = targetFrame(); let control;
   const seed = randomUUID();
   const evidence = {kind:'MEMBERSHIP_SESSION_EVIDENCE',sessions:[{sessionId:seed,revoked:false}],
     audit:[{sessionId:seed,eventType:'LOGIN_SUCCEEDED',outcome:'SUCCESS',clientType:'ANDROID'}]};
   const suspended = { kind: 'MEMBERSHIP_SUSPENDED', target: { ...target.target, status: 'SUSPENDED',
     revision: 8, authorizationVersion: 10 } };
   control = createNativeMembershipFixture({ workDeadline: 1_200_010,
+    profile: overrides.profile ?? 'membership-stale',
     now: /** Clock chỉ thuộc host test, có fault injection để kiểm fixed error. */ () => {
       if (state.clockError) throw new Error('SYNTHETIC_CLOCK_ERROR');
       return state.now;
@@ -88,6 +96,22 @@ async function controllerCases() {
     assert.throws(/** Failed latch không được dùng identity cũ để tiếp tục. */ () => control.ready());
   }
   console.log('MEMBERSHIP_CONTROLLER_READY_SCHEMA_PASS');
+  {
+    const { control, ready } = harness({ profile: 'offline-expired' });
+    assert.deepEqual(control.ready(), ready);
+    for (const patch of [
+      { expiredSessionId: 'ABCDEFAB-1234-4567-89AB-ABCDEFABCDEF' },
+      { expiredSessionExpiresAt: new Date(Date.now() + 60_000).toISOString() },
+      { expiredSessionExpiresAt: '2020-02-31T00:00:00.000Z' },
+      { extra: 'UNTRUSTED' },
+    ]) {
+      const candidate = { ...readyFrame(true), ...patch };
+      const { control: invalid } = harness({ profile: 'offline-expired', skipReady: true });
+      assert.throws(() => invalid.accept(candidate), { message: 'NATIVE_MEMBERSHIP_FIXTURE_FAILED' });
+      assert.throws(() => invalid.ready(), { message: 'NATIVE_MEMBERSHIP_FIXTURE_FAILED' });
+    }
+  }
+  console.log('MEMBERSHIP_CONTROLLER_EXPIRED_READY_METADATA_PASS');
   for (const mutation of ['extra','boolean','unsafe','uppercase','wrong-kind','unsolicited']) {
     const { control, state, target } = harness();
     const frame = structuredClone(target);
@@ -234,13 +258,16 @@ function fakeFixture(options = {}) {
   const child = new EventEmitter(); child.pid = 5243;
   child.stdin = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
   const state = { commands: [], terminal: false, stopWrites: 0 };
-  const ready = readyFrame(); const target = targetFrame();
+  const ready = readyFrame(options.scenario === 'offline-expired'); const target = targetFrame();
   const suspended = { kind:'MEMBERSHIP_SUSPENDED',target:{...target.target,status:'SUSPENDED',revision:8,authorizationVersion:10} };
-  const cleanup = { role:0,hba:0,users:0,sessions:0,workspaces:0,memberships:0,auditActor:0,limiterBuckets:0 };
+  const cleanup = { role:0,hba:0,users:0,sessions:0,workspaces:0,memberships:0,auditActor:0,limiterBuckets:0,
+    pushInstallations:0,websocketTickets:0,outboxEvents:0,outboxConsumptions:0,globalIdempotencyRecords:0 };
   const seed = randomUUID();
   const evidence = {kind:'MEMBERSHIP_SESSION_EVIDENCE',sessions:[{sessionId:seed,revoked:false}],
     audit:[{sessionId:seed,eventType:'LOGIN_SUCCEEDED',outcome:'SUCCESS',clientType:'ANDROID'}]};
   const password = 'Aa1'+'d'.repeat(32);
+  const expiredSessionToken = options.scenario === 'offline-expired' ? 'e'.repeat(64) : undefined;
+  const sensitiveSecrets = [password, ...(expiredSessionToken ? [expiredSessionToken] : [])];
 
   /** Param: frame — metadata test gửi vào parser thật sau secret scanner. */
   function emit(frame) { child.stdout.emit('data',Buffer.from(JSON.stringify(frame)+'\n')); }
@@ -249,7 +276,7 @@ function fakeFixture(options = {}) {
   child.stdin.write =
     /** Param: value — private packet/literal, chỉ ghi tên command public vào state test. */
     (value) => {
-      if (value.startsWith('{')) return true;
+      if (value.startsWith('{')) { state.privatePacket = JSON.parse(value); return true; }
       state.commands.push(value);
       if (options.reply) { options.reply(value,emit,{target,suspended}); return true; }
       if (value === 'MEMBERSHIP_TARGET\n') emit(target);
@@ -266,12 +293,12 @@ function fakeFixture(options = {}) {
   }
   let spawnedAt;
   const before = performance.now();
-  const fixture = startFixture(password,options.scenario??'membership-stale',[password],
+  const fixture = startFixture(password,options.scenario??'membership-stale',sensitiveSecrets,
     /** Thay duy nhất spawn capability, các schema/command/deadline/cleanup guards là source thật. */
-    () => { spawnedAt=performance.now(); return child; });
+    () => { spawnedAt=performance.now(); return child; }, undefined, expiredSessionToken);
   options.beforeReady?.();
   child.emit('spawn'); emit(ready);
-  return {fixture,state,child,target,suspended,password,finish,before,spawnedAt};
+  return {fixture,state,child,target,suspended,password,expiredSessionToken,finish,before,spawnedAt};
 }
 
 /** Kiểm adapter nối đúng controller/parser/close trên child sở hữu, không dùng fake method của fixture. */
@@ -288,6 +315,16 @@ async function factoryCases() {
     assert.equal(state.terminal,true); assert.equal(state.stopWrites,1);
   }
   console.log('MEMBERSHIP_FACTORY_REAL_BOUNDARY_PASS');
+
+  {
+    const { fixture, state, expiredSessionToken } = fakeFixture({ scenario: 'offline-expired' });
+    const ready = await fixture.ready();
+    assert.equal(state.privatePacket.expiredSessionToken, expiredSessionToken);
+    assert.equal(ready.expiredSessionId.length, 36);
+    assert.ok(Date.parse(ready.expiredSessionExpiresAt) < Date.now() - 60_000);
+    await fixture.close();
+  }
+  console.log('MEMBERSHIP_FACTORY_EXPIRED_PRIVATE_PACKET_PASS');
 
   {
     const originalNow = performance.now; let clock = 100;

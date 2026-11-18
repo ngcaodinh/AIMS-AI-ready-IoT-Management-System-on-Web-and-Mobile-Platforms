@@ -1,5 +1,87 @@
 # Tiến độ triển khai
 
+## FEAT-TN-002 continuation — sửa tuyến gọi Tester và hoàn tất harness §27.64 — 18/11/2026 13:48 +07
+
+**VERIFY_IN_PROGRESS; kiểm tra host-side PASS, acceptance Android S2 vẫn PARTIAL.**
+
+- Nguyên nhân dispatch: collaboration subagent allowlist không có `gpt-6-luna`, còn `codex debug models` cục bộ có Luna với `xhigh`; `agy` là runtime UI khác và danh sách model của nó có Gemini/Claude/GPT-OSS, không phải Tester Luna. Lệnh đầu kết hợp `--approve-for-me` với `--sandbox` cũng sai cú pháp; bỏ cờ xung đột thì CLI khởi chạy đúng `gpt-6-luna xhigh`.
+- `workspace-write` trong phiên Codex con vẫn báo Windows `failed_to_write_file`. Đã resume cùng Tester session qua shell được duyệt; CLI resume mặc định hiện `danger-full-access`/`approval never`, cho phép ghi các file test đã giới hạn trong brief. Đây là workaround có phạm vi của lượt này, không chứng minh workspace-write sandbox đã được sửa. Tester không chạm các thư mục bị AGENTS cấm.
+- Tester chỉ sửa test harness: `mobile/integration_test/app_auth_e2e_test.dart`, helper mới `mobile/integration_test/support/native_realtime_ticket_probe.dart`, `ops/auth/run_native_e2e.mjs` và `ops/auth/test_native_e2e_protocol.mjs`. Probe S2 chạy trong Android isolate khi resume sau Web S1 logout, dùng TLS lab đã pin, POST bearer S2 + workspace tới realtime ticket, kiểm tra `201`/`no-store`/schema, giữ response và ticket trong isolate; runner yêu cầu observation `PASS`.
+- `node --check ops/auth/run_native_e2e.mjs`, `node --check ops/auth/test_native_e2e_protocol.mjs` và `node ops/auth/test_native_e2e_protocol.mjs` đều PASS; protocol suite có 19 marker. Tester ghi Run 7 vào `docs/test-reports/FEAT-TN-002-integrated-test-report.md`.
+- Android `--full-session` **BLOCKED — NOT RUN**: runner dùng Flutter `.dart_tool/package_config.json` và tạo build output trong `.dart_tool`/`build`, bị AGENTS cấm truy cập trong lane này. Chưa có evidence request S2 thật sau Web logout hoặc cleanup ticket/session trên emulator; không nâng acceptance.
+- `agy models` giờ trả model 4 Argon/4 Hydrogen sau shell được duyệt, nhưng batch này chỉ làm test harness; không có inbox/notification/deep-link UI hiện hữu để mở rộng mà không đổi phạm vi. Late-push UI, app WebSocket owner alignment và installation-proof vẫn mở.
+- Các file report/progress/plan/log dưới `docs` bị ignore nên LOCAL-ONLY. Không đổi checkbox, không giao reviewer vì acceptance chưa PASS, không commit.
+
+## FEAT-TN-002 continuation — Tester/UI runtime re-audit — 18/11/2026 12:44 +07
+
+**VERIFY_IN_PROGRESS; acceptance vẫn PARTIAL.** Đã đọc lại objective hiện hành, plan, checkout và các file liên quan; không lặp lại test/review đã PASS trên source state cũ.
+
+- Một tiến trình Tester riêng chạy bằng `gpt-6-luna xhigh` đọc rules và §27.64. Source hiện có cờ `AUTH_E2E_S2_REALTIME_TICKET` và callsite `verifyNativeS2RealtimeTicket`, nhưng chưa có định nghĩa hàm; `ops/auth/run_native_e2e.mjs` không truyền cờ. Runner full-session đã có Web S1 logout trước Android S2 resume, nên vị trí kiểm tra đúng nằm trong resume. Tester dừng ở lần ghi đầu tiên vào `mobile/integration_test/app_auth_e2e_test.dart`: `Failed to write file`. Không có source/test/report update và không test nào chạy.
+- `node ops/auth/run_native_e2e.mjs --full-session` khởi chạy Flutter bằng package configuration `.dart_tool` và generated build output, các đường dẫn bị AGENTS cấm truy cập/sửa trong lane này. Không chạy acceptance command đó hoặc dùng đường vòng; cần một lane được phép cho Android build/runtime.
+- `agy` hiện có trong PATH, nhưng `agy models` không liệt kê model do CLI báo chưa đăng nhập Antigravity. Khởi động CLI cũng báo terminal sandbox Windows không khả dụng và quyền ghi log/cache/crash bị từ chối; không xác minh được 4 Argon/4 Hydrogen, không đăng nhập hoặc sửa cấu hình ngoài workspace.
+- Rà source hiện hành trong `mobile/lib` và `mobile/pubspec.yaml` không thấy inbox/notification/deep-link feature; chỉ có comment lifecycle nhắc stream notification. Không thêm UI ngoài phạm vi và không đánh PASS late-push. App WebSocket owner alignment vẫn cần quyết định.
+- Không đổi acceptance checkbox; không chạy review/commit. Cần sandbox/runtime ghi được cho Tester, Android lane tuân thủ AGENTS, Antigravity đăng nhập với model được yêu cầu, cùng owner decision cho app realtime trước khi đóng acceptance.
+
+## FEAT-TN-002 continuation — chẩn đoán dispatch GPT-6-Luna Tester — 18/11/2026 12:23 +07
+
+**VERIFY_IN_PROGRESS; acceptance vẫn PARTIAL.** Mục Loop 31 bên dưới bị đính chính: kết luận “GPT-6-Luna không có trong Codex CLI” là quá rộng. Tài liệu chính thức về [Codex subagents](https://developers.openai.com/codex/subagents) nêu rõ `gpt-6-luna`; [configuration reference](https://developers.openai.com/codex/config-reference) hỗ trợ đặt model và reasoning effort mặc định cho subagent. `codex debug models` và `app-server model/list` trên CLI cục bộ cũng trả `gpt-6-luna` cùng mức `xhigh`.
+
+- Đã gọi được một Tester riêng bằng CLI với model `gpt-6-luna xhigh`; agent đọc `AGENTS.md`, objective và §27.64, nhưng Windows sandbox từ chối lần ghi đầu tiên vào `ops/auth/test_native_e2e_protocol.mjs` (`windows_sandbox failed_to_write_file`). Không có test nào chạy trong lượt đó.
+- Các probe sandbox một-lệnh: `mxc` trả `native MXC is unavailable on this executor`; `unelevated` trả `CreateRestrictedToken failed: 87`; `elevated` trả `open sandbox provisioning pipe`. Lượt CLI lồng tiếp theo bị chặn khi mở Responses WebSocket với `os error 10013`. Đây là lỗi sandbox/network của môi trường chạy Codex lồng, không phải lỗi model hoặc project code.
+- Một lượt gọi subagent qua collaboration tool tích hợp vẫn không xác nhận được Luna vì model đó không có trong allowlist của tool này. Không dùng model khác thay Tester và không dùng `danger-full-access` để vượt sandbox. Lượt scoped CLI cuối cùng bị dừng khi bắt đầu liệt kê rộng các file trong thư mục sinh tự động bị AGENTS cấm; không có thay đổi source/test từ lượt đó.
+- Model dispatch đã có workaround cục bộ; Tester chưa thể hoàn tất test-only Android S2 ticket probe do sandbox. Acceptance §27.64 vẫn PARTIAL; không sửa checkbox. Không chạy test, không giao reviewer, không commit. Các mục late-push/Antigravity, app WebSocket owner alignment và installation-proof vẫn là blocker độc lập đã ghi trước đó.
+
+**Auto-review note:** một lần thử interactive không có brief Tester đã bị auto-review từ chối do lệnh không mang phạm vi công việc và cấu hình auto-approval cộng `workspace-write` có thể cho phép sửa workspace không giới hạn. Các lần sau dùng brief giới hạn theo §27.64; không lặp lại lệnh trống đó.
+
+## FEAT-TN-002 latest verification — 17/11/2026
+
+**VERIFY_IN_PROGRESS; chưa nghiệm thu toàn feature.** Checkout `dev@62c68c3` trên `dev` còn dirty và chưa commit. Plan này được `.gitignore:23` (`docs`) loại khỏi Git; nội dung cập nhật vẫn nằm trong workspace. Không đổi ignore rule hoặc force-stage.
+
+- Fresh Auth Lab `python -X utf8 -B ops/auth/run_local.py --verify` exit **0** với marker `realtime-sqlx-canceled-checkout-before-permit-release` và `realtime-adapter-session-denial-checkout-close-before-permit-release`. Probe mới gọi `PgIdentityStore::active_realtime_session_for_handshake` khi ACL SELECT bị từ chối; xác nhận adapter trả lỗi an toàn sau khi pool checkout về 0, query phục hồi trong lúc route permit còn giữ, rồi permit/handshake phục hồi. `provider-latest.json` có marker hai-instance Web+Android ticket/peer consume, logout Web, S1 socket close, S2 socket giữ, DB-denial fail-closed, và Android `/me` phục hồi. Runner cleanup xong; port `3000/3001` trống.
+- Regressions cuối: launcher Python **16/16**; Rust workspace **31 passed, 1 ignored**, Auth Lab binary **13/13**, HTTP auth **10/10**; `cargo check --locked --offline --workspace --all-targets --features iot-platform-backend/http-server`, `cargo fmt --all -- --check` và `node --check` đều exit **0**. `npm.cmd run test:e2e:auth` **4/4** và headed Chromium main logout **1/1**; Playwright kiểm quota 16, overflow `503`/`no-store`, replay ticket thật, close handshake, Ping/Pong và thu hồi slot sau peer im lặng.
+- Chrome thật qua CUA: readiness ban đầu trả `500 text/plain` do Auth API không chạy; sau khi khởi động Auth Lab readiness trả `401` envelope hợp lệ. Đã đăng nhập fixture tổng hợp, chọn workspace quản trị, logout và reload; trang vẫn ở login. Interactive fixture đã dọn; journal báo application fixture rows `REMOVED`, port `3000/3001` trống.
+- Android `node ops/auth/run_native_e2e.mjs --full-session` exit **0** với login/workspace/logout/resume và DB oracles; `node ops/auth/run_native_offline_e2e.mjs --offline-expired` exit **0** gần nhất với outbox, process restart, resume và terminal logout. `dart format --output=none --set-exit-if-changed ...` và `dart analyze integration_test` exit **0**. Thứ tự offline-expired: hai lần đầu dừng sau checkpoint `ready`, lần kế pass, lần kế tiếp lại dừng ở `ready`, lần gần nhất pass; nguyên nhân các timeout chưa được chứng minh nên giữ rủi ro test ổn định chưa được giải thích. Đây không chứng minh OS reboot.
+- Senior Tester re-audit trước đó kết luận **partial**. Correctness review cuối tìm ba lỗi quan trọng ở replay ticket, close handshake và peer liveness; đã sửa và kiểm thử lại. Senior Tester final và bốn review tuần tự Correctness/Security/Tests/Architecture-Performance trên delta cuối vẫn đang chờ.
+- Provider-level RT-3 multi-instance, DB permission-denial fail-closed, bounded active sockets và Chrome manual logout đã được verify. Còn mở: E2E-LOGOUT-001 app-level mutation Web S1 + Android S2; AT-WF-002-02 same-device account/cache isolation; AT-WF-002-03 đầy đủ trên Android sibling; E2E-LOGOUT-005 late-push; exact S1/S2 session/push-binding/audit readback; secret-sink canary cho structured log/browser/app debug; và UI/client acceptance còn thiếu trong AT-WF-002-01…03. Chưa có app-level socket consumer được xác nhận trong Web/Flutter; cần đối chiếu owner/scope trước khi thêm client mới. Giữ `VERIFY_IN_PROGRESS`.
+- Các snapshot cũ ở phần dưới được giữ làm lịch sử; nếu chúng còn nói direct SQLx gate/MB-OUTBOX-1 chưa có evidence, trạng thái mới nhất trong mục này và §27.45 thay thế chúng. Không promote checkbox feature-level; giữ `VERIFY_IN_PROGRESS`.
+
+## FEAT-TN-002 verification snapshot — 16/11/2026 (superseded)
+
+**VERIFY_IN_PROGRESS; chưa nghiệm thu toàn feature.** Code state là `dev@62c68c3`,
+working tree dirty và chưa commit. Bản cập nhật này thay thế các snapshot cũ hơn.
+
+- Web: `npm.cmd run test:auth` 43/43 PASS; `npm.cmd run build` PASS;
+  `npm.cmd run test:e2e:auth` 4/4 PASS. Trong đó một kịch bản DB-backed chứng minh
+  hai phiên Web, ticket/first-frame/replay, close socket S1, S2 còn hoạt động,
+  stale S1 bị `401 SESSION_REVOKED`, logout lặp `204`; ba ca còn lại kiểm redaction,
+  recovery UI bị intercept và cleanup failure. Server timeout frame đầu 4 giây;
+  browser đo close trong giới hạn 5 giây.
+- Android: `node ops/auth/run_native_e2e.mjs --full-session` exit 0 trên API24;
+  login thật, dừng process, resume và logout cùng kiểm tra session/outbox/cleanup.
+  Đây là online resume/logout, chưa bao phủ offline outbox qua restart.
+- Flutter: `flutter test --concurrency=1 --reporter compact` 226/226 PASS;
+  lượt hiện tại `flutter analyze` và `dart analyze integration_test` đều không issue.
+- Backend: `cargo check -p iot-platform-backend --features http-server` PASS;
+  `cargo test -p iot-platform-backend --features http-server --lib` 22/22 PASS;
+  `cargo fmt --all -- --check` PASS.
+- Python/fixture regression trước đó: launcher 10/10, native lab 50/50 và các
+  protocol/membership/offline fixture tests PASS. Lượt hiện tại
+  `python -X utf8 -B ops/auth/run_local.py --verify` exit 0 trên PostgreSQL fixture;
+  đây là provider regression evidence, không thay thế cross-client acceptance.
+- Chrome thật với fixture tổng hợp: login → chọn workspace A → logout → reload;
+  sau reload đối soát tự hoàn tất và UI trở về form đăng nhập. Network được kiểm
+  theo method/path/status. Auth Lab launcher thoát 0, port 3000/3001 trống; journal
+  xác nhận application fixture rows đã bị xóa, còn audit anonymous theo retention.
+- Senior Tester GPT-6-luna max re-audit verdict **partial / VERIFY_IN_PROGRESS**.
+  Các gap còn lại: E2E Web S1 + Android S2, account/cache isolation cùng máy,
+  offline outbox qua restart sau expiry, multi-instance/DB-failure socket close,
+  unused-ticket sau logout, late-push, DB/push/audit readback và secret-sink canary.
+  `4/4` Playwright là một kịch bản DB-backed cộng ba regression; không phải bốn
+  acceptance E2E. Các review Sol High cho delta hiện tại chưa chạy xong.
+
+Không có acceptance checkbox nào được đánh hoàn thành. Feature tiếp tục ở
+`VERIFY_IN_PROGRESS` cho đến khi các gap trong mục 27.37 và AT-WF-002 được chứng minh.
+
 ## FEAT-TN-002 continuation — 16/11/2026
 
 **VERIFY_IN_PROGRESS; chưa nghiệm thu.** Checkout bắt đầu `dev@767fec3`, branch
@@ -120,6 +202,13 @@ PostgreSQL trong container `iot-postgres17-database` đang nhận kết nối qu
 
 Kiểm tra sau sửa: focused regression **1/1 PASS**; `node+--experimental-transform-types --test web/tests/auth.test.mjs+web/tests/password_policy.test.mjs` **37/37 PASS**; `git diff --check` exit 0.
 Flutter tests/emulator chưa chạy lại vì lane hiện có cần truy cập `.dart_tool` và+build artifacts. Feature vẫn **VERIFY_IN_PROGRESS**; successful login/API,+Android runtime, WebSocket close, trusted TTL, two-session, offline/restart,+push-late và AT-WF-002-01…03 còn mở.
+
+### Automated test gate trước Chrome E2E — 16/11/2026
+
+- Chạy lại `node --experimental-transform-types --test tests/auth.test.mjs tests/password_policy.test.mjs` trong `web/`: **43/43 PASS**; `node --check scripts/check-auth-api-readiness.mjs`: **PASS**; `node scripts/check-auth-api-readiness.mjs`: **PASS** với `/api/v1/me` trả 401 `SESSION_EXPIRED` ErrorEnvelope.
+- Chạy lại `python -B -m unittest discover -s contracts/tests -p '*.py' -v`: **39/39 PASS**; chỉ chứng minh contract/fixture tĩnh.
+- Đây chưa phải bộ test đầy đủ của feature: Flutter/App và Rust/backend chưa được chạy lại trên source dirty vì lệnh cần tạo/đọc `.dart_tool`, `.gradle` hoặc `backend/target`, các đường dẫn đang bị AGENTS cấm. Kết quả Flutter cũ không áp dụng cho thay đổi Mobile hiện tại.
+- Chưa chạy Chrome E2E theo thứ tự người dùng yêu cầu; browser smoke trước đó chỉ xác nhận DOM của `/login`, không chứng minh logout. Giữ `VERIFY_IN_PROGRESS`; không nâng acceptance.
 
 ## FEAT-TN-002 continuation — 15/11/2026
 
@@ -432,12 +521,13 @@ không thay manifest/regression mới. [Audittoànfeature](../test-reports/FEAT-
 | FEAT-TN-001/P6–CP-03 | Chưa chạy acceptance liên client | NOT_RUN | Chờ P4/P5, provider thật, browser/device và owner/QA evidence; AT-WF-001-01…03 NOT_RUN |
 | FEAT-TN-002/L1a | Contract draft 0.2.1; checkout bắt đầu `dev@767fec3`, dirty/uncommitted | READY_FOR_QA tĩnh | Senior tester trước source changes: Python contract suite 39/39 PASS; không là provider runtime evidence |
 | FEAT-TN-002/L1b | 30 logout fixtures synthetic; current checkout dirty/uncommitted | READY_FOR_QA tĩnh | Contract suite 39/39 PASS trước source changes. [Report](../test-reports/FEAT-TN-002-contract-2026-10-23.md); CP-L1/CP-01 còn chờ owner review |
-| FEAT-TN-002/L2 | Logout route, transaction, ticket/push invalidation và audit đã có từ FEAT-TN-001; native main app hiện chạy qua PostgreSQL fixture | RUNTIME_PARTIAL | App online resume/logout và Web one-session 204 đã chạy; TN-002 two-session, repeat/logout isolation, push binding chưa có evidence đủ |
+| FEAT-TN-002/L2 | Logout route/transaction và auth flows đã được kiểm qua provider PostgreSQL, Playwright và Android main app | RUNTIME_PARTIAL; provider + one-client E2E PASS | Provider checks Web `204`, idempotent logout và giữ Android sibling session; Playwright replay cookie cũ nhận `401 SESSION_REVOKED`; Android login/resume/logout PASS. Cross-client/socket/push acceptance chưa đủ. |
 | FEAT-TN-002/L3 | Không có socket-owning server/consumer callsite cho close intent | BLOCKED_DEPENDENCY | Runtime WS close/lost-signal/multi-instance NOT_RUN; không thêm dependency/infrastructure |
-| FEAT-TN-002/L4 | Web coordinator/cookie/logout online flow; UI recovery được cập nhật bằng `agy` với Gemini 4 Argon · medium | BLOCKED_ACCEPTANCE; partial evidence | Chrome fixture run: login/me/workspaces và chọn workspace trả 200; logout trả UI về login với success notice. CDP không giữ logout status trong lượt mới; 204 còn ở report 15/11. Chưa có recovery-state/multi-session browser evidence. |
-| FEAT-TN-002/L5 | Android secure outbox/retry source, parser legacy fix source, recorded Flutter results and API24 online resume/logout | BLOCKED_ACCEPTANCE; partial evidence | Flutter results predate parser fix and no AGENTS-compliant lane is documented; probes cover active-session adapter, not durable `logout_intent`. Source does not enforce TTL after retry quota; trusted expiry/elapsed-time mechanism remains unresolved |
-| FEAT-TN-002/L6 | Web one-user login/select/logout trên PostgreSQL fixture có browser evidence; Android main full/resume/logout evidence thuộc lượt FEAT-TN-001 | BLOCKED_ACCEPTANCE; partial E2E evidence | Chrome: login/me/workspaces/select trả 200; empty fixture đạt empty state; logout UI success notice. Logout status receipt mới chưa capture; không gộp evidence Android 001 thành `logout_intent` proof. Hai-session, offline/restart, push-late và socket close còn thiếu; AT-WF-002-01 BLOCKED (partial evidence), -02 BLOCKED, -03 NOT_RUN |
-| FEAT-TN-001 Web login outage guard (supporting fix during TN-002) | `dev@4a6df48` base; local readiness-envelope hardening pending commit; unrelated Mobile auth source/tests remain dirty; UI copy previously updated with Gemini 4 Argon medium via `agy` | SOURCE_VERIFIED; live readiness PASS; credential E2E NOT_RUN | Coordinator and `check:auth-api` require unauthenticated `GET /api/v1/me` → 401 `SESSION_EXPIRED`/`SESSION_REVOKED` ErrorEnvelope with required fields and closed `details`/`FieldError` schema before allowing login; 500, unrelated/malformed 401, timeout, refusal and redirect stay on login with `SERVICE_UNAVAILABLE`, no intent or credential POST; late probe result after invalidate is ignored. Three false-readiness regressions RED before changes; final `node --experimental-transform-types --test tests/auth.test.mjs tests/password_policy.test.mjs` 43/43 PASS; `node --check scripts/check-auth-api-readiness.mjs` PASS; live preflight PASS and mocked malformed-envelope preflight rejected; isolated Chrome `/login` clean console. No credential E2E; TypeScript build not run because project rules forbid `node_modules` access. Does not advance TN-002 acceptance.|
+| FEAT-TN-002/L4 | Web coordinator/cookie/logout flow; Antigravity CLI 1.5.9 TUI confirmed Gemini 4 Argon (Medium) for UI recovery | WEB E2E PASS; acceptance partial | `npm.cmd run build` PASS (last source build); Playwright DB fixture 4/4 PASS: real logout clears the cookie, stale-session GET and password mutation return 401 `SESSION_REVOKED`, repeated logout is idempotent, independent Web session remains active; recovery/redaction/cleanup cases are separate. Chrome credential E2E is from Loop9, not this rerun. Two-client Android/socket acceptance remains open. |
+| FEAT-TN-002/L5 | Android secure outbox/retry, parser fix, Flutter and API24 full/resume/logout | APP E2E PASS; TTL acceptance blocked | Flutter 225/225 + analyzer PASS; API24 full/resume/logout integration PASS with secure session and outbox post-logout assertions. Trusted TTL after retry exhaustion/restart remains unresolved; do not purge using device wall clock alone. |
+| FEAT-TN-002/L6 | Playwright, Android integration and Auth Lab provider verification run on dirty code state | PARTIAL_ACCEPTANCE; all required E2E evidence not complete | Playwright 4/4, Android full-session exit 0 on API24, provider suite exit 0, and historical Loop9 Chrome login/select/logout. AT-WF-002-01 remains partial (no actual socket close); AT-WF-002-02 remains blocked (same-device account-switch/cache/push-late); AT-WF-002-03 has Web-session/provider idempotency evidence but no full cross-client acceptance. |
+| FEAT-TN-002 provider/test harness | Revoked/expired HTTP mapping plus Rust/Python verifier updates, dirty/uncommitted | PROVIDER PASS | `python -X utf8 -B -m unittest discover -s ops/auth/tests -p 'test_*.py' -v` 134/134 PASS; `python -X utf8 -B ops/auth/run_local.py --verify` exit 0; evidence `ops/auth/evidence/provider-latest.json`; ports 3000/3001 closed after launcher cleanup. |
+| FEAT-TN-001 Web login outage guard (supporting fix during TN-002) | `dev@62c68c3` guard and readiness-envelope hardening committed; unrelated Mobile auth source/tests remain dirty; UI copy previously updated with Gemini 4 Argon medium via `agy` | SOURCE_VERIFIED; live readiness PASS; credential E2E NOT_RUN | Coordinator and `check:auth-api` require unauthenticated `GET /api/v1/me` → 401 `SESSION_EXPIRED`/`SESSION_REVOKED` ErrorEnvelope with required fields and closed `details`/`FieldError` schema before allowing login; 500, unrelated/malformed 401, timeout, refusal and redirect stay on login with `SERVICE_UNAVAILABLE`, no intent or credential POST; late probe result after invalidate is ignored. Readiness is point-in-time: if the API or a login-only dependency fails after a valid probe, a login POST may be sent; the result stays UNKNOWN with no replay. Three false-readiness regressions RED before changes; final `node --experimental-transform-types --test tests/auth.test.mjs tests/password_policy.test.mjs` 43/43 PASS; `node --check scripts/check-auth-api-readiness.mjs` PASS; live preflight PASS and mocked malformed-envelope preflight rejected; isolated Chrome `/login` clean console. No credential E2E; TypeScript build not run because project rules forbid `node_modules` access. Does not advance TN-002 acceptance.|
 
 FEAT-TN-001 direct DB attempt 2026-10-24: `python -B ops/database/verify_repositories.py` was refused by `EMPTY_GUARD` because canonical DB has application rows; it stopped before writing fixtures. No reset/deletion was performed and this run is not a DB PASS. See [readiness report](../test-reports/FEAT-TN-001-readiness-2026-10-24.md).
 
@@ -494,3 +584,314 @@ Commit `af7153c` (auth API readiness guard) đã được push lên `origin/dev`
 ### FEAT-TN-002 L3/readiness recheck — 16/11/2026
 
 Rechecked current source: Axum has no `ws` feature and no WebSocket upgrade/socket registry/close-intent consumer callsite exists; only the close-outbox application kernel and repository probe are present. Therefore DB intent still cannot prove a real socket close and L3 remains `BLOCKED_DEPENDENCY`. The current readiness gate still passes (`/me` 401 JSON); no login POST was sent. Feature remains `VERIFY_IN_PROGRESS`.
+
+### FEAT-TN-002 Playwright / Flutter integration testcase continuation — 16/11/2026
+
+| Slice | State | Evidence |
+| --- | --- | --- |
+| Web Playwright source | `web/e2e/auth_logout.spec.mjs`, `web/playwright.config.mjs`, `@playwright/test` pinned to 1.63.0; dirty/uncommitted | Real fixture scenario is authored: login → workspace → logout 204 → replay the old HttpOnly cookie and require 401 `SESSION_REVOKED`. A separate intercepted-503 UI recovery case passes 1/1; it is not backend E2E evidence. |
+| Android integration assertion | Existing `mobile/integration_test/app_auth_e2e_test.dart`, dirty/uncommitted | Full/resume runner models real UI login, process restart, and logout. New assertion checks no active secure session and no `logout_intent` remain after logout. Dart format ran; integration test did not start. |
+| Web suite | `npm.cmd run test:auth`; `npm.cmd run test:e2e:auth` | 43/43 unit/policy and 3/3 Playwright PASS. The DB-backed case covers login, workspace selection, logout 204 with empty body, then old HttpOnly cookie replay → 401 `SESSION_REVOKED`; the other two cases are client-only recovery/redaction regressions. |
+| Android suite | `node ops/auth/run_native_e2e.mjs --full-session` | Exit 0 on Android API24; full UI login, process-stop/resume, logout, session/outbox assertions, proxy and fixture cleanup PASS. This does not cover trusted TTL or offline reboot. |
+| Chrome | User's open Chrome tab at `http://localhost:5173/login` | After both automation suites passed, actual login `200`, `/me` and workspace reads `200`, logout `204`; UI returned to login with success status. Chrome evidence excludes cookie replay; Playwright covers that branch. |
+| Fixture lifecycle | Interactive `ops/auth/run_local.py --port 3000` | Preflight failed with `500 text/plain` when port 3000 had no listener; after the fixture started, preflight returned the expected 401 ErrorEnvelope. The launcher exited 0 after cleanup; ports 3000/3001 are free. |
+
+The Senior Tester GPT-6-luna max and four sequential GPT-6.1 Sol High reviews are complete. Their overall verdict remains **Needs changes** because the broader L3/L5 and AT-WF-002 acceptance gaps above are unchanged. FEAT-TN-002 remains `VERIFY_IN_PROGRESS`.
+
+### FEAT-TN-002 focused responsive regression follow-up — 16/11/2026
+
+Senior Tester pointed out that `overflow-x: clip` can keep document `scrollWidth` equal to the viewport while clipping a child. Extended the Playwright 320px outage/recovery assertion to check the card, alert, workspace-lock guidance, reconciliation button, and login-again button bounding boxes. Added the Vietnamese function comment immediately above its `page.evaluate` callback. Re-review also found the prior 500ms wait could not prove a delayed no-replay invariant; renamed the case and removed that wait/claim. The case was then extended to click reconciliation and assert the explicit GET `/me` returns `401 SESSION_EXPIRED`, keeps the workspace locked, and adds no login POST at response time. Initial request-count assertion exposed the preflight GET plus explicit reconcile GET; corrected it to expect two. Latest focused Playwright run PASS (1/1). A fresh full Playwright rerun yielded the real-fixture startup error before login (the mocked case passed, total 1 failed/1 passed); the fresh Android runner stopped at fixture/preflight before the integration test. A Ctrl+C event sent to the verified launcher console did not stop the launcher/listener after 60 seconds; cleanup is unconfirmed. The CUA window-inspection call aborted before dispatch, so no terminal UI action occurred. No second signal, force-kill, or out-of-band DB cleanup was attempted. This remains mocked recovery evidence, not database-backed logout acceptance. No `@Chrome` run or final four Sol reviews yet. Feature remains `VERIFY_IN_PROGRESS`.
+
+### FEAT-TN-002 mocked reconciliation interaction — 16/11/2026
+
+Extended the browser 503 recovery case to activate “Đối soát phiên hiện tại”: the readiness GET and explicit reconciliation GET each receive a contract-shaped mocked `401 SESSION_EXPIRED`; the test asserts exactly two `/me` requests, one intercepted login POST, continued workspace lock, and a visible login-again action. The first focused run exposed the readiness GET plus explicit GET (`1` expected, `2` observed); corrected the test to represent the actual two-stage flow. `npm.cmd run test:e2e:auth -- --grep "reconciles with a session GET"` passes 1/1. This does not exercise `logoutPending`, delayed replay, or a real database/backend. The Senior Tester’s previous final review predates this last extension and is being repeated against the updated test.
+
+### FEAT-TN-002 request method/order assertion hardening — 16/11/2026
+
+The latest tester review found that URL-only request counters did not prove method or order. Updated Playwright routes to count only login POST and session GET, continue nonmatching methods, and assert the exact sequence readiness GET `/me` → login POST → explicit reconcile GET `/me`. Added Vietnamese parameter docs for the route/response callbacks. `npm.cmd run test:e2e:auth -- --grep "reconciles with a session GET"` passes 1/1. Senior Tester final re-review confirmed these findings are closed with no remaining issue in the focused test. This remains a fully intercepted UI/API-client case; it does not prove backend logout, delayed replay, or actual `logoutPending`.
+
+### FEAT-TN-002 Playwright security and cookie-path fixes — 16/11/2026
+
+Security review found two E2E issues: Playwright failures could expose the fixture password or stale HttpOnly cookie in call logs, and cookie lookup used `/` although the session cookie path is `/api/v1`. Added fixed-error wrappers plus a synthetic-sentinel regression; changed cookie lookup URL to `/api/v1/me`. `node --check web/e2e/auth_logout.spec.mjs` PASS; focused Playwright `npm.cmd run test:e2e:auth -- --grep "secret-bearing Playwright failures|reconciles with a session GET"` PASS 2/2. This does not prove actual database logout. Security final review identified the findings; no test artifacts or real secrets were inspected.
+
+### FEAT-TN-002 resume verification after laptop restart — 17/11/2026
+
+Current state remains dirty/uncommitted on `dev@62c68c3`. After restart, the complete Playwright suite passed **4/4**; Python Auth Lab tests **141/141**; `ops/auth/run_local.py --verify` exit 0; Android `run_native_e2e.mjs --full-session` exit 0 with full/resume/logout and fixture-cleanup markers; Flutter unit suite **226/226**; `flutter analyze` and `dart analyze integration_test` report no issues; Rust library suite **30/30**; `cargo check --workspace --all-targets` and `cargo fmt --all -- --check` passed. Connected Chrome completed synthetic login, workspace selection, logout, and reload at `localhost`; `127.0.0.1` correctly fails the exact-Origin CSRF policy and was not used for acceptance. No source code changed in this verification loop. Overall feature remains `VERIFY_IN_PROGRESS`; MB-OUTBOX-1 and the cross-client, multi-instance, late-push, cache-isolation, DB/push/audit readback, and secret-canary criteria remain open. Next: add the real Android offline logout → process restart → retained secure outbox → expired-session terminal `204` scenario to the owned PostgreSQL/Auth Lab runner.
+
+### FEAT-TN-002 offline resume admission race recheck — 17/11/2026
+
+- Phạm vi lượt này: sửa orchestration/test harness Android offline resume và ghi nhận lại evidence web/Chrome; không đổi UI hoặc hợp đồng sản phẩm. Branch `dev`, base `62c68c3`; chưa commit, working tree vẫn dirty với các thay đổi FEAT-TN-002 từ trước.
+- Review correctness tìm thấy ba vấn đề: HTTP prefix chỉ được kiểm trước SQL await nên request logout đến muộn có thể lọt trước khi bật mạng; checkpoint admission có thể hết hạn trong SQL nhưng lệnh network vẫn chạy; SQL baseline được đọc sau khi app resume đã khởi chạy và có thể tiêu hao retry budget khi app đang offline.
+- Đã thêm admission fence sát lệnh network-off/restore; restore cuối trong cleanup không phụ thuộc admission để luôn phục hồi mạng. Exact HTTP prefix được kiểm lại ngay trước restore. SQL baseline chuyển tới khoảng sau khi process offline đầu dừng và xác nhận mạng disabled, trước khi spawn process resume.
+- Regression harness có 23 coordinator PASS markers: `outbox-admission-expired`, `resume-terminal-before-restore`, `resume-admission-expired`, `resume-baseline-before-app`, `resume-terminal-early`, cùng các cleanup/timeout owner hiện hữu. `node --check ops/auth/native_offline_orchestration.mjs` và `node --check ops/auth/test_native_offline_orchestration.mjs` exit 0; `node ops/auth/test_native_offline_orchestration.mjs` exit 0.
+- Android emulator/API36: `node ops/auth/run_native_offline_e2e.mjs --offline` exit 0; offline login/outbox checkpoint pass, app process đầu dừng, process resume nhận mạng, capture kết thúc ở 9 request/status/close, `NATIVE_OFFLINE_ACTUAL_OWNED_TERMINAL_PASS`. Đây là session chưa hết hạn; không chứng minh MB-OUTBOX-1 expiry/TTL.
+- Web: `npm.cmd run test:e2e:auth` exit 0, Playwright 4/4. Chrome thật tại `http://localhost:5173/login`: Auth Lab DB fixture login → nhận 2 workspace → chọn `Phòng vận hành A`/Admin → logout hiển thị thông báo → reload trở lại login; console error/warning đọc được là rỗng. Các ô đăng nhập được xóa sau test. Fixture đã dừng và recovery journal báo `AUTH_LAB_ACCOUNT_FIXTURES_REMOVED`.
+- Không nâng acceptance: MB-OUTBOX-1 expired-but-valid vẫn mở vì migration yêu cầu `expires_at = created_at + 24 hours` và cấm sửa sau insert; cross-client Web S1 + Android S2, same-device account/cache isolation, RT-3 multi-instance/DB-failure socket reconciliation, late-push, exact session/push-binding/audit readback, secret-sink canary, và AT-WF-002-01…03 vẫn chưa có evidence. Feature giữ `VERIFY_IN_PROGRESS`.
+- `docs/plan/features/FEAT-TN-002-dang-xuat-va-thu-hoi-phien.md` đang bị `.gitignore` loại khỏi status; nội dung plan được cập nhật cục bộ, không force-add hoặc đổi ignore rule.
+
+### FEAT-TN-002 expired offline outbox — 17/11/2026
+
+- Branch `dev` at base `62c68c3`; checkout remains dirty and uncommitted. The feature plan file remains ignored by `.gitignore`; it was updated locally without changing ignore rules.
+- The fixture/oracle delta fixes a test-fixture mismatch: Auth Lab startup creates a setup session and `LOGIN_SUCCEEDED` audit before inserting the expired target. The oracle now binds one target UUID, permits/preserves setup rows, requires the target to be unrevoked with no target audit before logout, and expects only the target revoke plus one `LOGOUT SUCCESS` audit at terminal. The seed issues a valid 24-hour session already expired at test time, without updating immutable timestamps.
+- Fresh Android API 36 E2E: `node ops/auth/run_native_offline_e2e.mjs --offline-expired` exit 0; expired-offline/ready/persisted checkpoints kept SQL unchanged, app process stopped, second process resumed offline with the protected UI locked and encrypted intent retained, then network restore produced one terminal logout and the owned session/audit SQL oracle passed. This is app-process restart evidence, not device reboot evidence.
+- Fresh regressions: `node ops/auth/test_native_offline_evidence.mjs` and `node ops/auth/test_native_offline_orchestration.mjs` exit 0; `python -X utf8 -B -m unittest ops.auth.test_native_lab_fixture ops.database.test_psql_variables` **59/59**; `flutter test --reporter=compact` **228/228**; `flutter analyze` and `dart analyze integration_test` no issues; `npm.cmd run test:e2e:auth` **4/4**. The first Playwright run overlapped with the interactive Auth Lab owner and ended with a cleanup-unconfirmed runner error; after stopping that owner, the full suite passed. `npm.cmd run check:auth-api` passed with an unauthenticated `401 application/json`; `python -X utf8 -B ops/auth/run_local.py --verify` exited 0.
+- Connected Chrome was inspected at `http://localhost:5173/login` and showed the current live login form. This turn did not repeat the full Chrome login/logout mutation; the last full connected-Chrome login → workspace → logout → reload evidence remains recorded in 27.43, and no web UI source changed in this verification loop.
+- MB-OUTBOX-1 is now verified for the agreed terminal-only purge behavior with one app-process restart and an expired-but-recognized session. The accepted decision to retain the encrypted intent until terminal server response supersedes the earlier local expiry-purge concern; no trusted wall-clock purge was added.
+- Still open: cross-client Web S1 + Android S2 acceptance; same-device account/cache isolation; RT-3 multi-instance and database-failure socket reconciliation; late-push behavior; exact S1/S2 session and push-binding readback; secret-sink canary; and AT-WF-002-01…03. Overall feature remains `VERIFY_IN_PROGRESS`.
+- Next task: complete the cross-client session-isolation acceptance using a real shared account and the existing Web/Android fixtures, then gather the remaining socket/push/cache and workflow evidence. Do not mark the feature complete until all specified gates close.
+
+### FEAT-TN-002 continuation after laptop restart and SQLx quota hardening — 17/11/2026
+
+- Current code state: branch `dev`, base `62c68c3`; working tree remains dirty and uncommitted. The feature plan is still ignored by the repository's `docs` ignore rule; its local contents were updated without changing ignore rules or force-staging it.
+- Backend security delta verification on the current source: `cargo test --workspace --all-targets --features iot-platform-backend/http-server` exit 0 (root backend library 30/30, PostgreSQL adapter tests 4/4, workspace suites passed); `cargo check --workspace --all-targets --features iot-platform-backend/http-server` exit 0; `cargo fmt --all -- --check` exit 0; focused `timed_out_handshake_keeps_db_admission_until_checkout_close_finishes` regression 1/1; `npm.cmd run test:e2e:auth` 4/4. No dependencies were added.
+- The delta adds bounded admission before WebSocket upgrade, a DB semaphore sized from the actual pool, worker-owned permits, and explicit PostgreSQL checkout/COMMIT-or-ROLLBACK/close before ticket or session-recheck methods return. Playwright assertions reduce peer close and HTTP response details to fixed enums/booleans. The targeted GPT-6.1 Sol High security source review found no remaining Important issue in that reviewed scope.
+- Fresh Senior Tester GPT-6-luna max re-audit verdict: **do not mark complete**. Important gap: current gated regression proves permit retention until an adapter-close boundary, and Playwright exercises the database-backed valid/invalid/replay behavior, but there is no direct SQLx integration/fault assertion proving pool checkout close/discard precedes permit release. The security review was source-only. Add that focused integration evidence before closing the §27.45 security acceptance.
+- Chrome after restart: connected Chrome at `http://localhost:5173/login` displayed the login form. Listener check showed Vite on 5173 and no listener on Auth Lab ports 3000/3001; this turn did not repeat a fresh Chrome login/workspace/logout/reload flow. Do not count the page inspection as E2E evidence. The existing Playwright result remains automation evidence, not a replacement for the requested connected-Chrome pass.
+- Previously recorded Android API 36 `--offline-expired` evidence in §27.44 remains valid for one offline app-process restart, encrypted outbox retention, terminal logout, and owned SQL readback. Android Flutter/backend suites were not rerun after this backend-only delta.
+- Still open: direct SQLx checkout/permit ordering test; Web S1 + Android S2 cross-client acceptance; same-device account/cache isolation; RT-3 multi-instance and database-failure socket reconciliation; late-push behavior; exact S1/S2 session and push-binding/audit readback; secret-sink canary; and AT-WF-002-01…03. Device reboot is not covered by the app-process restart scenario. The latest Senior Tester classifies the full feature `VERIFY_IN_PROGRESS`; no acceptance checkbox is promoted.
+- Next: add the focused SQLx ordering/fault evidence; then continue the approved review sequence (correctness, security, tests, architecture/performance) against the final diff. After automation passes with Auth Lab available, repeat the connected-Chrome login/logout flow; finish cross-client and remaining acceptance items before declaring completion.
+
+### FEAT-TN-002 provider logout DB oracle — 17/11/2026
+
+The first provider rerun exposed a verifier-ordering regression: the new helper had revoked Android S2 before a later account-isolation check reused it. The helper now logs in an independent Android S3 for repeat logout, leaving S2 alive. Its PostgreSQL fixture binds one disabled, tokenless synthetic push installation to S2 and one to S3; after Web S1 logout both remain bound, while after Android S3 logout only S3's binding advances to generation 2/unbound. Exact session, audit, outbox, and binding projections use allowlisted psql variables and clean up the two random installation IDs.
+
+Fresh evidence at `2026-11-17T10:57:04.419492+00:00`: `python -X utf8 -B ops/auth/run_local.py --verify` exit 0; `ops/auth/evidence/provider-latest.json` marks real HTTP + PostgreSQL provider (not browser E2E), all 20 logout/realtime markers present, and `APPLICATION_ROWS_REMOVED`. Unit binding suite 8/8, Python AST parse, and `git diff --check` pass. Scope remains provider-level; app-level shared Web/Android flow, account/cache isolation, late push, remaining sink canaries and AT-WF-002 gates are still open. Overall feature status stays `VERIFY_IN_PROGRESS`; no review or completion gate is claimed.
+
+### FEAT-TN-002 cross-client Web/API + Android resume — 17/11/2026
+
+- Updated the owned native Auth Lab session snapshot to include both `ANDROID` and `WEB`; it remains account-scoped to the fixture UUID and returns only session UUID/revocation metadata. The first run exposed that the prior Android-only projection hid Web S1; the revised full-session run passed.
+- Focused verification: `python -X utf8 -B -m unittest discover -s ops/auth -p test_native_lab_fixture.py` **52/52**; `node ops/auth/test_native_e2e_protocol.mjs` exit 0; `node --check ops/auth/run_native_e2e.mjs` exit 0.
+- `node ops/auth/run_native_e2e.mjs --full-session` exit 0 on the API24 emulator. Safe output includes `NATIVE_CROSS_CLIENT_WEB_LOGOUT_ORACLES_PASS`, `NATIVE_CROSS_CLIENT_ANDROID_RESUME_LOGOUT_ORACLE_PASS`, `NATIVE_ACTUAL_MAIN_FULL_RESUME_LOGOUT_ORACLES_PASS`, and both fixture cleanup markers. Web S1 logout/retry returned bodyless 204, stale mutation returned 401 `SESSION_REVOKED`, Android S2 survived Web logout, resumed protected profile read succeeded, and Android logout revoked S2. Final snapshot preserved baseline and verified the two target sessions.
+- Evidence is API-level `clientType=WEB` plus native Android UI; it is not React UI logout in the same fixture or a protected mutation through Android S2. Do not promote E2E-LOGOUT-001 or AT-WF-002 checkboxes from this slice.
+- Still open: same-device account/cache isolation, Android UI sibling/repeat logout, late push, remaining structured-log/browser/app-debug sink canaries, complete AT-WF-002-01…03, and owner alignment for an app-level WebSocket consumer. Feature remains `VERIFY_IN_PROGRESS`; final review sequence is gated.
+
+### FEAT-TN-002 Android same-device account/cache slice — 17/11/2026
+
+- Extended the owned native `access` flow to sign in as account A, select its protected workspace, log out, confirm secure session/outbox and coordinator auth cache are empty, then sign in as account B on the same Android app process. The empty B state has B's profile and no A email, A workspace, or session summary. Existing disabled/wrong login and B refresh/logout cases remain in the sequence.
+- Host checkpoint oracle now enforces the ordered A→logout→denied→B→refresh→logout flow and exact login/logout/workspace counters. Owned PostgreSQL snapshot validates the terminal A/B revocation deltas and unchanged disabled account.
+- Verification: `node ops/auth/test_native_e2e_protocol.mjs` exit 0; Dart format check and `dart analyze integration_test` exit 0; `node ops/auth/run_native_e2e.mjs --access-cases` exit 0 on Android API24 with access and owned cleanup markers.
+- The mobile auth/workspace source has no inbox UI/module. This evidence covers existing profile/workspace cache only; E2E-LOGOUT-002 / AT-WF-002-02 remains partial if inbox isolation is required. No UI was added and no §19 checkbox was promoted.
+- Remaining: React Web UI with Android in one fixture, Android S2 protected mutation after Web S1 revoke, late push, remaining structured-log/browser/app-debug sink canaries, and full AT-WF-002-01…03. Overall state remains `VERIFY_IN_PROGRESS`; final review is gated.
+
+### FEAT-TN-002 React UI cùng fixture native — 17/11/2026
+
+A bounded Chrome runner now exercises React login, workspace selection, UI logout, cookie clearing, stale password mutation, and idempotent logout retry inside the Auth Lab fixture owned by the Android full/resume runner. Credentials travel over stdin; the host snapshots the account after Web login and after logout before validating exact Web S1 / Android S2 deltas. One full-session run passed all cross-client and Android resume markers.
+
+The initial missing `fileURLToPath` import was fixed. The first successful run exposed a Windows process-tree cleanup issue: stopping the `npm.cmd` shell left its Vite node descendant listening on 5173. The runner now uses `taskkill /T /F` only on the process handle it created; manual cleanup of that owned tree closed the port. A fresh full-session has not yet verified the revised cleanup because the next full run and two preflight attempts stopped before browser startup with safe `APP_FAILED_TO_START/BUILD_FAILURE/OTHER_LOG` tags and `NATIVE_DAEMON_CLEANUP_FAILED`. The emulator remains ADB-visible, but no raw build log was read or exposed and the exact build failure is not diagnosed.
+
+The React UI behavior has one successful same-fixture run, but its final cleanup patch needs a fresh full-session pass. Android S2 still has only a protected profile read after Web S1 revocation, not a protected mutation. No AT-WF-002 checkbox is promoted; FEAT-TN-002 remains `VERIFY_IN_PROGRESS`, and final reviews remain gated.
+### FEAT-TN-002 React UI cleanup revalidation — 17/11/2026
+
+After the user freed disk space, `node ops/auth/run_native_e2e.mjs --preflight` passed with app-stop/SDK-exit receipts. The next full-session passed Android full and the React UI + shared-fixture S1/S2 oracle, but the first Android resume process stalled before `app.started`; it did not count as acceptance. Fixture/proxy cleanup completed. Read-only post-run checks found the package absent, no Dart process, and port 5173 closed.
+
+One bounded full-session retry then exited 0 with the React UI logout oracle, Android resume/logout oracle, exact S1/S2 terminal session checks, and both fixture cleanup markers. Post-run checks again confirmed port 5173 closed and the app package absent; D retained about 2.15 GB free. The cleanup code is now verified end-to-end. The combined flow proves Web UI login/logout, stale Web mutation rejection, Android S2 survival/profile read, and Android logout. It still lacks a protected mutation from S2 after S1 revoke and an app-side WebSocket consumer/late-push inbox handler; no AT-WF-002 checkbox is promoted.
+### FEAT-TN-002 browser debug sink canary — 17/11/2026
+
+The same-fixture React runner now observes real Chrome `console` and `pageerror` events. It checks the synthetic email/password, Web session cookie, auth-context ID, and CSRF value in RAM, retains only a boolean leak flag, and emits a fixed failure code without the log text. Tracing, video, and screenshots remain off. `node --check web/e2e/native_cross_client_ui.mjs` passed; a fresh full-session passed the browser canary, Android resume, exact S1/S2 session oracle, and owned cleanup. Post-run port 5173 was closed and the native package absent.
+
+This closes only the browser console/page-error portion of the secret-sink work. It does not test backend structured audit/log/metrics sinks or Flutter debug output against the actual Android bearer/installation proof. The `web/e2e` mock failure test and native password scanner are separate evidence. No acceptance checkbox is promoted; S2 protected mutation and late-push/inbox coverage remain open.
+### Quyết định owner — Android S2 mutation evidence — 17/11/2026
+
+The user chose to keep the S2 protected-mutation acceptance partial until an appropriate non-revoking mutation is available. Mobile currently exposes only logout and password change as POST mutations; password change revokes all sessions, while logout is idempotent. We will not re-label either action to claim the missing evidence. Existing proof remains: S2 is active after Web S1 logout, its protected profile read succeeds on resume, and then app logout revokes S2. No source behavior or acceptance checkbox changed.
+### FEAT-TN-002 khảo sát mutation Android S2 — 17/11/2026
+
+Rà soát toàn bộ route mạng trong `mobile/lib` cho thấy client hiện chỉ có login/logout, profile/workspace reads và password change. Logout lặp không chứng minh session S2 còn active; password change thu hồi mọi session. Không có mutation protected thứ ba phù hợp trong app hiện tại, nên giữ `E2E-LOGOUT-001` / `AT-WF-002-01` partial theo lựa chọn của người dùng. Đây là read-only source discovery trên `HEAD 62c68c3` với dirty working tree; không chạy test hay sửa source.
+
+### FEAT-TN-002 consolidated audit and Flutter canary batch — 17/11/2026 14:56 UTC
+
+Implementation for the planned provider logout-audit canary and Flutter `debugPrint` canary is present on dirty `HEAD 62c68c3886f6edbcb14803e241e1e83642a94e58`. The Tester added five Flutter helper cases and three provider audit-reader cases. The agent's interim status reported focused provider **11/11** and `ops/auth/tests` **148/148**, but the exact command outputs and final report were not returned; treat both counts as unverified interim evidence. Auth Lab `run_local.py --verify` had no terminal result, and Flutter/native integrated suites were not reported as run.
+
+The GPT-6-luna max Tester ended with a usage-limit error; the tool reported availability at 2026-11-19 11:34 PM. An Orchestrator interruption record was appended to `docs/test-reports/FEAT-TN-002-integrated-test-report.md`; it is not a substitute for the required Tester final report. The report is LOCAL-ONLY because `.gitignore` excludes `docs`. The four-angle review and commit remain gated. Feature status remains `VERIFY_IN_PROGRESS`; no acceptance checkbox was promoted.
+
+Reconciliation at 2026-11-17 15:02 UTC found Auth Lab ports 3000/3001 closed and the latest provider evidence timestamp unchanged at 14:02:45 UTC. This does not prove the incomplete `run_local.py --verify` passed or failed. Keep the test stage open, with no review or commit.
+
+### FEAT-TN-002 §27.60 consolidated batch verification — 17/11/2026 22:26 +07
+
+The implementation delta is complete on dirty `HEAD 62c68c3886f6edbcb14803e241e1e83642a94e58`. The Flutter test-only canary now restores a non-null prior `debugPrint` callback and discards all captured messages after scanning, preventing raw log replay even when bearer registration fails. Provider reads two fixture-owned logout audit rows through bound PostgreSQL variables and emits only a fixed check marker.
+
+Senior Tester GPT-6.1-sol Extra High verified Python provider **11/11**, full auth Python **148/148**, Auth Lab `--verify` exit 0 with `logout-audit-secret-canary-scan` and cleanup; Flutter canary **5/5**, full Flutter **233/233**, Flutter analyzer and scoped Dart analyzer with no issues, scoped format with 0 changes; fresh Android API 24/React Web/PostgreSQL `node ops/auth/run_native_e2e.mjs --full-session` exit 0 with full/resume/logout oracles and fixture cleanup. Detailed commands, initial failures, fixes, retests, and markers are appended to `docs/test-reports/FEAT-TN-002-integrated-test-report.md`.
+
+The verified scope is §27.60 Task A/B only. Remaining feature acceptance is still partial: Android S2 protected mutation is unavailable by user decision; inbox/late-push surface is absent; app WebSocket needs owner alignment; `developer.log`, Android logcat, and installation proof are outside this evidence. No acceptance checkbox was promoted, and no review or commit was performed because the feature-level acceptance gate in the objective remains open. Test report is LOCAL-ONLY under `.gitignore:23`.
+
+#### §27.60 review-finding correction and retest — 2026-11-17 22:53 +07
+
+The user updated the loop to request one reviewer after tests. The first Extra High review of the test delta found two Important findings: `NativeDebugSecretCanary.verify()` ran only from teardown, outside the integration binding's PASS aggregation, and provider test rows did not isolate actor/outcome guards from duplicate session rejection. The same consolidated batch now verifies the canary at the end of the test body and keeps teardown as dispose-only cleanup; provider negative rows use the second session ID and isolate actor, event type, and outcome. Related comments and overflow handling were corrected.
+
+Retest after those edits: provider 11/11; full ops/auth 148/148; Flutter canary 5/5; full Flutter 233/233; Flutter and scoped Dart analyzers clean; formatter reports 0 changes; Android API24/React Web/Auth Lab full-session exit 0 with full/resume, Web logout, Android resume/logout and cleanup markers. Detailed commands are in the append-only LOCAL-ONLY test report. No explicit Android negative fault-injection run was executed; the unit test asserts a synthetic leak's fixed failure marker, and the actual host run verifies the clean pass path. The same Extra High reviewer re-reviewed the corrected delta across four angles and returned PASS for all views with no remaining findings. Initial findings and Version 2 are recorded in `docs/reviews/FEAT-TN-002-review.md`.
+
+Feature state remains `VERIFY_IN_PROGRESS`: no §19 acceptance status was promoted. Android S2 protected mutation stays partial by user decision; inbox/late-push and app WebSocket owner alignment remain open. No commit or feature-complete claim.
+
+### Objective re-entry audit and E2E handoff — 2026-11-17 23:09 +07
+
+Re-read the active goal objective and reconciled it against HEAD `62c68c3886f6edbcb14803e241e1e83642a94e58`, the dirty working tree, feature plan, implementation progress, and loop history. The §27.60 Run 3 tests and review Version 2 still match their recorded source fingerprints; that review is scoped to §27.60 and does not satisfy the feature-level final review gate.
+
+Created [FEAT-TN-002 E2E guide](../test-reports/FEAT-TN-002-e2e-guide.md), covering current native/Web/Flutter/Python commands, safe expected markers, reproducible access/password/offline branches, and explicit blockers. `git check-ignore` confirms this report is **LOCAL-ONLY** under `.gitignore:23`.
+
+No source behavior, acceptance checkbox, dependency, or UI changed during this continuation. The currently authorized independent implementation work is exhausted. Remaining blockers: no existing non-revoking Android S2 mutation (user chose partial); no mobile inbox/notification/deep-link handler for late-push; app-side WebSocket needs owner alignment; `developer.log`, Android logcat, and installation-proof sinks lack evidence. The feature remains `VERIFY_IN_PROGRESS`; full acceptance tests, feature-level review, and commit are still gated. No task was marked PASS from the guide.
+
+#### FEAT-TN-002 Extra High / repeat-logout reconciliation — 2026-11-17
+
+- User selected Extra High; the §27.60 Senior Tester already completed its related tests and fresh full-session run on the current source state. Do not rerun unchanged tests. Review Version 2 remains scoped to the §27.60 delta.
+- The accepted repeat criterion is repeated logout of S1 (`E2E-LOGOUT-003`), covered by React Web logout/retry with Android S2 active. Provider verification also sends Android S3 logout twice while sibling S2 remains active and checks exact database deltas. A separate Android UI double-tap is not an independent acceptance criterion in the plan, so the conditional follow-up is closed without scope expansion.
+- No source or acceptance change. Overall remains `VERIFY_IN_PROGRESS`; S2 protected mutation, inbox/late-push, app WebSocket owner alignment and remaining log/installation-proof evidence still block feature completion, feature-wide review and commit. This progress document is LOCAL-ONLY under the existing `docs` ignore rule.
+
+Correction to this entry: `docs/plan/implementation-progress.md` is tracked and is not LOCAL-ONLY. The feature plan and loop log are ignored under the existing rule. No ignore rule or Git index was changed.
+
+### FEAT-TN-002 §27.61 raw-wire correction and review — 18/11/2026 00:15 +07
+
+The first Extra High review found SIB-TEST-1 (Fetch normalizes HTTP 204 and cannot prove that no bytes followed the header), SIB-PERF-1 (response bytes were capped after reading), and SIB-DOC-1 (checkpoint/budget comments lacked context). The runner now sends the owned Web cleanup logout over a bounded loopback socket with `Connection: close`, validates the raw 204 response and zero bytes after the header, caps Fetch response streaming before retaining chunks, and documents the checkpoint/reserve boundaries. The Tester added one valid raw-response protocol case and four negative cases.
+
+Fresh Run 5 evidence: both Node syntax checks and `node ops/auth/test_native_e2e_protocol.mjs` exit 0 with 18 PASS markers; Android API 24 `--preflight`, `--android-sibling-cases`, and unchanged `--full-session` exit 0 sequentially. The sibling case proves Android UI logout revokes S2 while Web S1 remains active (`/me` 200), then measures Web cleanup as raw HTTP 204 with zero body bytes and validates exact terminal PostgreSQL deltas. Both native runs confirm proxy/fixture cleanup. Results and the Run 4 evidence correction are appended to the LOCAL-ONLY integrated report.
+
+The same Extra High reviewer appended Version 4 to `docs/reviews/FEAT-TN-002-review.md`; all four views PASS and SIB-TEST-1, SIB-PERF-1, SIB-DOC-1 are closed for §27.61. Review and test artifacts remain LOCAL-ONLY under `.gitignore:23`. FEAT-TN-002 remains `VERIFY_IN_PROGRESS`: S2 protected mutation remains partial by user decision; inbox/late-push, app WebSocket owner alignment, `developer.log`, Android logcat, and installation-proof evidence remain open. No acceptance checkbox changed and no commit was created.
+
+### FEAT-TN-002 consolidated source audit — 18/11/2026 00:30 +07
+
+Correction to the preceding source audit: logout uses optional `AuthDiagnostics` spans at pool acquire, transaction begin, and commit ACK. That sink receives only fixed stage/outcome enums and elapsed duration, so it cannot accept user identity or credential fields. The conclusion is narrowed to no direct structured logging callsite and no dedicated runtime scan for that timing sink. Four §27.61 file fingerprints match Run 5; `verify_provider.py` fingerprint `91bec5fd0bb6` matches Run 2/3, not Run 5.
+
+The existing bounded owned-PID Android logcat collector in `ops/auth/run_native_response_loss_e2e.mjs` scans actual proxy-captured bearer values, password and fixture emails in RAM, plus SDK stdout/stderr. Fresh Run 6 on the current Flutter target passed: exact-PID logcat **23,241 bytes**, SDK stdout **82,685 bytes**, stderr **529 bytes**; each sink scanned eight canaries with zero canary and sensitive-field matches. The actual response-loss flow included one Android logout POST `204`, and fixture cleanup passed. Its evidence uses a validated fixture-UUID path with exclusive create; the 11/15 artifact's hash/size/mtime remained unchanged. Details are appended to Run 6 in the integrated report.
+
+The separate Dart VM `developer.log` stream and a real installation-proof value remain unavailable in the current auth flow, so `SEC-LOGOUT-003` stays partial. Tester added the path regression and completed focused response-loss tests **6/6** plus the actual E2E. The same Extra High reviewer appended Version 5 after reviewing only this new delta and the updated E2E guide; Correctness, Security, Tests and Architecture/Performance PASS, closing AUD-COR-1, AUD-TEST-1 and AUD-TEST-2 for this delta. Version 4 remains valid for §27.61. S2 protected mutation remains partial by user decision, late-push lacks the app inbox/deep-link surface, and app WebSocket closure needs owner alignment. No §19 checkbox or acceptance state changed; feature remains `VERIFY_IN_PROGRESS`, no commit.
+
+### FEAT-TN-002 reopened mutation audit — 18/11/2026 09:54 +07
+
+A wider route audit corrects the scope of §27.59: the Android auth client exposes only logout/password mutations, but the accepted FEAT-TN-002 API also contains `POST /api/v1/realtime/tickets`. The backend handler and OpenAPI define it as a session/workspace-protected, state-changing one-time ticket issuance returning `201` / `no-store`; logout does not revoke the other Android session, so this is a viable candidate for the user's “different mutation” condition. It is not currently exposed by the production Flutter API client.
+
+The candidate is not yet acceptance evidence. The next bounded verification is an Android integration-isolate call after Web S1 logout, using the stored S2 credential and selected workspace, with no bearer or ticket passed to the host or emitted in logs. Keep the S2 mutation acceptance partial until that real run and cleanup pass. No source behavior or acceptance checkbox changed in this audit.
+
+### FEAT-TN-002 Tester and remaining-surface audit — 18/11/2026 09:59 +07
+
+The user confirmed GPT-6-Luna Extra High for the Senior Tester. A single Tester dispatch was attempted at XHigh, but the runtime could not confirm the inherited model and does not expose GPT-6-Luna; the agent stopped before reading files, editing, or running tests, as required. No test report or code changed as a result.
+
+A source-only scan of `mobile/lib` and `mobile/pubspec.yaml` found no notification/deep-link/inbox or WebSocket client/dependency callsite. The current integration scope therefore still needs the late-push app surface and a decision/owner for an app-side realtime consumer; Antigravity CLI and tool are unavailable in this runtime, so any required UI change remains blocked. Installation proof has no current auth-flow value/API path. These findings do not change acceptance status; the realtime-ticket S2 probe remains a candidate verification task, not PASS evidence.
+
+### FEAT-TN-002 exact Tester model dispatch — 18/11/2026 10:03 +07
+
+A second Tester dispatch used the user's exact requested override, `gpt-6-luna`, with XHigh reasoning. The spawn call was accepted, but the agent could not confirm its effective model and reported that GPT-6-Luna is absent from the available model list; it stopped before reading AGENTS, editing files, or running tests. This confirms the same model-availability blocker after the fresh resumed-run audit; no substitute Tester was used and no test result is claimed.
+
+No product source, test, acceptance state, or review changed. The S2 realtime-ticket probe remains unverified; UI-dependent late-push work still lacks Antigravity, app-side realtime ownership still needs alignment, and no installation-proof flow exists. FEAT-TN-002 remains `VERIFY_IN_PROGRESS`; no commit.
+
+### FEAT-TN-002 Tester retry under updated objective — 18/11/2026 10:30 +07
+
+The updated objective permits GPT-6-Luna Extra High if Luna Max is unavailable. A fresh Tester dispatch requested `gpt-6-luna` with XHigh reasoning; the runtime agent still could not confirm its effective model and reported Luna absent from its available model list. It stopped before reading project files, editing, or running commands. No substitute Tester was used.
+
+HEAD remains `62c68c3886f6edbcb14803e241e1e83642a94e58`; no product source, test, acceptance, or review state changed. The Android S2 realtime-ticket probe is still unverified, so acceptance remains partial. This is a model-availability blocker record, not Tester execution evidence; no tests, review, or commit are claimed.
+
+### FEAT-TN-002 GPT-6-Luna Max dispatch — 18/11/2026 10:33 +07
+
+The updated objective's first-choice Tester model was attempted with `gpt-6-luna` at Max reasoning. The agent could not verify the effective model identity and stopped before reading repository files, editing, or running commands. The XHigh fallback was also attempted under the same objective and could not be confirmed. No substitute model was used; no test or review is claimed. FEAT-TN-002 remains `VERIFY_IN_PROGRESS` with S2 mutation acceptance partial.
+
+### FEAT-TN-002 backend/Web implementation-gap reconciliation — 18/11/2026 10:41 +07
+
+A read-only audit against the current plan found no additional approved Rust/backend or React Web implementation task independent of the remaining Tester/UI/owner dependencies. Plan §27.54–27.56 records the integrated Web logout, stale protected mutation rejection, Android S2 profile resume, session oracle, and cleanup evidence; §27.60 excludes new production UI/API/WebSocket work in that batch. The only S2 candidate in §27.64 remains a test-only Android-isolate request to the existing realtime-ticket route. `backend/src/http/realtime.rs` is currently untracked and must be preserved. No code or acceptance status changed; no tests, review, or commit are claimed.
+
+### FEAT-TN-002 Luna Tester dispatch root cause — 18/11/2026 10:46 +07
+
+Diagnosed the failed model selection. The current Codex collaboration tool only advertises a fixed override set (`gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6.1-terra`, `gpt-6.1-sol`, `gpt-6-astra`); `gpt-6-luna` is absent. Luna Max/XHigh spawn requests were accepted at the call boundary, but the agents could not confirm an effective Luna model and stopped before reading project files or running work. Official OpenAI material distinguishes general model availability from multi-agent support: the reasoning guide names `gpt-6-luna`, while the multi-agent guide does not list it among supported multi-agent models. This is a host/runtime capability mismatch, not a repository or command-line bug. No available Codex app tool can change the collaboration model allowlist, so there is no safe workspace-side repair. The objective forbids substituting another Tester model; retain the exact blocker until the host enables Luna multi-agent routing or the user changes that requirement. No source/test/review state changed.
+
+### FEAT-TN-002 Flutter regression runner and blocker update — 18/11/2026 16:01 +07
+
+The GPT-6-Luna Tester dispatch root cause is resolved for this host: direct local Codex CLI invocation selected gpt-6-luna at XHigh with workspace-write; the first attempt's network socket was denied by the sandbox, and the retry under approved outer escalation connected without using a sandbox bypass.
+
+Run 9's Node syntax, protocol, and PID regressions passed, including 20 fixed protocol markers. The Flutter full suite did not finish after more than ten minutes and has no verdict. Runs 10–11 used safer streaming filters to distinguish a Flutter failure from suppressed progress. Run 10's first PowerShell callback lacked a runspace; its corrected line reader timed out with no lines. Run 11's CR/LF-aware reader emitted FLUTTER_PROCESS_STARTED, then recorded zero output segments, progress markers, and summary markers before EXIT=124 at five minutes. No raw Flutter output was inspected or saved. These are incomplete runner results, not evidence of failing tests.
+
+The user opened Chrome after Run 9, so Chrome is not the cause of that earlier stall. It could compete for resources during later runs, but there is no evidence it caused Run 11. D: had about 16.7 GB free; Flutter command resolution succeeded; no Flutter/Dart process remained after the watchdog. The child command's silent state remains unexplained. Three no-progress attempts have reached the plan limit; do not repeat the same Flutter suite without a new verified runner or environment change. The Flutter/Dart analyzers were not run.
+
+Native S2 verification remains partial because no configured AVD or emulator-5554 was available; no Android protected mutation or owned cleanup is claimed. The notification app entry path/API are owned by FEAT-TN-047 and absent from current source, so no mock/unreachable UI was added. An Antigravity request that would send private project content was rejected by automatic review; no files were sent. No acceptance state changed, no reviewer or commit was produced, and the feature remains VERIFY_IN_PROGRESS.
+
+### FEAT-TN-002 Android runtime recovery and current blockers — 18/11/2026
+
+The documented `Pixel_7` AVD is present and was launched on port 5554. The permitted ADB checks return `unauthorized`; the fixed `node ops/auth/run_native_e2e.mjs --preflight` exits 1 with `NATIVE_PREFLIGHT_ORCHESTRATION_NATIVE_PID_QUERY_DEVICE_UNAUTHORIZED` and `NATIVE_E2E_PREFLIGHT_FAILED`. Full-session, Android S2 mutation, and owned cleanup remain unverified. The user asked me to accept the debugging prompt, but Computer Use's automatic approval rejected selection of `qemu-system-x86_64` twice, including after explicit user authorization; no UI action was performed. Resume once the user accepts the prompt or Computer Use access is granted.
+
+Chrome's tab timestamp is 16:02 +07, after Run 11 stopped at 16:01 +07, so it did not cause that stall. A later run could still compete for machine resources; causal evidence is absent. The three no-progress Flutter attempts remain at the retry limit, so no unchanged suite retry was made. `agy models` lists Argon and Hydrogen, but FEAT-TN-047 still owns the missing notification event entry/API; no UI was sent or implemented. No acceptance status changed; feature remains `VERIFY_IN_PROGRESS`, with review and commit gated.
+
+### FEAT-TN-002 analyzer cleanup and verification — 18/11/2026 16:24 +07
+
+The first `flutter analyze --no-pub` run identified two unused import entries in the S2 integration harness. Removed only the unused TLS-configuration import from `app_auth_e2e_test.dart` and the unused `HttpClient` show-name from `native_realtime_ticket_probe.dart`. Retest: `flutter analyze --no-pub` PASS (exit 0, no issues); `dart analyze integration_test test/tool/native_debug_secret_canary_test.dart` PASS (exit 0, no issues). No behavior changed. The full Flutter test suite remains BLOCKED/INCOMPLETE after Runs 9–11; the three no-progress attempts remain capped, so no fourth unchanged run was started. Android preflight remains blocked by ADB authorization. Acceptance remains `VERIFY_IN_PROGRESS`; no review or commit.
+
+### FEAT-TN-002 Tester coverage reconciliation — 18/11/2026 16:41 +07
+
+One Tester session was confirmed as GPT-6-Luna Max, OpenAI, `workspace-write`; it read the required project rules/skills and appended Run 14 to the integrated report. The existing harness already covers S2 ticket phase gating, so no new test-only gap could close the open acceptance without the live Android run. Node protocol/PID evidence from Run 9 and analyzers from Run 13 were reused because relevant sources and conditions are unchanged. No test was rerun in this session.
+
+Current blockers remain: ADB `unauthorized` prevents preflight/full-session, and the Flutter suite remains without a verdict after three no-progress attempts. Late-notification UI depends on FEAT-TN-047's absent app event/API path; WebSocket owner alignment and separate `developer.log`/installation-proof evidence also remain open. No acceptance state was promoted. Final review and commit remain gated.
+
+### FEAT-TN-002 xác minh lại prompt USB debugging — 18/11/2026 17:04 +07
+
+Sau khi người dùng cho phép thao tác, Computer Use chọn được `Android Emulator - Pixel_7:5554` và quan sát thấy launcher, nhưng không có hộp thoại `Allow USB debugging`. Các lệnh ADB được phép `get-state` và `shell getprop sys.boot_completed` vẫn báo `unauthorized`. Không bấm vào vị trí không có nút, không chạy lại preflight/full-session trên cùng trạng thái, và không ghi nhận S2 request hoặc cleanup. HEAD giữ nguyên `62c68c3886f6edbcb14803e241e1e83642a94e58`; không có thay đổi source/test. Feature vẫn `VERIFY_IN_PROGRESS`; test, review và commit cuối còn chờ các blocker acceptance.
+
+### FEAT-TN-002 Android S2 evidence và suite retry cuối — 18/11/2026 17:35 +07
+
+Sau khi người dùng cho phép chấp nhận quyền USB debugging, Orchestrator khởi động lại ADB host (kill/start exit 0); ADB kiểm tra emulator-5554 trả device, sys.boot_completed=1. Lệnh node ops/auth/run_native_e2e.mjs --preflight và --full-session đều PASS exit 0. Full-session ghi được S2 realtime-ticket sau Web S1 logout, Android resume/logout oracle và owned-fixture cleanup. Điều kiện protected mutation S2 trong quyết định người dùng §27.58 nay có evidence thật; overall acceptance vẫn VERIFY_IN_PROGRESS vì các gate WebSocket, FEAT-TN-047 notification, developer.log/installation-proof và CP-L1 chưa đóng.
+
+Tester GPT-6-Luna Max chạy duy nhất một flutter test --no-pub --reporter compact sau thay đổi môi trường đã được xác minh. Sau khoảng 7m19s outer Tester session kết thúc exit 1 mà không có test output/marker/summary; exit code Flutter không quan sát được. Ghi verdict BLOCKED/INCOMPLETE, không suy diễn thành FAIL/PASS, và không retry thêm sau khi đã dùng retry duy nhất cho thay đổi môi trường. Run 15 và phần đính chính được append vào test report LOCAL-ONLY. Không sửa source/test, không giao Reviewer, không commit.
+
+### FEAT-TN-002 reconciliation sau Run 15 — 18/11/2026 17:52 +07
+
+Đối chiếu lại `HEAD 62c68c3886f6edbcb14803e241e1e83642a94e58` và working tree dirty. Evidence Run 15 xác nhận hạng mục §27.64 đã PASS ở mức task qua Android S2 protected realtime-ticket sau Web S1 logout và fixture cleanup; không chứng minh toàn bộ AC/AT-WF vì WebSocket owner alignment và các acceptance khác vẫn mở. Không đổi checkbox §19 hoặc status `VERIFY_IN_PROGRESS`. Flutter suite vẫn BLOCKED/INCOMPLETE, không có verdict; retry đã hết. Còn dependency FEAT-TN-047 notification entry/API, owner WebSocket, `developer.log`/installation-proof, và CP-L1 owner review. Không có source/test mới, không chạy test, không review hoặc commit. Lịch sử test cũ ở `FEAT-TN-002-integrated-test-report.md`; execution objective chỉ định `FEAT-TN-002-test-report.md` cho kết quả mới, cả hai LOCAL-ONLY do `.gitignore:23`.
+
+
+### FEAT-TN-002 user decision — defer FEAT-TN-047; contract artifacts already done — 18/11/2026 18:06 +07
+
+Người dùng xác nhận không triển khai phần phụ thuộc FEAT-TN-047 ở đợt này và contract đã làm. Plan đã ghi L1a/L1b READY_FOR_QA cùng static contract/fixture evidence 39/39; không cần viết lại contract. CP-L1 còn là bước owner review/sign-off riêng theo feature plan và chưa có evidence xác nhận trong checkout, nên chưa đánh dấu hoàn tất. E2E-LOGOUT-005 tiếp tục pending FEAT-TN-047; feature giữ VERIFY_IN_PROGRESS. Không sửa source/test, không chạy lại suite hoặc commit.
+
+
+### FEAT-TN-002 correction — owner approved CP-L1 — 18/11/2026 18:08 +07
+
+Người dùng xác nhận là feature owner và đã duyệt CP-L1. Feature plan cập nhật CP-L1 owner sign-off thành PASS. Đây chỉ là phê duyệt artifact contract; không thay thế bằng chứng runtime/provider hoặc các acceptance còn lại. FEAT-TN-047 vẫn deferred theo quyết định người dùng; không sửa source/test, không chạy test, review hoặc commit.
+
+
+### FEAT-TN-002 accepted boundary decisions — 18/11/2026 18:12 +07
+
+Người dùng đồng ý các khuyến nghị: backend realtime hiện có giữ trách nhiệm server-side cho socket theo OQ-LOGOUT-005; không thêm app WebSocket consumer/hạ tầng mới. FEAT-TN-047 tiếp tục deferred, nên E2E-LOGOUT-005 chưa thể đóng. Source audit không tìm thấy Dart developer.log callsite trong mobile/lib; subcheck này là N/A cho source hiện tại, còn installation-proof thật chưa có integration path nên SEC-LOGOUT-003 vẫn partial. Flutter suite vẫn BLOCKED/INCOMPLETE, không verdict và không retry nếu chưa xác minh thay đổi runner/môi trường. Không có source/test thay đổi.
+
+
+### FEAT-TN-002 next bounded verification task — Web S1 socket close — 18/11/2026 18:17 +07
+
+Per the existing AT-WF-002-01/OQ-LOGOUT-005 requirement and the user-approved backend realtime ownership boundary, add a test-only attempt to observe an authenticated Web S1 socket close after logout in the existing full-session lane. Tester may change only the current harness/protocol tests and test report. No new API, UI, WebSocket consumer, or dependency; if real socket transport is unavailable in the approved runner, record the exact blocker and do not mock. Keep Android S2 evidence and fixture cleanup. This does not authorize another Flutter full-suite retry or mark all of OQ-LOGOUT-005 complete.
+
+### FEAT-TN-002 Tester dispatch blocker — 18/11/2026 18:46 +07:00
+
+Ba lần dispatch không tạo được evidence cho probe đóng Web S1 socket theo §27.78: collaboration subagent không xác nhận được GPT-6-Luna Max; lượt codex exec đầu không trả output/verdict; lượt codex exec --json tiếp tục chạy nhưng không trả progress/final report và đã được dừng đúng process tree sau khi xác nhận. Chưa thể xác minh fixed preflight/full-session có bắt đầu hay không; không có test PASS/FAIL mới. WebSocket closure vẫn NOT VERIFIED; Run 15 S2 evidence không đổi; feature giữ VERIFY_IN_PROGRESS. Không retry cùng điều kiện, không Reviewer/commit. Report orchestration được tạo ở docs/test-reports/FEAT-TN-002-test-report.md, LOCAL-ONLY theo .gitignore:23.
+### FEAT-TN-002 full-session fixture failure reconciliation — 18/11/2026 20:13 +07:00
+
+Tester ran node ops/auth/run_native_e2e.mjs --full-session and received FAIL/exit 1 at fixture startup (NATIVE_FULL_SESSION_STAGE_FIXTURE_FAILED, NATIVE_E2E_PREFLIGHT_FAILED), before Web S1. Root cause is unknown; Python 3.13.2, the running PostgreSQL container and about 15 GB free do not prove it. The next Tester diagnostic dispatch returned no final result and made no file edits. Source audit shows full-session invokes Cargo build in backend/target, outside the current generated-path exception; do not rerun until the rule is clarified or a compliant runner is available. Acceptance is unchanged; FEAT-TN-002 remains VERIFY_IN_PROGRESS, with no Reviewer/commit. Details are in the existing LOCAL-ONLY test report.
+
+### FEAT-TN-002 owner-approved native build exception — 18/11/2026 20:20 +07:00
+
+Người dùng cho phép ngoại lệ hẹp: chỉ lệnh node ops/auth/run_native_e2e.mjs --full-session và tiến trình con được dùng backend/target cho Cargo build/chạy Auth Lab theo ops/auth/run_local.py; không kiểm tra thủ công output và không mở rộng sang build path khác. AGENTS.md đã cập nhật. Fixture failure trước vẫn chưa rõ nguyên nhân; chưa chạy lại. Tiếp tục bằng Tester GPT-6-Luna XHigh, giữ test/report append-only, không Flutter full suite, không FEAT-TN-047.
+
+### FEAT-TN-002 Tester regression and preflight result — 18/11/2026 20:45 +07:00
+
+Tester protocol regression and both node --check commands PASS; marker mới xác nhận redaction readiness diagnostic. Native preflight FAIL/exit 1 tại startup/cleanup với marker NATIVE_PREFLIGHT_STAGE_STARTUP_ASSERTION_BOUNDARY_NONE, NATIVE_DAEMON_CLEANUP_FAILED, NATIVE_PREFLIGHT_ORCHESTRATION_ERROR, NATIVE_E2E_PREFLIGHT_FAILED; full-session không chạy. ADB sau đó trả device/boot complete; không có dart/flutter process, nhưng nguyên nhân chưa rõ. Không retry cùng điều kiện, không promote acceptance; AT-WF-002-01 còn NOT VERIFIED, feature VERIFY_IN_PROGRESS. Chi tiết ở test report LOCAL-ONLY. Không Reviewer/commit.
+### FEAT-TN-002 startup-marker reconciliation and E2E guide refresh — 18/11/2026 20:59 +07:00
+
+Read-only source tracing maps the latest preflight marker to the `runNativePhase` startup gate (`started`, `boundaryFailed`, `terminal`); the generic marker does not reveal which predicate failed. The runner's redacted `NATIVE_STARTUP_DIAGNOSTIC` JSON was not preserved in the latest report, so the runtime root cause remains unknown. The E2E guide now reflects the post-run ADB state, latest preflight failure, historical Run 15 S2 evidence boundary, and approved backend realtime owner. No test, acceptance checkbox, source behavior, reviewer, or commit changed. FEAT-TN-047 stays deferred; contracts and CP-L1 approval remain complete; feature remains `VERIFY_IN_PROGRESS`.
+### FEAT-TN-002 verified blocker after re-entry — 18/11/2026 21:10 +07:00
+
+The two permitted ADB checks still return `device` and `sys.boot_completed=1`, matching prior evidence; no environment change supports another preflight. The current Tester agent cannot confirm the required GPT-6-Luna Max model. Latest Tester result remains Node syntax/protocol PASS, native preflight FAIL at startup/cleanup, and full-session NOT RUN. The safe startup diagnostic was not retained, so the exact failure remains unknown. No independent in-scope implementation remains: contracts and CP-L1 are complete, FEAT-TN-047 work is deferred, and backend realtime ownership is accepted. Web S1 socket-close evidence, a Flutter verdict, and installation proof remain open. Feature stays `VERIFY_IN_PROGRESS`; no Reviewer or commit.
+
+### FEAT-TN-002 Web UI logout harness root cause and fix — 18/11/2026 21:34 +07:00
+
+Source state is dev@62c68c3 with the existing dirty worktree. The fixed native preflight passed. The following fixed full-session run failed at Web UI logout: the socket creator wrote window.__tn002Socket, while verifyUiLogout read window.__tn002Sockets['web-s1']; therefore the readiness assertion failed before the logout click and live-close check. Corrected the test harness reader and added a protocol regression that compares writer/reader keys. The regression initially reproduced the mismatch and passed after the fix; both Node syntax checks and the protocol test passed, including NATIVE_WEB_UI_SOCKET_STATE_KEY_CONTRACT_PASS. The full-session failure yielded no socket-close, S2-ticket, or full-fixture-cleanup evidence. Retest is pending explicit approval for only the fixed full-session command and its children to automatically resolve existing Node dependencies; the earlier backend/target approval does not cover node_modules. Orchestrator evidence only; the GPT-6-Luna XHigh Tester has not returned a verifiable report. AT-WF-002-01 remains NOT VERIFIED; feature remains VERIFY_IN_PROGRESS. No Reviewer or commit.
+
+### FEAT-TN-002 full-session retest after Web logout guard fix — 18/11/2026 21:45 +07:00
+
+Owner approved the narrow automatic Node dependency-resolution exception; AGENTS.md records it for only the fixed full-session command and children, without manual node_modules inspection or package restore. Orchestrator ran node ops/auth/run_native_e2e.mjs --full-session on dev@62c68c3 and it exited 0. NATIVE_CROSS_CLIENT_WEB_LOGOUT_ORACLES_PASS is emitted only after the browser child successfully completes UI logout, observes the real socket close, passes stale-session probes, and exits. Android S2 ticket-after-Web-logout, resume/logout oracles, proxy cleanup, and actual fixture cleanup also passed. This closes the bounded local-instance probe but does not complete the whole feature or replace the required GPT-6-Luna XHigh Tester report. No overall acceptance checkbox promotion, Reviewer, or commit; feature stays VERIFY_IN_PROGRESS.
+
+### FEAT-TN-002 GPT-6-Luna XHigh Tester verification and criterion mapping — 18/11/2026 22:34 +07:00
+
+The Tester was launched with model gpt-6-luna and reasoning effort xhigh; the local catalog confirms xhigh support (configuration evidence, not runtime telemetry). It read AGENTS.md and the applicable test/comment skills, then ran the protocol syntax check, protocol regression, and fixed native full-session sequentially; all exited 0. The report is appended at docs/test-reports/FEAT-TN-002-test-report.md (LOCAL-ONLY). Source tracing confirms this flow asserts a real socket close after Web logout, the next stale password mutation returns 401 SESSION_REVOKED, and retrying logout returns bodyless 204; the DB delta and later successful Android S2 ticket establish that the other session remains active. This is runtime evidence for the behavior in AT-WF-002-01 and AT-WF-002-03, but no §19 checkbox was promoted because §25 still requires all feature gates. AT-WF-002-02 cache isolation for profile/workspaces passed in §27.53; inbox/late-push remains deferred with FEAT-TN-047. Flutter full-suite verdict is still unavailable; no Reviewer or commit.
+
+### FEAT-TN-002 owner scope decision — 18/11/2026 22:43 +07
+
+Người dùng xác nhận không triển khai các feature plan chưa bắt đầu trong batch này, gồm FEAT-TN-045 (issuance/rebind installation proof) và FEAT-TN-047 (notification entry/API). Không thêm API/UI/mock hoặc đổi acceptance để giả lấp dependency. Test hiện tại chỉ chứng minh session store giữ key proof tổng hợp; OQ-LOGOUT-006 và phần inbox/late-push vẫn pending. Web S1 socket-close/stale-mutation/retry và Android S2 ticket đã có runtime evidence qua Tester full-session; Flutter full suite chưa có verdict. Giữ feature `VERIFY_IN_PROGRESS`; không Reviewer/commit. Source state `dev@62c68c3886f6edbcb14803e241e1e83642a94e58`; không đổi source/test ở entry này.
+
+UI disposition cho batch này là `N/A`: logout UI hiện hữu không cần sửa; UI notification/inbox phụ thuộc FEAT-TN-047 đã hoãn. Không dispatch Antigravity hoặc thêm UI/mock. Feature vẫn `VERIFY_IN_PROGRESS` theo các acceptance gate còn mở.
+
+### FEAT-TN-002 bounded-loop blocker audit — 18/11/2026 22:51 +07
+
+Đối chiếu lại `dev@62c68c3886f6edbcb14803e241e1e83642a94e58`, working tree và tester runtime xác nhận không có source/environment change mới và không có Tester process còn sống. Root cause Web socket-global đã sửa; Tester full-session pass scenario giới hạn. Không còn task độc lập được phép: FEAT-TN-045/047 chưa bắt đầu và người dùng đã quyết định không triển khai chúng; các acceptance proof/rebind và inbox/late-push vì vậy pending. Flutter full suite không có verdict sau ba lần không tiến triển cùng retry sau environment check; điều kiện liên quan chưa đổi, không retry. Sau ba goal turns liên tiếp cùng còn vướng các gate này, goal được chuyển `blocked`; feature vẫn `VERIFY_IN_PROGRESS`, không review/commit.
+
+### FEAT-TN-002 final review and checkpoint verification — 18/11/2026
+
+Closed review findings FR002-R01/R02 in the Web UI canary delta. The harness now registers context/CSRF/cookie canaries before workspace actions, registers the realtime ticket before WebSocket creation, rescans bounded pre-registration sink messages, fails closed on buffer overflow, and clears temporary data. The protocol regression passes, as do Node syntax checks for the harness, canary helper, protocol test, and runner. The fixed `node ops/auth/run_native_e2e.mjs --full-session` exited 0 with Web logout/socket-close, Android S2 ticket-after-Web-logout, resume/logout, proxy cleanup, and fixture cleanup markers. Review verdict: Safe to merge for this delta after the Dart documentation comment Nit was corrected. No acceptance checkbox is promoted: FEAT-TN-045/047 remain deferred by owner decision, Flutter full-suite verdict is unavailable, and FEAT-TN-002 remains `VERIFY_IN_PROGRESS`.

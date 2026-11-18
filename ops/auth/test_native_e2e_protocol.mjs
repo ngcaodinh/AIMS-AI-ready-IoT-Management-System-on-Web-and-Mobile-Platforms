@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { parseDaemonLine, validateOwnedApp, normalizeExtensionResult, canSendDaemonRequest, canHandleNativeCheckpoint, validateNativePreselectionOracle, isConfirmedSpawnFailure, shutdownNativeDaemon, validateSessionDelta, validateAccessSessionDelta, createAccessCheckpointOracle, createPasswordCheckpointOracle, validatePasswordSessionDelta, nativePhaseBudget, requireWorkBudget, containsNativeSecret, validateFixtureCleanup, armNativeFixture, validateFixtureArmFrame, closeNativeFixture, startFixture } from './run_native_e2e.mjs';
+import { createBrowserSecretCanaryState, disposeBrowserSecretCanary,
+  finishBrowserSecretRegistration, observeBrowserSink, registerBrowserSecret } from '../../web/e2e/browser_secret_canary.mjs';
+import { parseDaemonLine, validateOwnedApp, normalizeExtensionResult, canSendDaemonRequest, canHandleNativeCheckpoint, validateNativePreselectionOracle, isConfirmedSpawnFailure, shutdownNativeDaemon, validateSessionDelta, validateCrossClientSessionDelta, validateAndroidLogoutPreservesWebSibling, validateRawBodyless204Response, validateAccessSessionDelta, validateAccountSwitchSessionDelta, createAccessCheckpointOracle, createPasswordCheckpointOracle, validatePasswordSessionDelta, nativePhaseBudget, nativeS2RealtimeTicketArguments, safeNativeFailureCategory, requireWorkBudget, containsNativeSecret, validateFixtureCleanup, armNativeFixture, validateFixtureArmFrame, closeNativeFixture, startFixture } from './run_native_e2e.mjs';
+
+let protocolStage = 'setup';
 
 /**
  * Tạo owned lifecycle giả để kiểm STOP/EOF, terminal và readback mà không spawn DB hoặc SDK.
@@ -34,8 +39,64 @@ function fakeFixtureLifecycle(counts) {
 
 /** Kiểm daemon/session/request counters bằng input synthetic, kể cả logout độc lập OTHER; không mở SDK/DB. */
 async function main() {
+  const webUiHarnessSource = readFileSync(new URL('../../web/e2e/native_cross_client_ui.mjs', import.meta.url), 'utf8');
+  const socketAssignment = /window\.(\w+)\s*=\s*socket\b/.exec(webUiHarnessSource);
+  const logoutHandlerStart = webUiHarnessSource.indexOf('async function verifyUiLogout');
+  const socketCloseHandlerStart = webUiHarnessSource.indexOf('async function verifyWebSessionSocketClosed');
+  assert.ok(socketAssignment && logoutHandlerStart >= 0 && socketCloseHandlerStart > logoutHandlerStart,
+    'NATIVE_WEB_UI_SOCKET_SOURCE_SHAPE_INVALID');
+  const logoutHandlerSource = webUiHarnessSource.slice(logoutHandlerStart, socketCloseHandlerStart);
+  const socketRead = /const socket = window\.(\w+)/.exec(logoutHandlerSource);
+  // Writer và logout guard phải dùng cùng property; lệch key khiến logout dừng trước khi xác minh server close.
+  assert.ok(socketRead, 'NATIVE_WEB_UI_LOGOUT_SOCKET_READ_MISSING');
+  assert.equal(socketRead[1], socketAssignment[1], 'NATIVE_WEB_UI_SOCKET_STATE_KEY_MISMATCH');
+  console.log('NATIVE_WEB_UI_SOCKET_STATE_KEY_CONTRACT_PASS');
+  // Credential phải được đăng ký trước action workspace; ticket phải được đăng ký trước khi dùng làm frame đầu.
+  const workspaceActionStart = webUiHarnessSource.indexOf("await page.getByRole('heading', { name: 'Chọn workspace' }).waitFor");
+  assert.ok(workspaceActionStart > 0, 'NATIVE_WEB_UI_WORKSPACE_ACTION_MISSING');
+  for (const credentialName of ['sessionContextId', 'csrfToken', 'sessionCookie.value', 'cookiePair']) {
+    const registration = webUiHarnessSource.indexOf(`registerBrowserSecret(sinkState, ${credentialName})`);
+    assert.ok(registration >= 0 && registration < workspaceActionStart,
+      'NATIVE_WEB_UI_AUTH_CANARY_REGISTERED_TOO_LATE');
+  }
+  const ticketRegistration = webUiHarnessSource.indexOf('window.__tn002RegisterSensitiveValue(firstFrameTicket)');
+  const webSocketCreation = webUiHarnessSource.indexOf('new WebSocket(');
+  assert.ok(ticketRegistration >= 0 && ticketRegistration < webSocketCreation,
+    'NATIVE_WEB_UI_TICKET_CANARY_REGISTERED_TOO_LATE');
+  // Log đến trước canary phải được quét lại; buffer vượt ngưỡng phải báo lỗi đóng an toàn.
+  const browserCanary = createBrowserSecretCanaryState();
+  const syntheticTicket = 'synthetic-realtime-ticket-canary';
+  observeBrowserSink(browserCanary, `message contained ${syntheticTicket}`);
+  registerBrowserSecret(browserCanary, syntheticTicket);
+  assert.equal(browserCanary.leaked, true, 'NATIVE_WEB_UI_PRE_REGISTRATION_SINK_NOT_DETECTED');
+  const completedCanary = finishBrowserSecretRegistration(browserCanary);
+  assert.equal(completedCanary.leaked, true, 'NATIVE_WEB_UI_PRE_REGISTRATION_SINK_NOT_DETECTED');
+  const overflowCanary = createBrowserSecretCanaryState();
+  observeBrowserSink(overflowCanary, 'x'.repeat(1_048_577));
+  assert.equal(overflowCanary.overflowed, true, 'NATIVE_WEB_UI_SINK_OVERFLOW_NOT_FAILED_CLOSED');
+  disposeBrowserSecretCanary(browserCanary);
+  disposeBrowserSecretCanary(overflowCanary);
+  console.log('NATIVE_WEB_UI_SECRET_CANARY_ORDER_CONTRACT_PASS');
+  assert.equal(safeNativeFailureCategory({ code: 'ENOENT', message: 'private path' }), 'ENOENT');
+  assert.equal(safeNativeFailureCategory({ code: 'ERR_ASSERTION', message: 'NATIVE_E2E_PHASE_NOT_READY' }), 'NATIVE_E2E_PHASE_NOT_READY');
+  assert.equal(safeNativeFailureCategory({ code: 'ERR_ASSERTION', message: 'NATIVE_PID_QUERY_COMMAND_FAILED_STDERR_PRESENT\nprivate details' }), 'NATIVE_PID_QUERY_COMMAND_FAILED_STDERR_PRESENT');
+  assert.equal(safeNativeFailureCategory({ code: 'ERR_ASSERTION', message: 'OLD_NATIVE_PROCESS_STILL_PRESENT' }), 'OLD_NATIVE_PROCESS_STILL_PRESENT');
+  assert.equal(safeNativeFailureCategory({ code: 'ERR_ASSERTION', message: 'private details', stack: 'Error\n    at assertNativePid (D:/workspace/ops/auth/run_native_e2e.mjs:1800:12)' }), 'ASSERTION_AT_1800');
+  assert.equal(safeNativeFailureCategory({ code: 'ERR_ASSERTION', message: 'token=private' }), 'ERR_ASSERTION');
+  assert.equal(safeNativeFailureCategory({ name: 'TypeError', message: 'private value' }), 'TYPE_ERROR');
+  assert.equal(safeNativeFailureCategory({ code: 'PRIVATE_CODE', message: 'secret value' }), 'OTHER');
+  assert.equal(safeNativeFailureCategory({ message: 'token=private' }), 'OTHER');
+  console.log('NATIVE_PREFLIGHT_FAILURE_CATEGORY_SECRET_SAFE_PASS');
   const app = { appId: '11111111-2222-4333-8444-555555555555', deviceId: 'emulator-5554',
     directory: 'D:\\CODE\\DO_AN\\DO_AN_3\\mobile', mode: 'debug', launchMode: 'run' };
+  assert.deepEqual(nativeS2RealtimeTicketArguments('resume', true),
+    ['--dart-define=AUTH_E2E_S2_REALTIME_TICKET=true']);
+  assert.deepEqual(nativeS2RealtimeTicketArguments('full', false), []);
+  assert.throws(() => nativeS2RealtimeTicketArguments('full', true),
+    { message: 'NATIVE_S2_REALTIME_TICKET_PHASE_INVALID' });
+  assert.throws(() => nativeS2RealtimeTicketArguments('resume', true, true),
+    { message: 'NATIVE_S2_REALTIME_TICKET_PHASE_INVALID' });
+  console.log('NATIVE_S2_REALTIME_TICKET_DEFINE_PASS');
   assert.equal(validateOwnedApp(app), app.appId);
   for (const invalid of [{ ...app, deviceId: 'other' }, { ...app, mode: 'release' },
     { ...app, launchMode: 'attach' }, { ...app, appId: '' }, { ...app, directory: `${app.directory}-other` }]) {
@@ -59,6 +120,8 @@ async function main() {
   assert.equal(canHandleNativeCheckpoint('full', checkpointCallback), true);
   assert.equal(canHandleNativeCheckpoint('access', checkpointCallback), true);
   assert.equal(canHandleNativeCheckpoint('resume', checkpointCallback), false);
+  assert.equal(canHandleNativeCheckpoint('resume', checkpointCallback, true), true);
+  assert.equal(canHandleNativeCheckpoint('resume', undefined, true), false);
   assert.equal(canHandleNativeCheckpoint('full', undefined), false);
   const preselectionCounts = { AUTH_LOGIN: 1, AUTH_LOGOUT: 0, PROFILE_READ: 1, WORKSPACE_LIST: 1, PASSWORD_CHANGE: 0, OTHER: 0 };
   assert.equal(validateNativePreselectionOracle('workspace-picker-before-select', preselectionCounts), true);
@@ -146,34 +209,130 @@ async function main() {
       () => validateSessionDelta(baseline, full, invalid));
   }
   console.log('NATIVE_EXACT_SESSION_DELTA_LOGIN_LOGOUT_PASS');
-  const completed = [...baseline, { sessionId: appId, revoked: true }];
-  assert.equal(validateAccessSessionDelta([], [], baseline, completed), appId);
-  for (const [disabledBefore, disabledAfter, emptyBefore, emptyAfter] of [
-    [[], [{ sessionId: otherId, revoked: true }], baseline, completed],
-    [baseline, [], [], [{ sessionId: appId, revoked: true }]],
-    [[], [], baseline, baseline], [[], [], baseline, full],
-    [[], [], baseline, [...completed, { sessionId: otherId, revoked: true }]],
-    [[], [], baseline, [{ sessionId: seedId, revoked: true }, completed[1]]],
-    [[], [], baseline, [completed[1]]], [[], [], baseline, [...completed, completed[1]]],
+  // Snapshot fixture chứng minh Web logout không thu hồi Android S2; Android chỉ revoke S2 khi App tự logout.
+  const androidId = 'dddddddd-4444-4444-8444-444444444444';
+  const webId = 'eeeeeeee-5555-4555-8555-555555555555';
+  const androidFull = [...baseline, { sessionId: androidId, revoked: false }];
+  const webLogin = [...androidFull, { sessionId: webId, revoked: false }];
+  const webLogout = [...androidFull, { sessionId: webId, revoked: true }];
+  const androidLogout = [...baseline, { sessionId: androidId, revoked: true }, { sessionId: webId, revoked: true }];
+  assert.deepEqual(validateCrossClientSessionDelta(baseline, androidFull, webLogin, webLogout, androidLogout),
+    { androidSessionId: androidId, webSessionId: webId });
+  const webLogoutWronglyRevokesAndroid = [...baseline, { sessionId: androidId, revoked: true }, { sessionId: webId, revoked: true }];
+  assert.throws(
+    /** Invariant Web revoke không được đánh dấu Android S2 revoked trước khi App logout. */
+    () => validateCrossClientSessionDelta(baseline, androidFull, webLogin, webLogoutWronglyRevokesAndroid),
+    { message: /^CROSS_CLIENT_SESSION_DELTA_INVALID/ },
+  );
+  console.log('NATIVE_CROSS_CLIENT_SESSION_DELTA_ORACLE_PASS');
+  protocolStage = 'android-sibling-session-delta';
+  // S1 được tạo trước lần đăng nhập Android để chứng minh ngay sau logout S2 thì S1 vẫn còn hoạt động.
+  const activeWebSession = { sessionId: webId, revoked: false };
+  const activeAndroidSession = { sessionId: androidId, revoked: false };
+  const revokedWebSession = { ...activeWebSession, revoked: true };
+  const revokedAndroidSession = { ...activeAndroidSession, revoked: true };
+  const webBeforeAndroidLogin = [...baseline, activeWebSession];
+  const bothActive = [...webBeforeAndroidLogin, activeAndroidSession];
+  const afterAndroidLogout = [...webBeforeAndroidLogin, revokedAndroidSession];
+  const afterWebCleanup = [...baseline, revokedAndroidSession, revokedWebSession];
+  const siblingSessionIds = { androidSessionId: androidId, webSessionId: webId };
+  assert.deepEqual(validateAndroidLogoutPreservesWebSibling(baseline, webBeforeAndroidLogin, bothActive), siblingSessionIds);
+  assert.deepEqual(validateAndroidLogoutPreservesWebSibling(baseline, webBeforeAndroidLogin, bothActive,
+    afterAndroidLogout), siblingSessionIds);
+  assert.deepEqual(validateAndroidLogoutPreservesWebSibling(baseline, webBeforeAndroidLogin, bothActive,
+    afterAndroidLogout, afterWebCleanup), siblingSessionIds);
+
+  assert.throws(/** S1 phải còn hoạt động ngay tại điểm kiểm Web login. */
+    () => validateAndroidLogoutPreservesWebSibling(baseline, [...baseline, revokedWebSession], bothActive),
+    { message: /^SESSION_ALREADY_REVOKED\b/ });
+  assert.throws(/** Android login không được làm mất hiệu lực S1 trước khi chạy logout. */
+    () => validateAndroidLogoutPreservesWebSibling(baseline, webBeforeAndroidLogin,
+      [...baseline, revokedWebSession, activeAndroidSession]),
+    { message: /^SESSION_BASELINE_CHANGED\b/ });
+
+  for (const invalidAfterAndroidLogout of [
+    bothActive,
+    afterWebCleanup,
+    [{ sessionId: seedId, revoked: true }, activeWebSession, revokedAndroidSession],
+    [...baseline, { sessionId: otherId, revoked: false }, revokedAndroidSession],
   ]) {
-    assert.throws(/** Không cấp phiên cho disabled, không che relogin/sai UUID bằng final logout flag. */
-      () => validateAccessSessionDelta(disabledBefore, disabledAfter, emptyBefore, emptyAfter));
+    assert.throws(/** Logout S2 phải đổi đúng S2, giữ nguyên bản ghi seed và UUID/trạng thái của S1. */
+      () => validateAndroidLogoutPreservesWebSibling(baseline, webBeforeAndroidLogin, bothActive, invalidAfterAndroidLogout),
+      { message: /^SESSION_LOGOUT_DELTA_INVALID\b/ });
+  }
+
+  assert.throws(/** Hai phiên revoked ở snapshot cuối không bù được việc thiếu snapshot ngay sau Android logout. */
+    () => validateAndroidLogoutPreservesWebSibling(baseline, webBeforeAndroidLogin, bothActive, undefined, afterWebCleanup),
+    { message: /^ANDROID_SIBLING_SESSION_DELTA_INVALID\b/ });
+  for (const invalidAfterWebCleanup of [
+    afterAndroidLogout,
+    [...baseline, activeAndroidSession, revokedWebSession],
+    [{ sessionId: seedId, revoked: true }, revokedAndroidSession, revokedWebSession],
+    [...afterWebCleanup, { sessionId: otherId, revoked: false }],
+  ]) {
+    assert.throws(/** Cleanup chỉ được revoke S1 và phải giữ nguyên S2 đã revoke cùng toàn bộ baseline. */
+      () => validateAndroidLogoutPreservesWebSibling(baseline, webBeforeAndroidLogin, bothActive,
+        afterAndroidLogout, invalidAfterWebCleanup),
+      { message: /^ANDROID_SIBLING_SESSION_DELTA_INVALID\b/ });
+  }
+  console.log('NATIVE_ANDROID_SIBLING_SESSION_DELTA_ORACLE_PASS');
+  protocolStage = 'raw-bodyless-204';
+  const bodylessResponse = Buffer.from('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n', 'ascii');
+  assert.deepEqual(validateRawBodyless204Response(bodylessResponse), { status: 204, bodyByteLength: 0 });
+  assert.throws(/** Byte nhị phân sau header phải bị chặn dù HTTP client có thể bỏ thân của 204. */
+    () => validateRawBodyless204Response(Buffer.concat([bodylessResponse, Buffer.from([0x00, 0xff])])),
+    { message: /^ANDROID_SIBLING_WEB_WIRE_BODY_NOT_EMPTY\b/ });
+  assert.throws(/** Response rỗng chỉ hợp lệ với status cleanup đã chốt là 204. */
+    () => validateRawBodyless204Response(Buffer.from('HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n', 'ascii')),
+    { message: /^ANDROID_SIBLING_WEB_WIRE_STATUS_INVALID\b/ });
+  assert.throws(/** Header kết thúc bằng LF thiếu phân cách HTTP CRLF nên chưa chứng minh thân rỗng. */
+    () => validateRawBodyless204Response(Buffer.from('HTTP/1.1 204 No Content\r\nConnection: close\n\n', 'ascii')),
+    { message: /^ANDROID_SIBLING_WEB_WIRE_RESPONSE_INVALID\b/ });
+  // Dùng header có cấu trúc hợp lệ nhưng vượt ngân sách 16 KiB để cô lập kiểm tra giới hạn wire.
+  const oversizeResponse = Buffer.from(`HTTP/1.1 204 No Content\r\nX-Padding: ${'x'.repeat(16_384)}\r\n\r\n`, 'ascii');
+  assert.throws(/** Một 204 rỗng vẫn bị từ chối nếu response vượt giới hạn tổng số byte. */
+    () => validateRawBodyless204Response(oversizeResponse),
+    { message: /^ANDROID_SIBLING_WEB_WIRE_RESPONSE_INVALID\b/ });
+  console.log('NATIVE_ANDROID_SIBLING_RAW_BODYLESS_204_ORACLE_PASS');
+  protocolStage = 'access-session-delta';
+  const completed = [...baseline, { sessionId: appId, revoked: true }];
+  const accountBAfterLogout = [...baseline, { sessionId: otherId, revoked: true }];
+  assert.deepEqual(validateAccountSwitchSessionDelta(baseline, completed, [], [], baseline, accountBAfterLogout),
+    { accountASessionId: appId, accountBSessionId: otherId });
+  for (const [fullBefore, fullAfter, disabledBefore, disabledAfter, emptyBefore, emptyAfter] of [
+    [baseline, baseline, [], [], baseline, accountBAfterLogout],
+    [baseline, [...completed, { sessionId: otherId, revoked: true }], [], [], baseline, accountBAfterLogout],
+    [[{ sessionId: seedId, revoked: true }], completed, [], [], baseline, accountBAfterLogout],
+    [baseline, full, [], [], baseline, accountBAfterLogout],
+    [baseline, completed, [], [{ sessionId: otherId, revoked: true }], baseline, accountBAfterLogout],
+    [baseline, completed, [], [], baseline, baseline],
+    [baseline, completed, [], [], baseline, full],
+    [baseline, completed, [], [], baseline, [...accountBAfterLogout, { sessionId: appId, revoked: true }]],
+    [baseline, completed, [], [], [{ sessionId: seedId, revoked: true }], accountBAfterLogout],
+    [baseline, completed, [], [], baseline, [accountBAfterLogout[1]]],
+    [baseline, completed, [], [], baseline, [...accountBAfterLogout, accountBAfterLogout[1]]],
+  ]) {
+    assert.throws(/** Không che thiếu/thừa hoặc revoke sai session A, disabled hay B bằng final flag. */
+      () => validateAccountSwitchSessionDelta(fullBefore, fullAfter, disabledBefore, disabledAfter, emptyBefore, emptyAfter));
   }
   console.log('NATIVE_ACCESS_SESSION_DELTA_PASS');
-  const steps = [['before-disabled', 0, 0], ['disabled-rejected', 1, 0], ['wrong-rejected', 2, 0],
-    ['empty-ready', 3, 1], ['empty-refreshed', 3, 2], ['logged-out', 3, 2]];
+  const steps = [
+    ['before-account-a', 0, 0, 0], ['account-a-ready', 1, 1, 0], ['account-a-logged-out', 1, 1, 1],
+    ['before-disabled', 1, 1, 1], ['disabled-rejected', 2, 1, 1], ['wrong-rejected', 3, 1, 1],
+    ['empty-ready', 4, 2, 1], ['empty-refreshed', 4, 3, 1], ['logged-out', 4, 3, 2],
+  ];
   const oracle = createAccessCheckpointOracle();
-  for (const [stage, login, workspace] of steps) oracle.checkpoint(stage,
-    { AUTH_LOGIN: login, AUTH_LOGOUT: stage === 'logged-out' ? 1 : 0, WORKSPACE_LIST: workspace, PASSWORD_CHANGE: 0, PROFILE_READ: workspace ? 1 : 0, OTHER: 1 });
-  oracle.finish({ AUTH_LOGIN: 3, AUTH_LOGOUT: 1, WORKSPACE_LIST: 2, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 1 });
+  for (const [stage, login, workspace, logout] of steps) oracle.checkpoint(stage,
+    { AUTH_LOGIN: login, AUTH_LOGOUT: logout, WORKSPACE_LIST: workspace, PASSWORD_CHANGE: 0, PROFILE_READ: workspace ? 1 : 0, OTHER: 1 });
+  oracle.finish({ AUTH_LOGIN: 4, AUTH_LOGOUT: 2, WORKSPACE_LIST: 3, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 1 });
   for (const [target, loginDelta, workspaceDelta, other] of [
-    [1, -1, 0, 0], [1, 1, 0, 0], [2, -1, 0, 0],
-    [3, 0, 1, 0], [4, 0, -1, 99],
+    [1, -1, 0, 0], [1, 1, 0, 0], [4, -1, 0, 0],
+    [6, 0, 1, 0], [7, 0, -1, 99],
   ]) {
     const rejected = createAccessCheckpointOracle();
-    for (const [index, [stage, login, workspace]] of steps.entries()) {
+    for (const [index, [stage, login, workspace, logout]] of steps.entries()) {
       const counts = { AUTH_LOGIN: login + (index === target ? loginDelta : 0),
-        AUTH_LOGOUT: stage === 'logged-out' ? 1 : 0, WORKSPACE_LIST: workspace + (index === target ? workspaceDelta : 0), PASSWORD_CHANGE: 0, PROFILE_READ: workspace ? 1 : 0, OTHER: other };
+        AUTH_LOGOUT: logout, WORKSPACE_LIST: workspace + (index === target ? workspaceDelta : 0), PASSWORD_CHANGE: 0, PROFILE_READ: workspace ? 1 : 0, OTHER: other };
       if (index === target) {
         assert.throws(/** No-op/duplicate POST, duplicate initial list hoặc thiếu refresh không được OTHER bù. */
           () => rejected.checkpoint(stage, counts));
@@ -186,19 +345,19 @@ async function main() {
   const zero = { AUTH_LOGIN: 0, AUTH_LOGOUT: 0, WORKSPACE_LIST: 0, PASSWORD_CHANGE: 0, PROFILE_READ: 0, OTHER: 0 };
   assert.throws(/** Stage ngoài thứ tự không được ACK dù counter shape đúng. */
     () => ordered.checkpoint('disabled-rejected', zero));
-  ordered.checkpoint('before-disabled', zero);
+  ordered.checkpoint('before-account-a', zero);
   assert.throws(/** C2-A không có đổi mật khẩu; enum mới không được âm thầm cấp mutation ngoài scope. */
-    () => createAccessCheckpointOracle().checkpoint('before-disabled', { ...zero, PASSWORD_CHANGE: 1 }));
+    () => createAccessCheckpointOracle().checkpoint('before-account-a', { ...zero, PASSWORD_CHANGE: 1 }));
   assert.throws(/** Replay checkpoint không được tiến sequence hai lần. */
-    () => ordered.checkpoint('before-disabled', zero));
+    () => ordered.checkpoint('before-account-a', zero));
   assert.throws(/** Không thiếu stage hoặc dùng final count để giả toàn chuỗi đã ACK. */
-    () => ordered.finish({ AUTH_LOGIN: 3, AUTH_LOGOUT: 1, WORKSPACE_LIST: 2, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 0 }));
+    () => ordered.finish({ AUTH_LOGIN: 4, AUTH_LOGOUT: 2, WORKSPACE_LIST: 3, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 0 }));
   assert.throws(/** POST phát muộn sau completed sequence vẫn phải FAIL final oracle. */
-    () => oracle.finish({ AUTH_LOGIN: 4, AUTH_LOGOUT: 1, WORKSPACE_LIST: 2, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 1 }));
-  for (const [target, logout] of [[0, 1], [5, 0], [5, 2]]) {
+    () => oracle.finish({ AUTH_LOGIN: 4, AUTH_LOGOUT: 3, WORKSPACE_LIST: 3, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 1 }));
+  for (const [target, logout] of [[0, 1], [2, 0], [2, 2], [8, 1], [8, 3]]) {
     const rejected = createAccessCheckpointOracle();
-    for (const [index, [stage, login, workspace]] of steps.entries()) {
-      const counts = { AUTH_LOGIN: login, AUTH_LOGOUT: index === 5 ? 1 : 0,
+    for (const [index, [stage, login, workspace, expectedLogout]] of steps.entries()) {
+      const counts = { AUTH_LOGIN: login, AUTH_LOGOUT: expectedLogout,
         WORKSPACE_LIST: workspace, PASSWORD_CHANGE: 0, PROFILE_READ: workspace ? 1 : 0, OTHER: 99 };
       if (index === target) {
         counts.AUTH_LOGOUT = logout;
@@ -210,14 +369,15 @@ async function main() {
     }
   }
   assert.throws(/** Request logout phát muộn sau SDK stop vẫn không được gộp vào trạng thái đã chốt. */
-    () => oracle.finish({ AUTH_LOGIN: 3, AUTH_LOGOUT: 2, WORKSPACE_LIST: 2, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 99 }),
+    () => oracle.finish({ AUTH_LOGIN: 4, AUTH_LOGOUT: 3, WORKSPACE_LIST: 3, PASSWORD_CHANGE: 0, PROFILE_READ: 1, OTHER: 99 }),
     { code: 'ERR_ASSERTION', message: /^ACCESS_LOGOUT_COUNT_INVALID\b/ });
   const missingLogout = { ...zero }; delete missingLogout.AUTH_LOGOUT;
   for (const invalid of [missingLogout, { ...zero, AUTH_LOGOUT: -1 }, { ...zero, AUTH_LOGOUT: 0.5 }, { ...zero, EXTRA: 0 }]) {
     assert.throws(/** Thiếu/thừa key hoặc count không nguyên không được nhận như counter protocol hợp lệ. */
-      () => createAccessCheckpointOracle().checkpoint('before-disabled', invalid), { message: 'ACCESS_COUNTER_INVALID' });
+      () => createAccessCheckpointOracle().checkpoint('before-account-a', invalid), { message: 'ACCESS_COUNTER_INVALID' });
   }
   console.log('NATIVE_ACCESS_ORDERED_CHECKPOINTS_PASS');
+  protocolStage = 'password-checkpoints';
   const passwordSteps = [['password-before', 0, 0, 0], ['limited-ready', 1, 0, 0],
     ['invalid-short', 1, 0, 0], ['invalid-uppercase', 1, 0, 0], ['invalid-lowercase', 1, 0, 0],
     ['invalid-digit', 1, 0, 0], ['invalid-confirm', 1, 0, 0], ['current-rejected', 1, 1, 0], ['password-changed', 1, 2, 0],
@@ -256,6 +416,7 @@ async function main() {
     assert.throws(/** Cả password oracle phải kiểm đủ6counter, không có schema fallback chỉ ở phase khác. */
       () => createPasswordCheckpointOracle().checkpoint('password-before', invalid), { message: 'PASSWORD_COUNTER_INVALID' });
   }
+  protocolStage = 'password-session-delta';
   const changed = [{ sessionId: appId, revoked: true }];
   const afterNewLogin = [...changed, { sessionId: otherId, revoked: true }];
   assert.deepEqual(validatePasswordSessionDelta([], changed, afterNewLogin), [appId, otherId]);
@@ -266,8 +427,9 @@ async function main() {
       () => validatePasswordSessionDelta([], first, last));
   }
   assert.deepEqual(nativePhaseBudget('password'), { testMilliseconds: 240_000, reserveMilliseconds: 960_000 });
+  protocolStage = 'phase-budget';
   assert.deepEqual(nativePhaseBudget('password-relogin'), { testMilliseconds: 180_000, reserveMilliseconds: 900_000 });
-  assert.equal(nativePhaseBudget('access').testMilliseconds, 60_000);
+  assert.deepEqual(nativePhaseBudget('access'), { testMilliseconds: 240_000, reserveMilliseconds: 480_000 });
   assert.throws(/** Không nhận numeric hoặc phase tùy ý để kéo dài test. */ () => nativePhaseBudget('arbitrary'));
   requireWorkBudget(2_100_000, 1_860_000, 135_000);
   assert.throws(/** Thiếu reserve phải dừng trước spawn tiếp; deadline không giả terminal/cleanup. */
@@ -280,8 +442,15 @@ async function main() {
     const previousTail = secret.slice(0, 15);
     assert.equal(containsNativeSecret(previousTail + secret.slice(15), syntheticSecrets), true);
   }
+  const expiredSessionToken = 'c'.repeat(64);
+  const offlineSecrets = [syntheticSecrets[0], expiredSessionToken];
+  assert.equal(containsNativeSecret('prefix' + expiredSessionToken + 'suffix', offlineSecrets), true);
+  assert.equal(containsNativeSecret(expiredSessionToken.slice(0, 31) + expiredSessionToken.slice(31), offlineSecrets), true);
   assert.throws(/** Secret list rỗng không được âm thầm tắt redaction boundary. */ () => containsNativeSecret('text', []));
-  const cleanup = { role: 0, hba: 0, users: 0, sessions: 0, workspaces: 0, memberships: 0, auditActor: 0, limiterBuckets: 0 };
+  protocolStage = 'fixture-cleanup';
+  const cleanup = { role: 0, hba: 0, users: 0, sessions: 0, workspaces: 0, memberships: 0,
+    auditActor: 0, limiterBuckets: 0, pushInstallations: 0, websocketTickets: 0,
+    outboxEvents: 0, outboxConsumptions: 0, globalIdempotencyRecords: 0 };
   validateFixtureCleanup(cleanup);
   for (const key of Object.keys(cleanup)) {
     const missing = { ...cleanup }; delete missing[key];
@@ -290,13 +459,54 @@ async function main() {
   }
   const { limiterBuckets, ...legacyCleanup } = cleanup;
   for (const invalid of [null, [], {}, { ...cleanup, unexpected: 0 }, { ...legacyCleanup, unexpected: 0 },
+    ...['pushInstallations', 'websocketTickets', 'outboxEvents', 'outboxConsumptions', 'globalIdempotencyRecords'].map(
+      /** Bất kỳ bảng nghiệp vụ nào còn record fixture cũng phải chặn ACK cleanup. */
+      (key) => ({ ...cleanup, [key]: 1 })),
     ...[1, -1, false, null, '0', 0.1, NaN].map(
       /** Biến count bucket thành giá trị không phải integer0 để kiểm strict consumer boundary. */
       (value) => ({ ...cleanup, limiterBuckets: value }))]) {
     assert.throws(/** Đủ8keys nhưng sai tên/kiểu/count vẫn phải FAIL trước cleanup ACK. */
       () => validateFixtureCleanup(invalid), { message: 'NATIVE_FIXTURE_CLEANUP_FAILED' });
   }
-  console.log('NATIVE_FIXTURE_EIGHT_COUNT_CLEANUP_PASS');
+  console.log('NATIVE_FIXTURE_THIRTEEN_COUNT_CLEANUP_PASS');
+  protocolStage = 'fixture-readiness-diagnostic';
+  {
+    const child = new EventEmitter(); child.pid = 4245;
+    child.stdin = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    const commands = []; let terminal = false; const diagnostics = [];
+    child.stdin.write = /** Không dùng nội dung packet giả trong assertion hoặc log test. */ () => {};
+    child.stdin.end = /** STOP vẫn đi tới child sở hữu và chỉ exit/readback giả mới hoàn tất cleanup. */ (value) => {
+      commands.push(value);
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ kind: 'STOPPED', cleanup }) + '\n'));
+      terminal = true; child.emit('exit', 0);
+    };
+    for (const stream of [child.stdin, child.stdout, child.stderr]) {
+      stream.destroy = /** Chỉ giải phóng pipe của child fake sau terminal. */ () => {};
+    }
+    const password = 'Aa1' + 'd'.repeat(32);
+    const fixture = startFixture(password, 'default', [password],
+      /** Thay duy nhất boundary spawn bằng process fake, không khởi tạo tiến trình hệ thống. */ () => child);
+    const originalError = console.error;
+    console.error = /** Thu riêng dòng diagnostic để chứng minh không phản chiếu stderr hoặc frame thô. */
+      (...values) => { diagnostics.push(values.join(' ')); };
+    try {
+      const ready = fixture.ready();
+      child.emit('spawn');
+      child.stderr.emit('data', Buffer.from('PRIVATE_STDERR_SENTINEL'));
+      child.stdout.emit('data', Buffer.from('{"kind":"FAILED","message":"PRIVATE_FRAME_SENTINEL"}\n'));
+      await assert.rejects(/** Fixture FAIL trước READY phải giữ lỗi protocol đã được phân loại. */ () => ready);
+      assert.deepEqual(diagnostics,
+        ['NATIVE_FIXTURE_READINESS_DIAGNOSTIC STATE=FIXTURE_REPORTED_FAILURE STDERR_PRESENT']);
+      assert.equal(diagnostics.join(' ').includes('PRIVATE_STDERR_SENTINEL'), false);
+      assert.equal(diagnostics.join(' ').includes('PRIVATE_FRAME_SENTINEL'), false);
+    } finally {
+      console.error = originalError;
+    }
+    await assert.rejects(/** Readback/STOP được thử dù fixture failure vẫn khiến cleanup verdict FAIL. */
+      () => fixture.close(), { message: 'NATIVE_FIXTURE_CLEANUP_FAILED' });
+    assert.equal(terminal, true); assert.deepEqual(commands, ['STOP\n']);
+  }
+  console.log('NATIVE_FIXTURE_READINESS_DIAGNOSTIC_REDACTED_PASS');
   const armState = { scenario: 'rate-limit', readyReceived: true, armSent: true, alreadyArmed: false };
   validateFixtureArmFrame({ kind: 'ARMED' }, armState);
   for (const state of [{ ...armState, scenario: 'default' }, { ...armState, readyReceived: false },
@@ -486,7 +696,10 @@ async function main() {
   console.log('NATIVE_PASSWORD_ORDER_SESSION_BUDGET_SECRET_PASS');
 }
 
-try { await main(); } catch {
-  // Không xuất assertion object hoặc input giả nhạy cảm; unit evidence chỉ fixed markers.
-  console.error('NATIVE_DAEMON_PROTOCOL_FAILED'); process.exitCode = 1;
+try { await main(); } catch (error) {
+  // Chỉ assertion code viết hoa được phép thoát; actual/expected và input test luôn bị loại bỏ.
+  const safeCode = typeof error?.message === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(error.message)
+    ? 'NATIVE_PROTOCOL_FAILURE_' + error.message : 'NATIVE_DAEMON_PROTOCOL_FAILED';
+  console.error(safeCode); console.error('NATIVE_PROTOCOL_STAGE_' + protocolStage.toUpperCase().replaceAll('-', '_') + '_FAILED');
+  process.exitCode = 1;
 }

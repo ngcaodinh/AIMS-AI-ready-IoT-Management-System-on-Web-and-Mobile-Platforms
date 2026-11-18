@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,8 +11,10 @@ const storageChannel = MethodChannel(
   'plugins.it_nomads.com/flutter_secure_storage',
 );
 const sessionKey = 'session_token';
+const logoutIntentKey = 'logout_intent';
 const syntheticToken = 'synthetic-session-not-a-real-credential';
 const unrelatedKey = 'synthetic-installation-proof';
+final syntheticExpiry = DateTime.utc(2026, 11, 16);
 
 /// Mô phỏng native I/O trong RAM, gồm lỗi trước/sau ghi để kiểm side effect chưa biết.
 final class StorageChannelFake {
@@ -35,7 +38,11 @@ final class StorageChannelFake {
     final arguments = call.arguments as Map<Object?, Object?>;
     final key = arguments['key'] as String;
     optionsSeen.add(arguments['options'] as Map<Object?, Object?>);
-    expect(key == sessionKey, isTrue, reason: 'Only session key is allowed');
+    expect(
+      key == sessionKey || key == logoutIntentKey,
+      isTrue,
+      reason: 'Only auth session keys are allowed',
+    );
     if (call.method == failureMethod) {
       if (writeBeforeFailure && call.method == 'write') {
         values[key] = arguments['value'] as String;
@@ -84,21 +91,62 @@ Future<void> expectStorageFailure(
   fail('Storage failure must not become success or an absent session');
 }
 
-/// Kiểm roundtrip không cache và xóa đúng key; dữ liệu installation phải còn nguyên.
+/// Kiểm roundtrip phiên/outbox và xóa đúng key; dữ liệu installation phải còn nguyên.
 Future<void> checkRoundTrip() async {
   final fake = StorageChannelFake();
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(storageChannel, fake.handle);
   final store = SecureSessionTokenStore();
-  expect(await store.read(), isNull);
-  await store.write(syntheticToken);
-  expect(await SecureSessionTokenStore().read() == syntheticToken, isTrue);
-  await store.delete();
-  expect(await store.read(), isNull);
+  expect(await store.readSession(), isNull);
+  fake.values[sessionKey] = syntheticToken;
+  final legacy = await store.readSession();
+  expect(legacy?.token, syntheticToken);
+  expect(legacy?.expiresAt, isNull);
+  final session = StoredSessionCredential(
+    token: syntheticToken,
+    expiresAt: syntheticExpiry,
+  );
+  await store.writeSession(session);
+  final restored = await SecureSessionTokenStore().readSession();
+  expect(restored?.token == syntheticToken, isTrue);
+  expect(restored?.expiresAt, syntheticExpiry);
+  final intent = PendingLogoutIntent(
+    intentId: 'intent-test-1',
+    sessionToken: syntheticToken,
+    expiresAt: syntheticExpiry,
+    attemptCount: 0,
+    nextAttemptAt: DateTime.utc(2026, 11, 15),
+  );
+  await store.writeLogoutIntent(intent);
+  final restoredIntent = await store.readLogoutIntent();
+  expect(restoredIntent?.intentId, intent.intentId);
+  expect(restoredIntent?.sessionToken, syntheticToken);
+  expect(restoredIntent?.expiresAt, syntheticExpiry);
+  expect(restoredIntent?.attemptCount, 0);
+  expect(restoredIntent?.nextAttemptAt, intent.nextAttemptAt);
+  await store.deleteSession();
+  await store.deleteLogoutIntent();
+  expect(await store.readSession(), isNull);
+  expect(await store.readLogoutIntent(), isNull);
   expect(fake.values[unrelatedKey] == 'synthetic-proof', isTrue);
   for (final options in fake.optionsSeen) {
     expect(options['resetOnError'], 'false');
     expect(options['storageNamespace'], 'nexa_auth_session_v1');
+  }
+}
+
+/// Giữ đọc bearer legacy qua adapter secure dù JSON có thể hiểu chuỗi đó thành scalar.
+Future<void> checkJsonScalarLegacyTokens() async {
+  final fake = StorageChannelFake();
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(storageChannel, fake.handle);
+  final store = SecureSessionTokenStore();
+
+  for (final token in <String>['12345', 'true', 'null', '1e5']) {
+    fake.values[sessionKey] = token;
+    final restored = await store.readSession();
+    expect(restored?.token, token);
+    expect(restored?.expiresAt, isNull);
   }
 }
 
@@ -111,15 +159,77 @@ Future<void> checkOperationFailures() async {
         .setMockMethodCallHandler(storageChannel, fake.handle);
     final store = SecureSessionTokenStore();
     final future = switch (operation) {
-      SessionStorageOperation.read => store.read(),
-      SessionStorageOperation.write => store.write(syntheticToken),
-      SessionStorageOperation.delete => store.delete(),
+      SessionStorageOperation.read => store.readSession(),
+      SessionStorageOperation.write => store.writeSession(
+        StoredSessionCredential(token: syntheticToken, expiresAt: syntheticExpiry),
+      ),
+      SessionStorageOperation.delete => store.deleteSession(),
     };
     await expectStorageFailure(future, operation);
     expect(fake.calls, 1);
     expect(fake.values[sessionKey] == syntheticToken, isTrue);
     expect(fake.values[unrelatedKey] == 'synthetic-proof', isTrue);
   }
+}
+
+/// Kiểm riêng read/write/delete của outbox vì lỗi không được làm mất tombstone.
+Future<void> checkOutboxFailures() async {
+  final intent = PendingLogoutIntent(
+    intentId: 'intent-test-2',
+    sessionToken: syntheticToken,
+    expiresAt: syntheticExpiry,
+    attemptCount: 0,
+    nextAttemptAt: DateTime.utc(2026, 11, 15),
+  );
+  for (final operation in SessionStorageOperation.values) {
+    final fake = StorageChannelFake()..failureMethod = operation.name;
+    fake.values[logoutIntentKey] = '{"version":1}';
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(storageChannel, fake.handle);
+    final store = SecureSessionTokenStore();
+    final future = switch (operation) {
+      SessionStorageOperation.read => store.readLogoutIntent(),
+      SessionStorageOperation.write => store.writeLogoutIntent(intent),
+      SessionStorageOperation.delete => store.deleteLogoutIntent(),
+    };
+    await expectStorageFailure(future, operation);
+    expect(fake.calls, 1);
+    expect(fake.values[logoutIntentKey], '{"version":1}');
+    expect(fake.values[unrelatedKey], 'synthetic-proof');
+  }
+}
+
+/// Record outbox sai schema không được coi là vắng để startup bootstrap active token.
+Future<void> checkMalformedOutbox() async {
+  final fake = StorageChannelFake();
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(storageChannel, fake.handle);
+  final valid = <String, Object?>{
+    'version': 1,
+    'intentId': 'intent-test-3',
+    'sessionToken': syntheticToken,
+    'expiresAt': syntheticExpiry.toIso8601String(),
+    'attemptCount': 0,
+    'nextAttemptAt': DateTime.utc(2026, 11, 15).toIso8601String(),
+  };
+  final invalidRecords = <Map<String, Object?>>[
+    {...valid, 'version': 2},
+    {...valid, 'attemptCount': -1},
+    {...valid, 'attemptCount': 6},
+    {...valid, 'sessionToken': 'invalid#token'},
+    {...valid, 'nextAttemptAt': 'not-utc'},
+    {...valid, 'expiresAt': '2026-02-30T00:00:00.000Z'},
+    {...valid}..remove('expiresAt'),
+    {...valid}..remove('expiresAt')..['unexpected'] = 'replacement',
+  ];
+  for (final value in invalidRecords) {
+    fake.values[logoutIntentKey] = jsonEncode(value);
+    await expectStorageFailure(
+      SecureSessionTokenStore().readLogoutIntent(),
+      SessionStorageOperation.read,
+    );
+  }
+  expect(fake.calls, invalidRecords.length);
 }
 
 /// Write có thể đã lưu trước khi ACK lỗi; caller vẫn nhận thất bại và tự xử lý unknown.
@@ -130,10 +240,12 @@ Future<void> checkUnknownWrite() async {
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(storageChannel, fake.handle);
   await expectStorageFailure(
-    SecureSessionTokenStore().write(syntheticToken),
+    SecureSessionTokenStore().writeSession(
+      StoredSessionCredential(token: syntheticToken, expiresAt: syntheticExpiry),
+    ),
     SessionStorageOperation.write,
   );
-  expect(fake.values[sessionKey] == syntheticToken, isTrue);
+  expect(fake.values[sessionKey] != null, isTrue);
   expect(
     fake.calls,
     1,
@@ -149,13 +261,13 @@ Future<void> checkInvalidReads() async {
   for (final value in <Object>['', ' ', 'synthetic\r\nheader', 42]) {
     fake.readOverride = value;
     await expectStorageFailure(
-      SecureSessionTokenStore().read(),
+      SecureSessionTokenStore().readSession(),
       SessionStorageOperation.read,
     );
   }
   fake.missingPlugin = true;
   await expectStorageFailure(
-    SecureSessionTokenStore().read(),
+    SecureSessionTokenStore().readSession(),
     SessionStorageOperation.read,
   );
 }
@@ -167,10 +279,24 @@ Future<void> checkInvalidWrites() async {
       .setMockMethodCallHandler(storageChannel, fake.handle);
   for (final token in ['', ' ', 'synthetic\nheader']) {
     await expectStorageFailure(
-      SecureSessionTokenStore().write(token),
+      SecureSessionTokenStore().writeSession(
+        StoredSessionCredential(token: token, expiresAt: syntheticExpiry),
+      ),
       SessionStorageOperation.write,
     );
   }
+  await expectStorageFailure(
+    SecureSessionTokenStore().writeLogoutIntent(
+      PendingLogoutIntent(
+        intentId: 'intent-invalid-token',
+        sessionToken: 'synthetic\nheader',
+        expiresAt: syntheticExpiry,
+        attemptCount: 0,
+        nextAttemptAt: DateTime.utc(2026, 11, 15),
+      ),
+    ),
+    SessionStorageOperation.write,
+  );
   expect(fake.calls, 0);
 }
 
@@ -180,7 +306,11 @@ Future<void> checkPendingWrite() async {
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(storageChannel, fake.handle);
   var completed = false;
-  final future = SecureSessionTokenStore().write(syntheticToken).then(
+  final future = SecureSessionTokenStore()
+      .writeSession(
+        StoredSessionCredential(token: syntheticToken, expiresAt: syntheticExpiry),
+      )
+      .then(
     /// Đánh dấu ACK đã đi qua adapter để kiểm trước/sau gate của plugin giả.
     (_) {
       completed = true;
@@ -203,9 +333,15 @@ void main() {
     checkRoundTrip,
   );
   test(
+    'JSON scalar-looking legacy bearer values remain readable',
+    checkJsonScalarLegacyTokens,
+  );
+  test(
     'read write delete failures stay explicit and sanitized',
     checkOperationFailures,
   );
+  test('logout outbox failures stay explicit and preserve record', checkOutboxFailures);
+  test('malformed logout outbox fails closed', checkMalformedOutbox);
   test(
     'write ACK failure stays unknown even after persistence',
     checkUnknownWrite,

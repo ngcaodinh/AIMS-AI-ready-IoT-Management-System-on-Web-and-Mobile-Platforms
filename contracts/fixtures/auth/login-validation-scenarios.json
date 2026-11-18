@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.2.1",
+  "contractVersion": "0.2.2",
   "fixtureKind": "synthetic-contract-example",
   "note": "Fixture validation tổng hợp; chưa phải kết quả provider hoặc E2E.",
   "scenarios": [

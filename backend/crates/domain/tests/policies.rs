@@ -51,7 +51,7 @@ fn limiter_preserves_five_failures_and_reopens_at_exact_expiry() {
     ));
 }
 
-/// Context mismatch được ưu tiên trước limited guard; expiry/disabled/revoked không tạo principal.
+/// Authorization tách expired/revoked đã nhận diện; disabled vẫn giữ lỗi tổng quát và không tạo principal.
 #[test]
 fn session_authorization_checks_current_authority_and_context_before_limited() {
     let now = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
@@ -88,7 +88,7 @@ fn session_authorization_checks_current_authority_and_context_before_limited() {
     assert!(session.authorize(&account, &proof, now, true).is_ok());
     assert!(matches!(
         session.authorize(&account, &proof, session.expires_at, true),
-        Err(AccessFailure::SessionInvalid)
+        Err(AccessFailure::SessionExpired)
     ));
     account.status = AccountStatus::Disabled;
     assert!(matches!(
@@ -99,7 +99,7 @@ fn session_authorization_checks_current_authority_and_context_before_limited() {
     session.revoked_at = Some(now);
     assert!(matches!(
         session.authorize(&account, &proof, now, true),
-        Err(AccessFailure::SessionInvalid)
+        Err(AccessFailure::SessionRevoked)
     ));
 }
 

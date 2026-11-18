@@ -60,7 +60,12 @@ function getInitialDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-/** Trang xác thực và bootstrap thật; form login có phần giới thiệu, các trạng thái nghiệp vụ tập trung vào tác vụ. */
+/**
+ * Điều phối giao diện xác thực, chọn workspace, khôi phục phiên và đăng xuất trên một thẻ tác vụ tập trung
+ * để khóa dữ liệu bảo vệ ngay khi trạng thái phiên chưa chắc chắn và ngăn thao tác chồng chéo.
+ * Output
+ * Cây JSX của quy trình xác thực tương ứng với phase hiện tại của coordinator.
+ */
 export function AuthPage() {
   const [state, setState] = useState<AuthState>(INITIAL_STATE);
   const [email, setEmail] = useState('');
@@ -269,8 +274,8 @@ export function AuthPage() {
         </div>
       </header>
       <main className="auth-main" id="main" tabIndex={-1}>
-        <div className={`auth-layout${state.phase === 'login' ? ' auth-layout-login' : ''}`}>
-        <div className={`auth-card${state.phase === 'picker' ? ' auth-card-wide' : ''}`} data-state={state.phase}>
+        <div className="auth-layout">
+        <div className="auth-card" data-state={state.phase}>
           <div className="auth-card-heading"><span className="auth-state-icon"><AuthIcon name={stateIcon} /></span><span className="auth-eyebrow">NEXA WORKSPACE</span></div>
           {state.phase === 'selected' && <nav className="auth-breadcrumb" aria-label="Đường dẫn"><span>Workspaces</span><span aria-hidden="true">/</span><span aria-current="page">{state.selected?.name}</span></nav>}
           <h1 ref={headingRef} tabIndex={-1}>{title}</h1>
@@ -406,17 +411,6 @@ export function AuthPage() {
             }>{state.busy && state.logoutPending ? 'Đang đăng xuất…' : 'Đăng xuất'}</button>}
           {state.busy && state.phase !== 'loading' && <p className="auth-progress" role="status"><span className="auth-spinner" aria-hidden="true" />{state.logoutPending ? 'Đang xử lý đăng xuất…' : 'Đang xử lý…'}</p>}
         </div>
-        {/* Chỉ giới thiệu tại form login; picker/recovery/selected dành toàn bộ bố cục cho tác vụ và thông báo. */}
-        {state.phase === 'login' && <aside className="auth-showcase" aria-label="Giới thiệu Nexa IoT">
-          <p className="auth-showcase-pill"><b>Web + App</b><span>Một hệ thống, hai nền tảng</span></p>
-          <h2 className="auth-showcase-title">Nhìn thấy, điều khiển và tự động hóa mọi thiết bị IoT.</h2>
-          <p className="auth-showcase-text">Theo dõi cảm biến theo thời gian thực, bật tắt thiết bị từ xa và xác nhận kết quả từ chính thiết bị.</p>
-          <ul className="auth-showcase-list">
-            <li><span className="auth-showcase-icon"><AuthIcon name="radio" /></span><div><strong>MQTT trực tuyến</strong><span>Phản hồi dưới 1 giây</span></div></li>
-            <li><span className="auth-showcase-icon auth-showcase-icon-amber"><AuthIcon name="phone" /></span><div><strong>Web và App đồng bộ</strong><span>Cùng một nguồn dữ liệu</span></div></li>
-            <li><span className="auth-showcase-icon auth-showcase-icon-sky"><AuthIcon name="shield" /></span><div><strong>Phiên được bảo vệ</strong><span>Chỉ mở workspace sau khi xác minh quyền</span></div></li>
-          </ul>
-        </aside>}
         </div>
       </main>
       <footer className="auth-footer"><span translate="no">Nexa IoT</span><span className="auth-footer-dot" aria-hidden="true" /><span>Không gian làm việc kết nối</span></footer>

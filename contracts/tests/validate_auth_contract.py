@@ -271,7 +271,7 @@ class AuthContractTests(unittest.TestCase):
 
     # Khóa header đối soát phiên Web trên mọi route bảo vệ trước khi có provider.
     def test_web_auth_context_fence_is_declared_for_protected_routes(self):
-        self.assertEqual(self.contract["info"]["version"], "0.2.1")
+        self.assertEqual(self.contract["info"]["version"], "0.2.2")
         parameters = self.contract["components"]["parameters"]
         self.assertEqual(parameters["AuthContext"]["name"], "X-Auth-Context-Id")
         self.assertIn(

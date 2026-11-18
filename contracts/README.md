@@ -17,7 +17,7 @@ This directory is the versioned source of truth shared by backend, web, mobile, 
 - `schemas/`: device, dashboard and rule JSON schemas.
 - `fixtures/`: shared API and messaging examples with synthetic values only.
 
-## Authentication/bootstrap contract 0.2.1 (draft)
+## Authentication/bootstrap contract 0.2.2 (draft)
 
 Password validation addendum2026-10-26 (explicit user change): login accepts
 9–128Unicode codepoints; currentPassword remains1–128. New and generated
@@ -26,7 +26,8 @@ digit0–9. No special character is required; no trim/normalization. Existing
 credentials remain usable for login without the new composition check.
 `fixtures/auth/password-policy.json` policyVersion1 is the cross-runtime oracle
 used by Rust/Web/Dart tests. This supersedes the old12minimum in this unreleased
-draft; JSON fields/version stay0.2.1, but this validation change requires
+draft; login fields stay unchanged, while the artifact version advances to
+0.2.2 for the additive realtime-ticket contract. This validation change requires
 coordinated provider/client deployment and is not a backward-compatibility claim.
 
 `openapi/auth.v1.json` is the P1 contract artifact for FEAT-TN-001 with the
@@ -104,8 +105,8 @@ browser/device evidence are created during client BUILD and checked at CP-03.
 
 ### Login001 validation matrix
 
-`fixtures/auth/login-validation-scenarios.json` adds 33 synthetic login cases
-under the unchanged draft version `0.2.1`. The shared validator includes this
+`fixtures/auth/login-validation-scenarios.json` retains 33 synthetic login cases
+and is labeled with the current draft version `0.2.2`. The shared validator includes this
 file in version, operation/status, error-code and transport checks. Run
 `python -B -m unittest discover -s contracts/tests -p test_login_contract.py -v`
 for six focused checks, or the full discovery command above for regressions.
@@ -124,10 +125,11 @@ storage remain separate checkpoints.
 
 ### Logout002 completion of the draft contract
 
-Version `0.2.1` completes logout semantics already selected in feature002
-section22 and retains the `0.2.0` login/auth-context wire. It does not indicate a
-provider release or change the historical FEAT001 QA results. All three fixture
-files use the current artifact version. CP-01 owner review remains pending.
+Version `0.2.2` completes logout semantics already selected in feature002
+section22 and adds the ticket HTTP response and first-frame WebSocket contract;
+it retains the `0.2.0` login/auth-context wire. It does not indicate a provider
+release or change the historical FEAT001 QA results. Auth fixtures use the
+current artifact version. CP-01 owner review remains pending.
 
 `fixtures/auth/logout-scenarios.json` describes Web/Android active, limited,
 revoked and expired sessions; absent/unknown/malformed credentials; body,
@@ -138,6 +140,15 @@ not HTTP fields or client authority. A provider runner must create isolated lab
 sessions, resolve each alias through its real transport and redact credentials.
 `given`, `expectedEffects` and `assertions` are requirements, never observed DB
 state. No fixture status means a runtime test has passed.
+
+`fixtures/auth/realtime-ticket-scenarios.json` is a synthetic wire matrix for
+`POST /api/v1/realtime/tickets` and the `/api/v1/realtime` first-frame handshake.
+The ticket string is a nonfunctional 64-hex placeholder; runtime clients must
+keep a real ticket only in memory and send it as the first text frame. The
+contract extension requires no server frame before validation, a fixed
+`AUTHENTICATED` acknowledgment after validation, and a five-second timeout for
+an unvalidated socket. These static cases do not prove a PostgreSQL consume or
+physical socket close.
 
 - Logout alone includes an empty security requirement `{}` because no
   credential must produce a side-effect-free 204. This representation follows

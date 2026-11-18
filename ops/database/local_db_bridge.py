@@ -111,7 +111,8 @@ class InspectionHandler(socketserver.BaseRequestHandler):
                 break
             else:
                 raise ValueError("Repeated encryption negotiation")
-            relay = subprocess.Popen(["docker","exec","-i",lab.CONTAINER,"perl","-e",SOCKET_RELAY],
+            # Dùng config CLI rỗng của Auth Lab để Docker không mở credential mặc định của người chạy.
+            relay = subprocess.Popen(lab.docker_argv("exec","-i",lab.CONTAINER,"perl","-e",SOCKET_RELAY),
                                      stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
             relay.stdin.write(startup)
             relay.stdin.flush()

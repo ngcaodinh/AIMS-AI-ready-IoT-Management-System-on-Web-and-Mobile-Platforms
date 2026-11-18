@@ -20,10 +20,12 @@ import 'package:nexa_iot/features/workspaces/presentation/workspace_selection_st
 
 import 'support/native_membership_probe.dart';
 import 'support/native_membership_scenario.dart';
+import 'support/native_debug_secret_canary.dart';
 import 'support/native_offline_probe.dart';
 import 'support/native_offline_scenario.dart';
 import 'support/native_rate_probe.dart';
 import 'support/native_rate_scenario.dart';
+import 'support/native_realtime_ticket_probe.dart';
 
 // Chỉ enum giai đoạn test phục vụ chẩn đoán; không lưu input/UI text hoặc auth authority.
 var _caseStage = 'fixture';
@@ -33,15 +35,20 @@ String _validationObservation = 'NONE';
 String _tapStage = 'NONE';
 String _tapFailure = 'NONE';
 String _tapHit = 'NONE';
+String _resumeStorageObservation = 'NONE';
+String _resumeUiObservation = 'NONE';
+String _offlineExpiredUiObservation = 'NONE';
 final _rateCheckpoint = NativeRateCheckpoint();
 final _ratePhaseClock = Stopwatch();
 final _membershipCheckpoint = NativeMembershipCheckpoint();
 final _membershipPhaseClock = Stopwatch();
 final _offlinePreArmClock = Stopwatch();
 final _offlinePhaseClock = Stopwatch();
-final _offlineCheckpoint = NativeOfflineCheckpoint(
-  elapsed: _readOfflineElapsed,
-);
+late final NativeOfflineCheckpoint _offlineCheckpoint;
+var _offlineLogoutResumeActive = false;
+var _s2RealtimeTicketObservation = 'NOT_REQUESTED';
+const _s2RealtimeTicketEnabled =
+    bool.fromEnvironment('AUTH_E2E_S2_REALTIME_TICKET');
 
 /// Output: native phase elapsed neo valid packet, không neo lại khi đọc status hoặc tạo gate.
 Duration _readOfflineElapsed() => _offlinePhaseClock.elapsed;
@@ -67,10 +74,21 @@ void main() {
         'rate-limit',
         'membership-stale',
         'offline-login',
+        'offline-expired',
       ].contains(phase)) {
     throw StateError('INVALID_NATIVE_TEST_CONFIGURATION');
   }
-  if (phase == 'offline-login') _offlinePreArmClock.start();
+  _offlineCheckpoint = NativeOfflineCheckpoint(
+    elapsed: _readOfflineElapsed,
+    profile: phase == 'offline-login'
+        ? 'offline-outbox'
+        : phase == 'offline-expired'
+        ? 'offline-expired'
+        : 'offline-resume',
+  );
+  if (phase == 'offline-login' || phase == 'offline-expired') {
+    _offlinePreArmClock.start();
+  }
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final fixture = Completer<Map<String, Object?>>();
   var status = 'WAITING';
@@ -106,8 +124,14 @@ void main() {
         final passwordPhase =
             phase == 'password' || phase == 'password-relogin';
         final ratePhase = phase == 'rate-limit';
+        final offlineExpiredPhase = phase == 'offline-expired';
         if (decoded is! Map<String, dynamic> ||
-            decoded.length != (passwordPhase || ratePhase ? 5 : 4) ||
+            decoded.length !=
+                (passwordPhase || ratePhase
+                    ? 5
+                    : offlineExpiredPhase
+                    ? 7
+                    : 4) ||
             decoded['version'] != 1 ||
             decoded['phase'] != phase ||
             (passwordPhase &&
@@ -121,6 +145,12 @@ void main() {
         }
         final emails = decoded['emails'];
         final password = decoded['password'];
+        final expiredToken = decoded['expiredSessionToken'];
+        final expiredSessionId = decoded['expiredSessionId'];
+        final expiredAtText = decoded['expiredSessionExpiresAt'];
+        final expiredAt = expiredAtText is String
+            ? DateTime.tryParse(expiredAtText)
+            : null;
         if (emails is! List<dynamic> ||
             emails.length != 5 ||
             emails.toSet().length != 5 ||
@@ -139,7 +169,17 @@ void main() {
             password is! String ||
             (phase == 'resume'
                 ? password.isNotEmpty
-                : !RegExp(r'^Aa1[0-9a-f]{32}$').hasMatch(password))) {
+                : !RegExp(r'^Aa1[0-9a-f]{32}$').hasMatch(password)) ||
+            (offlineExpiredPhase &&
+                (expiredToken is! String ||
+                    !RegExp(r'^[0-9a-f]{64}$').hasMatch(expiredToken) ||
+                    expiredSessionId is! String ||
+                    !RegExp(
+                      r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+                    ).hasMatch(expiredSessionId) ||
+                    expiredAt == null ||
+                    !expiredAt.isUtc ||
+                    expiredAt.toIso8601String() != expiredAtText))) {
           return developer.ServiceExtensionResponse.result(
             '{"accepted":false}',
           );
@@ -147,25 +187,29 @@ void main() {
         // Neo native cap từ valid packet trước complete/ACK; replay không được reset Stopwatch.
         if (ratePhase) _ratePhaseClock.start();
         if (phase == 'membership-stale') _membershipPhaseClock.start();
-        if (phase == 'offline-login') {
-          if (decoded['version'] is! int ||
-              _offlinePreArmClock.elapsed >= const Duration(seconds: 240)) {
-            return developer.ServiceExtensionResponse.result(
-              '{"accepted":false}',
-            );
-          }
-          final run = RegExp(r'^probe-([0-9a-f-]{36})-0@example\.invalid$')
-              .firstMatch(emails.first as String);
-          if (run == null)
-            return developer.ServiceExtensionResponse.result(
-              '{"accepted":false}',
-            );
-          for (var index = 0; index < 5; index++) {
-            if (emails[index] !=
-                'probe-${run.group(1)}-$index@example.invalid') {
+        if (phase == 'offline-login' ||
+            phase == 'offline-expired' ||
+            phase == 'resume') {
+          if (phase == 'offline-login' || phase == 'offline-expired') {
+            if (decoded['version'] is! int ||
+                _offlinePreArmClock.elapsed >= const Duration(seconds: 240)) {
               return developer.ServiceExtensionResponse.result(
                 '{"accepted":false}',
               );
+            }
+            final run = RegExp(r'^probe-([0-9a-f-]{36})-0@example\.invalid$')
+                .firstMatch(emails.first as String);
+            if (run == null)
+              return developer.ServiceExtensionResponse.result(
+                '{"accepted":false}',
+              );
+            for (var index = 0; index < 5; index++) {
+              if (emails[index] !=
+                  'probe-${run.group(1)}-$index@example.invalid') {
+                return developer.ServiceExtensionResponse.result(
+                  '{"accepted":false}',
+                );
+              }
             }
           }
           _offlinePhaseClock.start();
@@ -203,7 +247,9 @@ void main() {
           accepted ? '{"accepted":true}' : '{"accepted":false}',
         );
       }
-      if (phase == 'offline-login') {
+      if (phase == 'offline-login' ||
+          phase == 'offline-expired' ||
+          (phase == 'resume' && _offlineLogoutResumeActive)) {
         final accepted = _offlineCheckpoint.acknowledge(parameters);
         return developer.ServiceExtensionResponse.result(
           accepted ? '{"accepted":true}' : '{"accepted":false}',
@@ -239,7 +285,7 @@ void main() {
   developer.registerExtension(
     'ext.nexa_auth_test.status',
     /**
-     * Chỉ trả trạng thái fixed và own PID để host gắn evidence vào đúng native process.
+     * Chỉ trả trạng thái fixed và own PID; resume có thể thêm receipt ticket an toàn sau khi kiểm response.
      * Input
      * Param: method — extension status cố định.
      * Param: parameters — metadata SDK, không đọc credential từ query/status.
@@ -255,11 +301,15 @@ void main() {
           ..._rateCheckpoint.receipt()
         else if (phase == 'membership-stale')
           ..._membershipCheckpoint.receipt()
-        else if (phase == 'offline-login')
+        else if (phase == 'offline-login' ||
+            phase == 'offline-expired' ||
+            (phase == 'resume' && _offlineLogoutResumeActive))
           ..._offlineCheckpoint.receipt()
-        else
+        // Resume chưa đọc xong secure store thì không phát riêng checkpoint rỗng gây lệch schema host.
+        else if (phase != 'resume')
           'checkpoint': _checkpointStage,
-        if (phase == 'offline-login' && !fixture.isCompleted)
+        if ((phase == 'offline-login' || phase == 'offline-expired') &&
+            !fixture.isCompleted)
           'preArmRemainingMilliseconds':
               (const Duration(seconds: 240) - _offlinePreArmClock.elapsed)
                   .inMilliseconds
@@ -268,6 +318,13 @@ void main() {
         'tapStage': _tapStage,
         'tapFailure': _tapFailure,
         'tapHit': _tapHit,
+        if (phase == 'resume') ...{
+          'resumeStorageObservation': _resumeStorageObservation,
+          'resumeUiObservation': _resumeUiObservation,
+          's2RealtimeTicketObservation': _s2RealtimeTicketObservation,
+        },
+        if (phase == 'offline-expired')
+          'offlineExpiredUiObservation': _offlineExpiredUiObservation,
       }),
     ),
   );
@@ -275,7 +332,7 @@ void main() {
   unawaited(
     binding.allTestsPassed.future.then(
       /**
-       * Chỉ đánh PASS sau khi framework đã tổng hợp kết quả toàn target và teardown.
+       * Chỉ đánh PASS sau khi framework tổng hợp kết quả thân test; điều kiện bảo mật được ném trước khi thân kết thúc.
        * Input
        * Param: passed — kết quả native suite do integration_test sở hữu.
        */
@@ -301,13 +358,13 @@ void main() {
           WidgetController.hitTestWarningShouldBeFatal = previousPointerPolicy;
         },
       );
-      final fixtureWait = phase == 'offline-login'
+      final fixtureWait = phase == 'offline-login' || phase == 'offline-expired'
           ? const Duration(seconds: 240) - _offlinePreArmClock.elapsed
           : const Duration(seconds: 60);
       if (fixtureWait <= Duration.zero)
         throw StateError('NATIVE_OFFLINE_PREARM_EXPIRED');
       final packet = await fixture.future.timeout(fixtureWait);
-      if (phase == 'offline-login') {
+      if (phase == 'offline-login' || phase == 'offline-expired') {
         await withNativeOfflineCredentials(
           packet,
 
@@ -349,7 +406,7 @@ void main() {
       await tester.pumpAndSettle();
     },
     // Backstop framework, không thay phase1260 hoặc chứng minh cancel I/O từ timeout.
-    timeout: phase == 'offline-login'
+    timeout: phase == 'offline-login' || phase == 'offline-expired'
         ? const Timeout(Duration(minutes: 17))
         : phase == 'rate-limit'
         ? const Timeout(Duration(minutes: 22))
@@ -485,6 +542,46 @@ Future<void> verifyNativeOfflineMain(
   if (_offlinePhaseClock.elapsed >= const Duration(seconds: 20)) {
     throw StateError('NATIVE_OFFLINE_UI_TIMEOUT');
   }
+  if (packet['phase'] == 'offline-expired') {
+    final token = packet['expiredSessionToken'];
+    final expiryText = packet['expiredSessionExpiresAt'];
+    final expiry = expiryText is String ? DateTime.tryParse(expiryText) : null;
+    if (token is! String ||
+        expiry == null ||
+        !expiry.isUtc ||
+        expiry.toIso8601String() != expiryText) {
+      throw StateError('INVALID_NATIVE_OFFLINE_EXPIRED_PACKET');
+    }
+    // Seed đúng secure store của sản phẩm trước composition; host tắt mạng sau no-CA, trước GET /me.
+    await const SecureSessionTokenStore().writeSession(
+      StoredSessionCredential(token: token, expiresAt: expiry),
+    );
+    await waitForOfflineCheckpoint(tester, 'offline-expired-offline');
+    _caseStage = 'main';
+    product.main();
+    await tester.pump();
+    await verifyNativeOfflineExpiredLogoutScenario(
+      tester,
+      packet,
+      elapsed: _readOfflineElapsed,
+      /** Chỉ giữ stage và enum/boolean coordinator để khoanh vùng lỗi mà không lộ nội dung UI hoặc credential. */
+      observeUi: (stage, snapshot) =>
+          _offlineExpiredUiObservation = '$stage|$snapshot',
+      checkpoint:
+          /// Input Param: stage — fixed expiry/logout pause do host DB/HTTP/network owner ACK.
+          (stage) => waitForOfflineCheckpoint(tester, stage),
+    );
+    if (!_offlineCheckpoint.complete) {
+      throw StateError('NATIVE_OFFLINE_CHECKPOINT_INCOMPLETE');
+    }
+    _caseStage = 'teardown';
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    if (_offlinePhaseClock.elapsed >= const Duration(seconds: 675)) {
+      throw StateError('NATIVE_OFFLINE_UI_TIMEOUT');
+    }
+    return;
+  }
   _caseStage = 'main';
   product.main();
   await tester.pump();
@@ -538,36 +635,93 @@ Future<void> waitForOfflineCheckpoint(WidgetTester tester, String stage) async {
 }
 
 /**
- * Chạy TLS negative rồi composition sản phẩm, kiểm2workspace/role và giữ hoặc logout phiên theo phase.
+ * Chạy TLS negative rồi composition sản phẩm; resume có thể kiểm ticket S2 sau Web S1 logout.
  * Input
  * Param: tester — native engine, dùng HTTP/secure storage sản phẩm thật.
  * Param: packet — synthetic identities/password qua RAM; resume không có password.
- * Param: phase — full đăng nhập một lần, resume chỉ đọc secure storage/server recheck rồi logout.
+ * Param: phase — kịch bản native cố định; full/resume quét debugPrint và giữ probe ticket trong isolate.
  */
 Future<void> verifyActualMain(
   WidgetTester tester,
   Map<String, Object?> packet,
   String phase,
 ) async {
-  if (phase == 'offline-login') {
+  if (phase == 'offline-login' || phase == 'offline-expired') {
     await verifyNativeOfflineMain(tester, packet);
     return;
   }
-  _caseStage = 'no-ca';
-  final untrustedClient = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 5);
-  var rejected = false;
-  try {
-    final request = await untrustedClient
-        .getUrl(Uri.parse('https://10.0.2.2:8443/api/v1/me'))
-        .timeout(const Duration(seconds: 5));
-    await request.close().timeout(const Duration(seconds: 5));
-  } on HandshakeException {
-    rejected = true;
-  } finally {
-    untrustedClient.close(force: true);
+  // Chỉ bật khi host đã chọn đúng pha offline-resume; nhánh này bắt buộc giữ mạng guest tắt tới checkpoint đầu.
+  const offlineLogoutResume = bool.fromEnvironment(
+    'AUTH_E2E_OFFLINE_LOGOUT_RESUME',
+  );
+  if (offlineLogoutResume && phase != 'resume') {
+    throw StateError('NATIVE_OFFLINE_RESUME_PHASE_INVALID');
   }
-  if (!rejected) throw StateError('NATIVE_NO_CA_MUST_REJECT');
+  if (_s2RealtimeTicketEnabled &&
+      (phase != 'resume' || offlineLogoutResume)) {
+    throw StateError('NATIVE_S2_REALTIME_TICKET_PHASE_INVALID');
+  }
+  StoredSessionCredential? resumeCredential;
+  if (phase == 'resume') {
+    _caseStage = 'resume-storage';
+    // Chỉ phân loại trạng thái có/không; bearer và nội dung outbox không rời secure storage.
+    try {
+      const store = SecureSessionTokenStore();
+      resumeCredential = await store.readSession();
+      final hasSession = resumeCredential != null;
+      final hasLogoutIntent = await store.readLogoutIntent() != null;
+      _resumeStorageObservation = switch ((hasSession, hasLogoutIntent)) {
+        (true, true) => 'SESSION_AND_INTENT',
+        (true, false) => 'SESSION_ONLY',
+        (false, true) => 'INTENT_ONLY',
+        (false, false) => 'EMPTY',
+      };
+      _offlineLogoutResumeActive =
+          offlineLogoutResume && _resumeStorageObservation == 'INTENT_ONLY';
+    } on SessionStorageException catch (failure) {
+      _resumeStorageObservation =
+          'READ_FAILURE_${failure.operation.name.toUpperCase()}';
+    }
+    if (offlineLogoutResume && !_offlineLogoutResumeActive) {
+      throw StateError('NATIVE_OFFLINE_RESUME_INTENT_REQUIRED');
+    }
+  }
+  NativeDebugSecretCanary? debugSecretCanary;
+  if (phase == 'full') {
+    final password = packet['password'];
+    if (password is! String || password.isEmpty) {
+      throw StateError('NATIVE_DEBUG_CANARY_CREDENTIAL_MISSING');
+    }
+    debugSecretCanary = NativeDebugSecretCanary(initialCanaries: [password]);
+  } else if (phase == 'resume' && !offlineLogoutResume) {
+    final token = resumeCredential?.token;
+    if (token == null) {
+      throw StateError('NATIVE_DEBUG_CANARY_SESSION_REQUIRED');
+    }
+    debugSecretCanary = NativeDebugSecretCanary(initialCanaries: [token]);
+  }
+  if (debugSecretCanary != null) {
+    final canary = debugSecretCanary;
+    // Nếu luồng chính lỗi trước bước quét, teardown vẫn khôi phục printer và xóa buffer.
+    addTearDown(canary.dispose);
+  }
+  if (!offlineLogoutResume) {
+    _caseStage = 'no-ca';
+    final untrustedClient = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 5);
+    var rejected = false;
+    try {
+      final request = await untrustedClient
+          .getUrl(Uri.parse('https://10.0.2.2:8443/api/v1/me'))
+          .timeout(const Duration(seconds: 5));
+      await request.close().timeout(const Duration(seconds: 5));
+    } on HandshakeException {
+      rejected = true;
+    } finally {
+      untrustedClient.close(force: true);
+    }
+    if (!rejected) throw StateError('NATIVE_NO_CA_MUST_REJECT');
+  }
   if (phase == 'rate-limit' &&
       _ratePhaseClock.elapsed >= const Duration(seconds: 1260)) {
     throw StateError('NATIVE_RATE_UI_TIMEOUT');
@@ -579,6 +733,21 @@ Future<void> verifyActualMain(
   _caseStage = 'main';
   product.main();
   await tester.pump();
+  if (phase == 'resume' && _offlineLogoutResumeActive) {
+    _caseStage = 'offline-outbox-resume';
+    await verifyNativeOfflineLogoutResumeScenario(
+      tester,
+      elapsed: _readOfflineElapsed,
+      checkpoint: (stage) => waitForOfflineCheckpoint(tester, stage),
+    );
+    if (!_offlineCheckpoint.complete) {
+      throw StateError('NATIVE_OFFLINE_RESUME_CHECKPOINT_INCOMPLETE');
+    }
+    _caseStage = 'teardown';
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    return;
+  }
   if (phase == 'response-loss') {
     await verifyNativeResponseLoss(tester, packet);
     packet['password'] = '';
@@ -676,7 +845,24 @@ Future<void> verifyActualMain(
     (widget) =>
         widget is WorkspaceSelectionScreen && widget.state.options.length == 2,
   );
-  await waitForNative(tester, picker);
+  try {
+    await waitForNative(tester, picker);
+  } catch (_) {
+    if (phase == 'resume') {
+      final application = find.byType(AppAuthApplication);
+      if (application.evaluate().length == 1) {
+        final coordinator = tester
+            .widget<AppAuthApplication>(application)
+            .coordinator;
+        final failure = coordinator.session.failure?.kind.name ?? 'none';
+        _resumeUiObservation =
+            '${coordinator.page.name}:${coordinator.session.phase.name}:$failure';
+      } else {
+        _resumeUiObservation = 'missing_app';
+      }
+    }
+    rethrow;
+  }
   final options = tester.widget<WorkspaceSelectionScreen>(picker).state.options;
   final byName = {for (final option in options) option.name: option};
   // Mapping cố định từ fixture canonical, không so summary với chính row sai để che đảo vai trò A/B.
@@ -685,6 +871,11 @@ Future<void> verifyActualMain(
       byName['Nhà kính B']?.role != WorkspaceRole.user)
     throw StateError('NATIVE_WORKSPACE_ROLES_INVALID');
   if (phase == 'full') {
+    final credential = await const SecureSessionTokenStore().readSession();
+    if (credential == null || debugSecretCanary == null) {
+      throw StateError('NATIVE_DEBUG_CANARY_SESSION_REQUIRED');
+    }
+    debugSecretCanary.addCanary(credential.token);
     await waitForAccessCheckpoint(tester, 'workspace-picker-before-select');
   }
   final ordered = [byName['Phòng vận hành A']!, byName['Nhà kính B']!];
@@ -705,14 +896,52 @@ Future<void> verifyActualMain(
     }
   }
   if (phase == 'resume') {
+    if (_s2RealtimeTicketEnabled) {
+      _caseStage = 's2-realtime-ticket';
+      final application = find.byType(AppAuthApplication);
+      if (application.evaluate().length != 1) {
+        throw StateError('NATIVE_S2_REALTIME_TICKET_SESSION_REQUIRED');
+      }
+      final session = tester
+          .widget<AppAuthApplication>(application)
+          .coordinator
+          .session;
+      final selectedWorkspace = session.selectedWorkspace;
+      final credential = resumeCredential;
+      final canary = debugSecretCanary;
+      if (_resumeStorageObservation != 'SESSION_ONLY' ||
+          session.phase != AppSessionPhase.full ||
+          selectedWorkspace == null ||
+          credential == null ||
+          canary == null) {
+        throw StateError('NATIVE_S2_REALTIME_TICKET_SESSION_REQUIRED');
+      }
+      _s2RealtimeTicketObservation = 'RUNNING';
+      await verifyNativeS2RealtimeTicket(
+        credential: credential,
+        workspaceId: selectedWorkspace.id,
+        canary: canary,
+      );
+      _s2RealtimeTicketObservation = 'PASS';
+    }
     _caseStage = 'logout';
     await tapNative(tester, 'session-logout');
     await waitForNative(tester, find.byKey(const ValueKey('auth-email')));
+    // Logout được xác nhận chỉ khi UI đã về login và secure store không còn credential hoặc outbox intent.
+    const store = SecureSessionTokenStore();
+    if (await store.readSession() != null ||
+        await store.readLogoutIntent() != null) {
+      throw StateError('NATIVE_LOGOUT_LOCAL_STATE_RETAINED');
+    }
   }
   packet['password'] = '';
   _caseStage = 'teardown';
   await tester.pumpWidget(const SizedBox());
   await tester.pump();
+  if (debugSecretCanary != null) {
+    // Xác minh trong thân test để integration binding ghi nhận rò rỉ là test FAIL.
+    debugSecretCanary.verify();
+  }
 }
 
 /** Kiểm mất response sau commit bằng main/API/storage thật, chỉ submit lại qua gesture chủ động.
@@ -728,7 +957,7 @@ Future<void> verifyNativeResponseLoss(
   final email = (packet['emails'] as List).first as String;
   final password = packet['password'] as String;
   await waitForNative(tester, find.byKey(const ValueKey('auth-email')));
-  if (await store.read() != null)
+  if (await store.readSession() != null)
     throw StateError('NATIVE_LOSS_PREEXISTING_SESSION');
   await tester.enterText(find.byKey(const ValueKey('auth-email')), email);
   await tester.enterText(find.byKey(const ValueKey('auth-password')), password);
@@ -742,7 +971,7 @@ Future<void> verifyNativeResponseLoss(
       coordinator.session.profile != null ||
       coordinator.session.workspaces.isNotEmpty ||
       coordinator.session.selectedWorkspace != null ||
-      await store.read() != null)
+      await store.readSession() != null)
     throw StateError('NATIVE_LOSS_ADMISSION_INVALID');
   await waitForAccessCheckpoint(tester, 'loss-result');
   final quiet = Stopwatch()..start();
@@ -772,7 +1001,9 @@ Future<void> verifyNativeResponseLoss(
       throw StateError('NATIVE_LOSS_CREDENTIAL_RETAINED');
     }
   }
-  if (await store.read() != null) throw StateError('NATIVE_LOSS_STORED_ORPHAN');
+  if (await store.readSession() != null) {
+    throw StateError('NATIVE_LOSS_STORED_ORPHAN');
+  }
   await waitForAccessCheckpoint(tester, 'loss-ready');
   await tester.enterText(find.byKey(const ValueKey('auth-email')), email);
   await tester.enterText(find.byKey(const ValueKey('auth-password')), password);
@@ -781,14 +1012,15 @@ Future<void> verifyNativeResponseLoss(
   final picker = tester.widget<WorkspaceSelectionScreen>(
     find.byType(WorkspaceSelectionScreen),
   );
-  if (picker.state.options.length != 2 || await store.read() == null)
+  if (picker.state.options.length != 2 || await store.readSession() == null) {
     throw StateError('NATIVE_LOSS_NEW_LOGIN_INVALID');
+  }
   await waitForAccessCheckpoint(tester, 'loss-picker');
   await tapNative(tester, 'workspace-select-${picker.state.options.first.id}');
   await waitForNative(tester, find.byKey(const ValueKey('session-summary')));
   await tapNative(tester, 'session-logout');
   await waitForNative(tester, find.byKey(const ValueKey('auth-email')));
-  if (await store.read() != null)
+  if (await store.readSession() != null)
     throw StateError('NATIVE_LOSS_LOGOUT_STORE_RETAINED');
   await waitForAccessCheckpoint(tester, 'loss-loggedout');
 }
@@ -945,7 +1177,7 @@ Future<String> readNativeRejection(
 }
 
 /**
- * Kiểm disabled/wrong chung lỗi và empty account với refresh/logout qua UI thật cùng ordered host ACK.
+ * Kiểm logout account A rồi login account B trên cùng app, đồng thời giữ denied/empty regression.
  * Input
  * Param: tester — native UI engine, không inject API/store hoặc gọi callback nghiệp vụ trực tiếp.
  * Param: packet —5identities và password synthetic RAM của canonical fixture.
@@ -956,16 +1188,86 @@ Future<void> verifyNativeAccess(
 ) async {
   final emails = packet['emails'] as List;
   final password = packet['password'] as String;
+  final accountAEmail = emails[0] as String;
+  final accountBEmail = emails[3] as String;
   await waitForNative(tester, find.byKey(const ValueKey('auth-email')));
+  await waitForAccessCheckpoint(tester, 'before-account-a');
+  _caseStage = 'account-a-login';
+  await submitNativeAccessLogin(tester, accountAEmail, password);
+  final accountAPicker = find.byWidgetPredicate(
+    /** Account A phải có đúng picker thật có hai workspace trước khi cache được tạo. */
+    (widget) =>
+        widget is WorkspaceSelectionScreen && widget.state.options.length == 2,
+  );
+  await waitForNative(tester, accountAPicker);
+  final accountAOptions = tester
+      .widget<WorkspaceSelectionScreen>(accountAPicker)
+      .state
+      .options;
+  final accountAWorkspace = accountAOptions.where(
+    /** Chọn row admin cố định của fixture, không suy danh tính từ thứ tự server trả về. */
+    (option) =>
+        option.name == 'Phòng vận hành A' && option.role == WorkspaceRole.admin,
+  );
+  if (accountAWorkspace.length != 1 || accountAOptions.length != 2) {
+    throw StateError('NATIVE_ACCOUNT_A_WORKSPACE_INVALID');
+  }
+  _caseStage = 'account-a-picker';
+  await tapNative(tester, 'workspace-select-${accountAWorkspace.single.id}');
+  await waitForNative(tester, find.byKey(const ValueKey('session-summary')));
+  expect(find.text(accountAEmail), findsOneWidget);
+  expect(find.text('Phòng vận hành A'), findsOneWidget);
+  final accountAApplication = find.byType(AppAuthApplication);
+  if (accountAApplication.evaluate().length != 1) {
+    throw StateError('NATIVE_ACCOUNT_A_APPLICATION_INVALID');
+  }
+  final accountASession = tester
+      .widget<AppAuthApplication>(accountAApplication)
+      .coordinator
+      .session;
+  if (accountASession.phase != AppSessionPhase.full ||
+      accountASession.profile?.email != accountAEmail ||
+      accountASession.selectedWorkspace == null) {
+    throw StateError('NATIVE_ACCOUNT_A_SESSION_INVALID');
+  }
+  _caseStage = 'account-a-summary';
+  await waitForAccessCheckpoint(tester, 'account-a-ready');
+
+  _caseStage = 'account-a-logout';
+  await tapNative(tester, 'session-logout');
+  await waitForNative(tester, find.byKey(const ValueKey('auth-email')));
+  const store = SecureSessionTokenStore();
+  final application = find.byType(AppAuthApplication);
+  if (application.evaluate().length != 1) {
+    throw StateError('NATIVE_ACCOUNT_SWITCH_APPLICATION_INVALID');
+  }
+  final signedOutSession = tester
+      .widget<AppAuthApplication>(application)
+      .coordinator
+      .session;
+  if (await store.readSession() != null ||
+      await store.readLogoutIntent() != null ||
+      signedOutSession.phase != AppSessionPhase.signedOut ||
+      signedOutSession.profile != null ||
+      signedOutSession.workspaces.isNotEmpty ||
+      signedOutSession.selectedWorkspace != null ||
+      find.byType(WorkspaceSelectionScreen).evaluate().isNotEmpty ||
+      find.byKey(const ValueKey('session-summary')).evaluate().isNotEmpty) {
+    throw StateError('NATIVE_ACCOUNT_A_CACHE_RETAINED');
+  }
+  await waitForAccessCheckpoint(tester, 'account-a-logged-out');
   await waitForAccessCheckpoint(tester, 'before-disabled');
+  _caseStage = 'disabled-rejected';
   await submitNativeAccessLogin(tester, emails[1] as String, password);
   final disabledCopy = await readNativeRejection(tester);
   await waitForAccessCheckpoint(tester, 'disabled-rejected');
+  _caseStage = 'wrong-rejected';
   await submitNativeAccessLogin(tester, emails[3] as String, '${password}0');
   final wrongCopy = await readNativeRejection(tester);
   if (wrongCopy != disabledCopy)
     throw StateError('NATIVE_GENERIC_REJECTION_MISMATCH');
   await waitForAccessCheckpoint(tester, 'wrong-rejected');
+  _caseStage = 'account-b-login';
   await submitNativeAccessLogin(tester, emails[3] as String, password);
   final empty = find.byWidgetPredicate(
     /**
@@ -976,6 +1278,24 @@ Future<void> verifyNativeAccess(
     (widget) => widget is WorkspaceSelectionScreen && widget.state.isEmpty,
   );
   await waitForNative(tester, empty);
+  final accountBApplication = find.byType(AppAuthApplication);
+  if (accountBApplication.evaluate().length != 1) {
+    throw StateError('NATIVE_ACCOUNT_B_APPLICATION_INVALID');
+  }
+  final accountBSession = tester
+      .widget<AppAuthApplication>(accountBApplication)
+      .coordinator
+      .session;
+  if (accountBSession.phase != AppSessionPhase.full ||
+      accountBSession.profile?.email != accountBEmail ||
+      accountBSession.workspaces.isNotEmpty ||
+      accountBSession.selectedWorkspace != null ||
+      !accountBSession.workspacesLoaded ||
+      find.text(accountAEmail).evaluate().isNotEmpty ||
+      find.text('Phòng vận hành A').evaluate().isNotEmpty ||
+      find.byKey(const ValueKey('session-summary')).evaluate().isNotEmpty) {
+    throw StateError('NATIVE_ACCOUNT_B_CACHE_ISOLATION_INVALID');
+  }
   expect(find.text('Không có workspace khả dụng'), findsOneWidget);
   expect(
     find.text('Tạo workspace chưa khả dụng trong phiên bản này.'),
@@ -992,6 +1312,7 @@ Future<void> verifyNativeAccess(
   await waitForNative(tester, find.byKey(const ValueKey('app-loading')));
   await waitForNative(tester, empty);
   await waitForAccessCheckpoint(tester, 'empty-refreshed');
+  _caseStage = 'account-b-logout';
   await tapNative(tester, 'workspace-logout');
   await waitForNative(tester, find.byKey(const ValueKey('auth-email')));
   expect(find.byType(WorkspaceSelectionScreen), findsNothing);

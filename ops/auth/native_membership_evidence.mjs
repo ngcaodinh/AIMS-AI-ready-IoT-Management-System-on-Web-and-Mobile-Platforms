@@ -28,18 +28,21 @@ function exactKeys(value, keys) {
 /**
  * Chốt HTTP metadata theo temporal prefix, status và target; không giữ header/body/URL/secret.
  * Input
- * Param: profile — preset nội bộ membership-stale hoặc offline-login với bảng request cố định.
+ * Param: profile — preset nội bộ membership-stale, offline-login hoặc offline-expired với bảng request cố định.
  * Output: baseline/checkpoint/current/final oracle fail sticky, observe được H2 capture gọi đồng bộ.
  */
 export function createMembershipHttpOracle(profile = 'membership-stale') {
-  assert.ok(['membership-stale', 'offline-login'].includes(profile));
+  assert.ok(['membership-stale', 'offline-login', 'offline-expired'].includes(profile));
   const offline = profile === 'offline-login';
-  const expectedStages = offline ? ['offline-ready', 'offline-result', 'offline-quiet', 'offline-picker', 'offline-logged-out'] : stages;
-  const expectedPrefixes = offline ? [1, 1, 2, 5, 9] : prefixes;
-  const expectedRequests = offline ? [['PROFILE_READ', 401], ['PROFILE_READ', 401],
+  const offlineExpired = profile === 'offline-expired';
+  const expectedStages = offlineExpired ? ['offline-expired-offline', 'offline-expired-ready',
+    'offline-expired-persisted', 'offline-outbox-resumed', 'offline-logged-out'] : offline ? ['offline-ready', 'offline-result', 'offline-quiet', 'offline-picker',
+    'offline-outbox-ready', 'offline-outbox-persisted', 'offline-outbox-resumed', 'offline-logged-out'] : stages;
+  const expectedPrefixes = offlineExpired ? [0, 0, 0, 0, 1] : offline ? [1, 1, 2, 5, 8, 8, 8, 9] : prefixes;
+  const expectedRequests = offlineExpired ? [['AUTH_LOGOUT', 204]] : offline ? [['PROFILE_READ', 401], ['PROFILE_READ', 401],
     ['AUTH_LOGIN', 200], ['PROFILE_READ', 200], ['WORKSPACE_LIST', 200],
     ['WORKSPACE_DETAIL', 200], ['WORKSPACE_LIST', 200], ['WORKSPACE_DETAIL', 200], ['AUTH_LOGOUT', 204]] : requests;
-  const targetIndex = offline ? 7 : 3;
+  const targetIndex = offlineExpired ? -1 : offline ? 7 : 3;
   const records = new Map();
   let sequence = 0; let lastElapsed = 0; let position = -1; let baseline = false;
   let failed = false; let finished = false;

@@ -7,9 +7,18 @@ const _stages = [
   'offline-result',
   'offline-quiet',
   'offline-picker',
-  'offline-logged-out',
+  'offline-outbox-ready',
+  'offline-outbox-persisted',
 ];
-const _caps = [110000, 110000, 170000, 170000, 5000];
+const _caps = [110000, 110000, 170000, 170000, 170000, 170000];
+const _expiredStages = [
+  'offline-expired-offline',
+  'offline-expired-ready',
+  'offline-expired-persisted',
+];
+const _expiredCaps = [110000, 170000, 170000];
+const _resumeStages = ['offline-outbox-resumed', 'offline-logged-out'];
+const _resumeCaps = [170000, 120000];
 
 /// Clock synthetic của gate, không thay Stopwatch của App hoặc đồng hồ backend.
 final class OfflineTestClock {
@@ -35,10 +44,30 @@ void finishStages(NativeOfflineCheckpoint gate, int count) {
   }
 }
 
+/// Kiểm profile có đúng stage/cap theo thứ tự và chỉ complete sau khi từng pause được clear.
+/// Input
+/// Param: profile — tên profile checkpoint cố định của fixture native.
+/// Param: stages — enum stage theo thứ tự mà runner được phép ACK.
+/// Param: caps — timeout milliseconds tương ứng, không do packet cấp quyền.
+void verifyProfile(String profile, List<String> stages, List<int> caps) {
+  final gate = NativeOfflineCheckpoint(
+    elapsed: () => Duration.zero,
+    profile: profile,
+  );
+  for (var index = 0; index < stages.length; index++) {
+    final stage = stages[index];
+    gate.begin(stage);
+    expect(gate.receipt()['checkpointRemainingMilliseconds'], caps[index]);
+    expect(gate.acknowledge({'stage': stage}), isTrue);
+    gate.endPause();
+  }
+  expect(gate.complete, isTrue);
+}
+
 /// Kiểm ordered local protocol; không dùng fake clock làm evidence mạng/DB/emulator.
 void main() {
   test(
-    'five ordered stages have fixed caps and require final clear',
+    'six ordered outbox stages have fixed caps and require final clear',
 
     /// Receipt là bản sao, ACK chỉ một lần; metadata không mang SQL/credential authority.
     () {
@@ -69,6 +98,16 @@ void main() {
         gate.endPause();
       }
       expect(gate.complete, isTrue);
+    },
+  );
+
+  test(
+    'expired and resume profiles use their own fixed checkpoint sequences',
+
+    /// Profile expired giữ pause offline/persisted; resume chỉ mở checkpoint restore/logout.
+    () {
+      verifyProfile('offline-expired', _expiredStages, _expiredCaps);
+      verifyProfile('offline-resume', _resumeStages, _resumeCaps);
     },
   );
 
@@ -194,7 +233,7 @@ void main() {
       clock.value = const Duration(seconds: 111);
       expect(gate.acknowledged, isTrue);
       gate.endPause();
-      finishStagesAfterFirst(gate);
+      finishStagesAfterFirst(gate, _stages);
       expect(gate.complete, isTrue);
       clock.value = const Duration(seconds: 675);
       expect(gate.complete, isFalse);
@@ -223,8 +262,9 @@ void main() {
 /// Hoàn tất bốn stage cuối từ ACK đầu đã clear, giữ nguyên clock và global anchor.
 /// Input
 /// Param: gate — instance đã đi qua stage đầu bằng protocol công khai.
-void finishStagesAfterFirst(NativeOfflineCheckpoint gate) {
-  for (final stage in _stages.skip(1)) {
+/// Param: stages — chuỗi profile mà test đang kiểm, không đổi order/cap nội bộ.
+void finishStagesAfterFirst(NativeOfflineCheckpoint gate, List<String> stages) {
+  for (final stage in stages.skip(1)) {
     gate.begin(stage);
     expect(gate.acknowledge({'stage': stage}), isTrue);
     gate.endPause();

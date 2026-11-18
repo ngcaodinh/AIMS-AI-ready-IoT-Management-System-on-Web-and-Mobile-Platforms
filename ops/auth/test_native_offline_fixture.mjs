@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { startFixture } from './run_native_e2e.mjs';
+import { createOfflineSessionOracle } from './native_offline_evidence.mjs';
 
 /** Dựng shim fake qua parser/startFixture thật, không spawn DB/SDK hoặc chứa credential thật. */
 function fakeOfflineFixture(fault = 'none') {
@@ -45,7 +46,8 @@ function fakeOfflineFixture(fault = 'none') {
     (value) => {
       assert.equal(value, 'STOP\n'); state.stopWrites++;
       emit({ kind: 'STOPPED', cleanup: { role: 0, hba: 0, users: 0, sessions: 0, workspaces: 0,
-        memberships: 0, auditActor: 0, limiterBuckets: 0 } });
+        memberships: 0, auditActor: 0, limiterBuckets: 0, pushInstallations: 0, websocketTickets: 0,
+        outboxEvents: 0, outboxConsumptions: 0, globalIdempotencyRecords: 0 } });
       state.terminal = true; child.emit('exit', 0);
     };
   for (const stream of [child.stdin, child.stdout, child.stderr]) {
@@ -59,6 +61,45 @@ function fakeOfflineFixture(fault = 'none') {
 
 /** Kiểm scope read-only/immutable/schema/cleanup của offline fixture adapter thực qua fake child. */
 async function main() {
+  {
+    const seedSessionId = randomUUID();
+    const appSessionId = randomUUID();
+    const workspaceRows = [
+      { workspaceId: randomUUID(), name: 'Phòng vận hành A', role: 'ADMIN' },
+      { workspaceId: randomUUID(), name: 'Nhà kính B', role: 'USER' },
+    ];
+    const baseline = {
+      sessions: [{ sessionId: seedSessionId, revoked: false }],
+      audit: [{ sessionId: seedSessionId, eventType: 'LOGIN_SUCCEEDED', outcome: 'SUCCESS', clientType: 'ANDROID' }],
+      workspaces: workspaceRows,
+    };
+    const mid = {
+      sessions: [...baseline.sessions, { sessionId: appSessionId, revoked: false }],
+      audit: [...baseline.audit, { sessionId: appSessionId, eventType: 'LOGIN_SUCCEEDED', outcome: 'SUCCESS', clientType: 'ANDROID' }],
+      workspaces: workspaceRows,
+    };
+    const final = {
+      sessions: [...baseline.sessions, { sessionId: appSessionId, revoked: true }],
+      audit: [...baseline.audit,
+        { sessionId: appSessionId, eventType: 'LOGIN_SUCCEEDED', outcome: 'SUCCESS', clientType: 'ANDROID' },
+        { sessionId: appSessionId, eventType: 'LOGOUT', outcome: 'SUCCESS', clientType: 'ANDROID' }],
+      workspaces: workspaceRows,
+    };
+    const oracle = createOfflineSessionOracle(baseline);
+    oracle.negative(baseline);
+    oracle.mid(mid);
+    assert.equal(oracle.appSessionId, appSessionId);
+    oracle.unchanged(mid);
+    oracle.unchanged(mid);
+    oracle.unchanged(mid);
+    oracle.final(final);
+    assert.throws(
+      /** Audit final không được hợp thức hóa thêm trạng thái pending sau khi logout đã commit. */
+      () => oracle.unchanged(final),
+      { message: 'NATIVE_OFFLINE_SESSION_INVALID' },
+    );
+  }
+  console.log('OFFLINE_SESSION_PENDING_RESTART_ORACLE_PASS');
   {
     const { owner, state, ready, evidence } = fakeOfflineFixture();
     assert.deepEqual(await owner.ready(), ready);

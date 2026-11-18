@@ -21,9 +21,10 @@ pub struct Profile {
     pub preferences_revision: i64,
 }
 
-/// Metadata phiên sau current admission; limited không bao giờ có profile.
+/// Metadata phiên sau admission; ID dùng đóng đúng socket phiên và limited không bao giờ có profile.
 pub struct SessionInspection {
     pub user_id: Uuid,
+    pub session_id: Uuid,
     pub context_id: Uuid,
     pub limited: bool,
     pub profile: Option<Profile>,
@@ -127,6 +128,7 @@ where
         transaction.commit().await?;
         Ok(SessionInspection {
             user_id: principal.user_id(),
+            session_id: principal.session_id(),
             context_id: locked.session.auth_context_id,
             limited,
             profile,
@@ -157,6 +159,7 @@ where
         transaction.commit().await?;
         Ok(SessionInspection {
             user_id: principal.user_id(),
+            session_id: principal.session_id(),
             context_id: locked.session.auth_context_id,
             limited: true,
             profile: None,

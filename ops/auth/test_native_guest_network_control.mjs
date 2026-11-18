@@ -62,6 +62,21 @@ assert.throws(/** Output: profile ngoài allowlist phải reject trước khi b�
       async () => { throw Error('UNEXPECTED_SDK_CALL'); } }), { message: 'GUEST_NETWORK_MODE_INVALID' });
 console.log('GUEST_NETWORK_COMMAND_PROFILE_ALLOWLIST_PASS');
 
+{
+  const fake = fakeGuest('effective', 'cmd'); let admissionChecks = 0;
+  const admission = {
+    /** Chỉ cho phép lệnh data đầu tiên để lộ write Wi-Fi thiếu fence giữa hai ADB calls. */
+    assertActive() {
+      admissionChecks++;
+      if (admissionChecks > 1) throw new Error('NATIVE_OFFLINE_PREARM_UNAVAILABLE');
+    },
+  };
+  await assert.rejects(() => fake.control.setState('off', admission),
+    { message: 'NATIVE_OFFLINE_PREARM_UNAVAILABLE' });
+  assert.deepEqual(fake.writes, ['data:disable']);
+  console.log('GUEST_NETWORK_ADMISSION_BETWEEN_RADIOS_PASS');
+}
+
 /**
  * Mô hình guest settings/SDK cho invariant ordering, không giả làm actual route proof.
  * Input

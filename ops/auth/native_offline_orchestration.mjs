@@ -2,22 +2,23 @@ import assert from 'node:assert/strict';
 import { randomBytes, X509Certificate } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createMembershipHttpOracle } from './native_membership_evidence.mjs';
-import { createOfflineSessionOracle } from './native_offline_evidence.mjs';
+import { createOfflineExpiredSessionOracle, createOfflineSessionOracle } from './native_offline_evidence.mjs';
 import { assertNativePid, runNativePhase } from './run_native_e2e.mjs';
 
 /**
- * Điều phối offline trong một native engine, cùng fixture20phút và proxy H2 owned.
+ * Điều phối offline logout/restart qua hai native process, cùng fixture20phút và proxy H2 owned.
  * Input
  * Param: capabilities — factories TLS/fixture/proxy, SDK consumer và guest network đã pin API36.
  * Param: capabilities.network — readState/setState chỉ quyền mạng của AVD owned.
+ * Param: capabilities.seedExpiredSession — tạo row expired bằng INSERT với TTL24h nguyên vẹn.
  * Param: capabilities.phaseRuntime — fake SDK/clock trong host tests, không nhận CLI authority.
  * Param: capabilities.now/wallNow/pause/timers — đồng hồ, bounded poll và timer ownership.
- * Output: PID sau UI/H2/SQL, original SDK/fixture/proxy terminal và restore mạng.
+ * Output: PID resume sau UI/H2/SQL, cả SDK/fixture/proxy terminal và restore mạng.
  * Errors: fixed failure, secrets chỉ RAM, pending SQL luôn được drain trước return.
  */
 export async function orchestrateNativeOffline({ createFixture, createCertificates, startProxy, verifyHostNoCa,
   network, runPhase = runNativePhase, phaseRuntime = {}, now = performance.now.bind(performance),
-  wallNow = Date.now, pause = delay, timers = { setTimeout, clearTimeout },
+  wallNow = Date.now, pause = delay, timers = { setTimeout, clearTimeout }, seedExpiredSession = false,
   certificateInfo =
     /** Param: material — chỉ xuất public DER và validity, không trả private PFX. */
     (material) => {
@@ -25,13 +26,17 @@ export async function orchestrateNativeOffline({ createFixture, createCertificat
       return { certificate: value.raw.toString('base64'), notBefore: Date.parse(value.validFrom), notAfter: Date.parse(value.validTo) };
     } }) {
   let password = 'Aa1' + randomBytes(16).toString('hex');
-  const secrets = [password]; const unavailable = new AbortController();
+  let expiredSessionToken = seedExpiredSession ? randomBytes(32).toString('hex') : undefined;
+  const secrets = [password, ...(expiredSessionToken ? [expiredSessionToken] : [])];
+  const unavailable = new AbortController();
   let fixture; let proxy; let materials; let packet; let certificate; let certificateDeadline; let workDeadline;
   let fixtureClosing; let proxyClosing; let restoring; let changed = false; let restored = false;
-  let closing = false; let failed = false; let success = false; let lastNow = 0; let processId;
-  let setupTimer; let sqlTimer; let pendingSql; let prepare; let negative; let sessionOracle; let sdkExit;
+  let closing = false; let failed = false; let failureReported = false; let success = false; let lastNow = 0; let processId;
+  let setupTimer; let sqlTimer; let pendingSql; let prepare; let negative; let sessionOracle;
+  const sdkExits = [];
   let stage = 'BASELINE'; let sqlReads = 0;
-  const http = createMembershipHttpOracle('offline-login');
+  const phase = seedExpiredSession ? 'offline-expired' : 'offline-login';
+  const http = createMembershipHttpOracle(phase);
 
   /** Output: monotonic finite sample, rollback/throw đều cấm PASS và giữ cleanup. */
   function clock() {
@@ -73,14 +78,21 @@ export async function orchestrateNativeOffline({ createFixture, createCertificat
     return proxyClosing;
   }
 
-  /** Khóa admission trước STOP, không nhả registry SQL hoặc SDK từ timer/abort. */
-  function fail() {
+  /** Khóa admission trước STOP và chỉ phát một enum nguyên nhân để định vị owner bị lỗi.
+   * Input
+   * Param: reason — nguyên nhân cố định từ callsite; không chứa exception, payload hay identity.
+   */
+  function fail(reason = 'UNCLASSIFIED') {
+    if (!failureReported) {
+      failureReported = true;
+      console.error(`NATIVE_OFFLINE_FIRST_FAILURE_${reason}_AT_${stage}`);
+    }
     failed = true; unavailable.abort(); closeProxy(); closeFixture();
   }
 
   /** Fixture/proxy mất availability ngoài cleanup là failure sticky. */
   function ownerUnavailable() {
-    if (!closing) fail();
+    if (!closing) fail('PROXY_UNAVAILABLE');
   }
 
   /** Param: owner — raw proxy registry trước async bind để failure vẫn cleanup đúng instance. */
@@ -89,7 +101,7 @@ export async function orchestrateNativeOffline({ createFixture, createCertificat
     assert.ok(!proxy && owner && owner.signal instanceof AbortSignal && owner.terminal instanceof Promise);
     proxy = owner; proxy.terminal.catch(/** Drain rejection nhưng không giả terminal PASS. */ () => {});
     proxy.signal.addEventListener('abort', ownerUnavailable); wipe();
-    if (proxy.signal.aborted || unavailable.signal.aborted) { fail(); closeProxy(); }
+    if (proxy.signal.aborted || unavailable.signal.aborted) { fail('PROXY_UNAVAILABLE'); closeProxy(); }
   }
 
   /**
@@ -99,7 +111,9 @@ export async function orchestrateNativeOffline({ createFixture, createCertificat
   function readSql(validate) {
     active(235_000); assert.ok(!pendingSql);
     const deadline = clock() + 130_000;
-    sqlTimer = timers.setTimeout(fail, 130_000);
+    sqlTimer = timers.setTimeout(
+      /** SQL timeout chỉ đóng admission; không biến timeout thành receipt terminal. */
+      () => fail('SQL_TIMEOUT'), 130_000);
     const operation = Promise.resolve().then(/** Fence ngay trước original SQL command. */
       () => { active(); return fixture.offlineEvidence(); }).then(
       /** Param: rows — completion thật, late/aborted receipt không được cấp authority. */
@@ -108,20 +122,44 @@ export async function orchestrateNativeOffline({ createFixture, createCertificat
     operation.then(/** SQL terminal nhả registry, timeout không tự nhả. */
       () => { timers.clearTimeout(sqlTimer); pendingSql = undefined; },
       /** Original rejection báo external failure ngay, không unhandled. */
-      () => { timers.clearTimeout(sqlTimer); pendingSql = undefined; fail(); });
+      () => { timers.clearTimeout(sqlTimer); pendingSql = undefined; fail('SQL_FAILED'); });
     return operation;
   }
 
-  /** Restore attempt có cùng raw owner, lỗi restore không được che bằng second attempt mới. */
-  function restore() {
+  /**
+   * Khôi phục mạng theo một owner duy nhất; admission chỉ chặn lần ghi mới, cleanup vẫn được phép phục hồi.
+   * Input
+   * Param: admission — quyền checkpoint tùy chọn; bỏ trống chỉ ở cleanup cuối để không khóa restore.
+   * Output: true chỉ sau khi guest readback xác nhận mạng đã bật.
+   * Side effects: một lần ghi có admission; cleanup được phép retry sau khi owner gốc đã kết thúc lỗi.
+   */
+  function restore(admission) {
     if (!restoring) {
-      let settle; restoring = new Promise(/** Registry trước SDK network operation để cleanup join cùng owner. */
+      let settle;
+      const owner = new Promise(/** Param: resolve — registry trước lệnh mạng để cleanup join cùng owner. */
         (resolve) => { settle = resolve; });
-      Promise.resolve().then(/** Luôn khôi phục cả data và Wi-Fi qua controller cố định. */
-        () => network.setState('enabled')).then(/** Readback riêng sau original write terminal. */
-        async () => { assert.equal(await network.readState(), 'enabled'); restored = true; }).then(
-        /** Chỉ restore/readback cùng owner thành công mới ACK. */ () => settle(true),
-        /** Failure vẫn cho các owner khác cleanup đồng thời. */ () => { fail(); settle(false); });
+      restoring = owner;
+      /** Lỗi giữ failure sticky nhưng nhả owner đã terminal để finally có thể retry phục hồi mạng. */
+      const failRestore = () => {
+        fail('NETWORK_RESTORE_FAILED');
+        if (restoring === owner) restoring = undefined;
+        settle(false);
+      };
+      try {
+        // Chuyển quyền giai đoạn xuống bộ điều khiển để kiểm lại trước từng lần ghi trạng thái vô tuyến.
+        if (admission) { admission.assertActive(); active(); }
+        Promise.resolve(network.setState('enabled', admission)).then(/** Readback riêng sau lệnh mạng gốc đã kết thúc. */
+          async () => {
+            if (admission) { admission.assertActive(); active(); }
+            assert.equal(await network.readState(), 'enabled');
+            if (admission) { admission.assertActive(); active(); }
+            restored = true;
+          }).then(
+          /** Chỉ restore/readback cùng owner thành công mới ACK. */ () => settle(true),
+          failRestore);
+      } catch {
+        failRestore();
+      }
     }
     return restoring;
   }
@@ -144,57 +182,103 @@ export async function orchestrateNativeOffline({ createFixture, createCertificat
     assert.ok(typeof certificate.certificate === 'string' && certificate.certificate.length &&
       Number.isFinite(certificate.notBefore) && Number.isFinite(certificate.notAfter) && Number.isFinite(wall));
     certificateDeadline = sampled + certificate.notAfter - wall;
-    const before = clock(); fixture = createFixture(password, secrets, ownerUnavailable); const after = clock();
+    const before = clock(); fixture = createFixture(password, secrets, ownerUnavailable, expiredSessionToken); const after = clock();
     workDeadline = fixture.workDeadline;
     assert.ok(Number.isFinite(workDeadline) && workDeadline - 1_200_000 >= before && workDeadline - 1_200_000 <= after);
     stage = 'READY'; const ready = await fixture.ready(); active(1_165_000);
-    packet = { version: 1, phase: 'offline-login', emails: [...ready.emails], password };
+    packet = { version: 1, phase, emails: [...ready.emails], password };
+    if (seedExpiredSession) {
+      packet.expiredSessionToken = expiredSessionToken;
+      packet.expiredSessionId = ready.expiredSessionId;
+      packet.expiredSessionExpiresAt = ready.expiredSessionExpiresAt;
+    }
+    expiredSessionToken = undefined;
     // Baseline130s song song startup180s, TLS chỉ bind sau khi biết B. Valid packet chờ toàn prepare này.
     prepare = readSql(/** Param: rows — snapshot baseline pin account/workspaces trước mọi UI login. */
-      (rows) => { sessionOracle = createOfflineSessionOracle(rows); }).then(
+      (rows) => {
+        sessionOracle = seedExpiredSession
+          ? createOfflineExpiredSessionOracle(rows, ready.expiredSessionId, ready.expiredSessionExpiresAt)
+          : createOfflineSessionOracle(rows);
+      }).then(
       /** Dùng setup10s bên trong pre-ARM240s, không lấy completion SQL làm mốc gia hạn fixture. */
       async () => {
         stage = 'TLS_SETUP';
         active(); const deadline = clock() + 10_000;
-        setupTimer = timers.setTimeout(fail, 10_000);
+        setupTimer = timers.setTimeout(
+          /** Hết10s setup phải đóng owner thay vì cấp thêm thời gian cho proxy. */
+          () => fail('TLS_SETUP_TIMEOUT'), 10_000);
+        stage = 'TLS_PROXY_START';
         ownProxy(await startProxy(materials.valid, sessionOracle.targetWorkspaceId, http.observe, ownProxy));
+        stage = 'TLS_HOST_NO_CA';
         active(); await verifyHostNoCa(proxy.signal); active();
+        stage = 'TLS_PROXY_DRAIN';
         while (proxy.httpSnapshot().rawActive !== 0) {
           assert.ok(clock() < deadline); active(); await pause(25);
         }
-        assert.ok(clock() < deadline); active(); http.baseline(proxy.httpSnapshot());
+        stage = 'TLS_METADATA_BASELINE';
+        assert.ok(clock() < deadline); active();
+        const baseline = proxy.httpSnapshot();
+        // Chỉ công bố counter allowlist để phân biệt raw TLS no-CA với request HTTP ngoài dự kiến.
+        console.log(JSON.stringify({ kind: 'NATIVE_OFFLINE_TLS_BASELINE', healthy: baseline.healthy,
+          sealed: baseline.sealed, sequence: baseline.sequence, elapsedMilliseconds: baseline.elapsedMilliseconds,
+          byKind: baseline.byKind, rawOpened: baseline.rawOpened,
+          rawActive: baseline.rawActive, opened: baseline.opened, active: baseline.active,
+          requests: baseline.requests, statuses: baseline.statuses, closed: baseline.closed,
+          incomplete: baseline.incomplete, proxyAvailable: baseline.proxyAvailable }));
+        http.baseline(baseline);
+        console.log('NATIVE_OFFLINE_TLS_BASELINE_VALID');
         timers.clearTimeout(setupTimer); setupTimer = undefined;
       });
-    prepare.catch(/** Handler trước SDK await, giữ same prepare để drain sau stop. */ () => fail());
+    prepare.catch(/** Handler trước SDK await, giữ cùng prepare để drain sau stop. */ () => fail('PREPARE_FAILED'));
     active(1_150_000);
     processId = await runPhase(packet, certificate.certificate,
-      /** Param: pid/admission — final oracle sau UI logout, trước SDK cleanup trong130s. */
+      /** Kiểm logout offline chưa đổi DB trước khi SDK cleanup cho phép process restart. */
       async (pid, admission) => {
-        stage = 'FINAL_SQL';
+        stage = 'OUTBOX_PENDING_SQL';
         admission.assertActive(); active(235_000); assert.ok(Number.isSafeInteger(pid) && pid > 0);
         http.assertCurrent(await idle(admission));
-        await readSql(/** Param: rows — AppUUID revoked cùng exact audit và seed unchanged. */
-          (rows) => sessionOracle.final(rows));
+        await readSql(/** Param: rows — session/audit vẫn nguyên vẹn trong khi app offline chờ terminal. */
+          (rows) => sessionOracle.unchanged(rows));
         admission.assertActive(); http.assertCurrent(await idle(admission));
-      }, password,
+      }, secrets,
       /** Param: checkpoint/admission — fixed native pause và fence do shared consumer sở hữu. */
       async (checkpoint, admission) => {
         stage = checkpoint.toUpperCase().replaceAll('-', '_');
         http.checkpoint(checkpoint, await idle(admission));
-        if (checkpoint === 'offline-ready') {
+        if (seedExpiredSession && checkpoint === 'offline-expired-offline') {
           assert.equal(await network.readState(), 'enabled'); admission.assertActive(); active();
-          changed = true; await network.setState('off');
+          changed = true; await network.setState('off', admission);
+          admission.assertActive(); active(); assert.equal(await network.readState(), 'disabled');
+        } else if (seedExpiredSession && ['offline-expired-ready', 'offline-expired-persisted'].includes(checkpoint)) {
+          assert.equal(await network.readState(), 'disabled');
+          await readSql((rows) => sessionOracle.unchanged(rows));
+        } else if (checkpoint === 'offline-ready') {
+          assert.equal(await network.readState(), 'enabled'); admission.assertActive(); active();
+          changed = true; await network.setState('off', admission);
           admission.assertActive(); active(); assert.equal(await network.readState(), 'disabled');
         } else if (checkpoint === 'offline-result') {
           negative = readSql(/** Param: rows — không session/audit delta khi route thật bị cắt. */
             (rows) => sessionOracle.negative(rows));
-          negative.catch(/** Negative tiếp tục owned khi restore ACK trước SQL completion. */ () => fail());
-          assert.ok(await restore());
+          negative.catch(/** Negative tiếp tục owned khi restore ACK trước SQL completion. */ () => fail('NEGATIVE_SQL_FAILED'));
+          assert.ok(await restore(admission));
         } else if (checkpoint === 'offline-quiet') {
           assert.ok(negative); await negative;
         } else if (checkpoint === 'offline-picker') {
           await readSql(/** Param: rows — đúng một live AppUUID, hai workspace/roles giữ nguyên. */
             (rows) => sessionOracle.mid(rows));
+        } else if (checkpoint === 'offline-outbox-ready') {
+          assert.equal(await network.readState(), 'enabled'); admission.assertActive(); active();
+          await readSql(/** Param: rows — session/audit còn nguyên trước gesture logout offline. */
+            (rows) => sessionOracle.unchanged(rows));
+          // Re-arm cùng restore owner sau lần guest-off đầu để cleanup có thể bật mạng lần hai.
+          restored = false; restoring = undefined; changed = true;
+          admission.assertActive(); active();
+          await network.setState('off', admission);
+          admission.assertActive(); active(); assert.equal(await network.readState(), 'disabled');
+        } else if (checkpoint === 'offline-outbox-persisted') {
+          assert.equal(await network.readState(), 'disabled');
+          await readSql(/** Param: rows — logout offline chưa revoke/audit session trước khi restart. */
+            (rows) => sessionOracle.unchanged(rows));
         }
         admission.assertActive(); active(); http.assertCurrent(await idle(admission));
         const snapshot = proxy.httpSnapshot();
@@ -205,30 +289,85 @@ export async function orchestrateNativeOffline({ createFixture, createCertificat
         beforePacket: /** Param: admission — SDK pre-ARM fence, chờ original prepare và giữ910s. */
           async (admission) => { admission.assertActive(); await prepare; admission.assertActive(); active(910_000); },
         onPhaseClosing: /** Param: passed — failure phải đóng fixture để pending SQL drain trước return. */
-          (passed) => { if (!passed) fail(); },
+          (passed) => { if (!passed) fail('NATIVE_PHASE_FAILED'); },
         captureSdkExit:
           /** Param: exit — raw SDK completion, bounded shutdown timeout không cấp quyền nhả owner này. */
           (exit) => {
-            assert.ok(sdkExit === undefined && exit instanceof Promise); sdkExit = exit;
-            sdkExit.catch(/** Drain rejection ngay, finally vẫn await cùng original completion. */ () => {});
+            assert.ok(exit instanceof Promise); sdkExits.push(exit);
+            exit.catch(/** Drain rejection ngay, finally vẫn await cùng original completion. */ () => {});
           },
       });
-    stage = 'POST_PID_HTTP'; active(); (phaseRuntime.checkPid ?? assertNativePid)(null); http.finish(proxy.httpSnapshot());
+    stage = 'FIRST_PHASE_CLEANUP';
+    (phaseRuntime.checkPid ?? assertNativePid)(null);
+    assert.equal(await network.readState(), 'disabled');
+    stage = 'RESUME_DB_BASELINE';
+    await readSql(/** Param: rows — lưu baseline khi process cũ đã dừng để tránh dùng hết retry của app resume. */
+      (rows) => sessionOracle.unchanged(rows));
+    active(); http.assertCurrent(proxy.httpSnapshot());
+    stage = 'RESUME';
+    const resumePacket = { version: 1, phase: 'resume', emails: [...packet.emails], password: '' };
+    processId = await runPhase(resumePacket, certificate.certificate,
+      /** Đối chiếu exact revoke/audit sau secure outbox nhận server terminal 204. */
+      async (pid, admission) => {
+        stage = 'RESUME_FINAL_SQL';
+        admission.assertActive(); active(105_000); assert.ok(Number.isSafeInteger(pid) && pid > 0);
+        await readSql(/** Param: rows — đúng AppUUID được revoke, audit login/logout và seed giữ nguyên. */
+          (rows) => sessionOracle.final(rows));
+        admission.assertActive(); await idle(admission); http.assertCurrent(proxy.httpSnapshot());
+      }, secrets,
+      async (checkpoint, admission) => {
+        stage = checkpoint.toUpperCase().replaceAll('-', '_');
+        http.checkpoint(checkpoint, await idle(admission));
+        if (checkpoint === 'offline-outbox-resumed') {
+          stage = 'RESUME_NETWORK_STATE';
+          assert.equal(await network.readState(), 'disabled');
+          admission.assertActive(); active();
+          // SQL baseline đã đọc khi app dừng; exact prefix chặn request muộn trước khi mạng được bật.
+          http.assertCurrent(await idle(admission));
+          stage = 'RESUME_NETWORK_RESTORE';
+          assert.ok(await restore(admission));
+        }
+        if (checkpoint === 'offline-outbox-resumed') stage = 'RESUME_HTTP_RECONCILE';
+        admission.assertActive(); active();
+        const current = await idle(admission);
+        if (checkpoint === 'offline-outbox-resumed') {
+          // Bật mạng có thể phát logout hợp lệ ngay; capture oracle vẫn kiểm exact POST/204 tại checkpoint kế.
+          assert.ok(current.healthy && !current.sealed && current.proxyAvailable &&
+            current.rawActive === 0 && current.active === 0);
+        } else {
+          http.assertCurrent(current);
+        }
+        const snapshot = proxy.httpSnapshot();
+        console.log(JSON.stringify({ kind: 'NATIVE_OFFLINE_CHECKPOINT', stage: checkpoint, requests: snapshot.requests,
+          statuses: snapshot.statuses, closed: snapshot.closed, incomplete: snapshot.incomplete, sqlReads }));
+      }, { ...phaseRuntime, offlineLogoutResume: true, workDeadline, externalSignal: unavailable.signal,
+        assertExternalActive: /** Cùng lifetime/abort authority, không nhận guard từ CLI. */ () => active(),
+        onPhaseClosing: /** Param: passed — failure phải đóng fixture/proxy để mọi operation có terminal. */
+          (passed) => { if (!passed) fail('NATIVE_PHASE_FAILED'); },
+        captureSdkExit: /** Param: exit — giữ raw SDK completion của phase resume tới cleanup cuối. */
+          (exit) => {
+            assert.ok(exit instanceof Promise); sdkExits.push(exit);
+            exit.catch(/** Drain rejection ngay, finally vẫn await cùng original completion. */ () => {});
+          },
+      });
+    stage = 'POST_PID_HTTP'; active(); (phaseRuntime.checkPid ?? assertNativePid)(null);
+    http.finish(proxy.httpSnapshot());
     assert.ok(changed && restored); success = true;
-  } catch { console.error('NATIVE_OFFLINE_FAILED_STAGE_' + stage); fail(); }
+  } catch { console.error('NATIVE_OFFLINE_FAILED_STAGE_' + stage); fail('ORCHESTRATION_FAILED'); }
   finally {
     closing = true; unavailable.abort(); timers.clearTimeout(setupTimer); timers.clearTimeout(sqlTimer); wipe();
     // Restore được join cùng owner trước return, kể cả off command đã đổi state rồi báo lỗi.
     const restoreOwner = changed ? restore() : Promise.resolve(true);
     closeProxy(); closeFixture();
     const result = await Promise.allSettled([restoreOwner, proxyClosing ?? true, fixtureClosing ?? true,
-      proxy?.terminal, prepare, negative, pendingSql, sdkExit]);
+      proxy?.terminal, prepare, negative, pendingSql, ...sdkExits]);
     if (result.some(/** Param: item — rejection của bất kỳ original owner đều cấm PASS. */
       (item) => item.status !== 'fulfilled') || result.slice(0, 3).some(
       /** Param: item — cleanup phải trả literal true, không suy ACK từ timeout/undefined. */
       (item) => item.value !== true)) failed = true;
     proxy?.signal.removeEventListener('abort', ownerUnavailable);
-    if (packet) packet.password = ''; password = ''; secrets.fill('');
+    if (packet) { packet.password = ''; packet.expiredSessionToken = ''; }
+    password = ''; secrets.fill('');
   }
   assert.ok(success && !failed, 'NATIVE_OFFLINE_ORCHESTRATION_FAILED');
   return processId;

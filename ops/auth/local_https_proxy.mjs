@@ -118,6 +118,7 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
     (resolve) => { finishTerminal = resolve; });
   let stopping = false;
   let failed = false;
+  let failureReported = false;
   let listenerClosed = false;
   let listeningAcquired = false;
   let finish;
@@ -188,8 +189,15 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
     return closed;
   }
 
-  /** Metadata fault làm proxy unavailable ngay và giữ cleanup owned tới raw terminal. */
-  function failMetadata() {
+  /** Metadata fault đóng proxy owned và chỉ báo một mã nguyên nhân cố định.
+   * Input
+   * Param: reason — nhánh lỗi allowlist, không chứa exception hoặc dữ liệu HTTP.
+   */
+  function failMetadata(reason) {
+    if (!failureReported) {
+      failureReported = true;
+      console.error(`NATIVE_PROXY_FAILURE_${reason}`);
+    }
     failed = true;
     void close();
   }
@@ -211,7 +219,7 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
           const rawOwner = metadataRawOwners.get(socket.remotePort);
           assert.ok(rawOwner, 'HTTP_METADATA_RAW_OWNER_MISSING');
           metadata = httpMetadata.openExchange(rawOwner);
-        } catch { socket.destroy(); failMetadata(); return; }
+        } catch { socket.destroy(); failMetadata('EXCHANGE_ADMISSION'); return; }
       }
       const upstream = net.connect({ host: '127.0.0.1', port: configuration.upstreamPort });
       const requestLimit = createByteLimit(configuration.maxBytes, observer);
@@ -221,7 +229,7 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
       /** Kết thúc cả hai hướng khi lỗi/timeout; metadata lỗi cũng đóng proxy, giữ outcome transport riêng. */
       function abort() {
         for (const stream of owned) stream.destroy();
-        if (metadata && !httpMetadata.snapshot().healthy) failMetadata();
+        if (metadata && !httpMetadata.snapshot().healthy) failMetadata('CAPTURE_UNHEALTHY');
       }
       if (metadata) {
         const pendingClose = Promise.all(owned.map(
@@ -239,8 +247,8 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
           () => {
             try {
               metadata.close();
-              if (!httpMetadata.snapshot().healthy) failMetadata();
-            } catch { failMetadata(); }
+              if (!httpMetadata.snapshot().healthy) failMetadata('CAPTURE_UNHEALTHY');
+            } catch { failMetadata('EXCHANGE_TERMINAL'); }
           }).finally(
             /** Bỏ đúng Promise đã settled, proxy.close vẫn chờ mọi closure còn pending. */
             () => metadataClosures.delete(pendingClose));
@@ -277,7 +285,7 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
       if (stopping || rawSockets.size >= configuration.maxConnections) {
         socket.destroy();
         // Observed run mất coverage khi cap từ chối peer trước raw admission, phải hủy toàn bộ proof của lượt.
-        if (!stopping && httpMetadata) failMetadata();
+        if (!stopping && httpMetadata) failMetadata('RAW_CONNECTION_LIMIT');
         return;
       }
       rawSockets.add(socket);
@@ -300,7 +308,7 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
             !metadataRawOwners.has(remotePort), 'HTTP_METADATA_RAW_OWNER_INVALID');
           rawOwner = httpMetadata.openRaw();
           metadataRawOwners.set(remotePort, rawOwner);
-        } catch { socket.destroy(); failMetadata(); }
+        } catch { socket.destroy(); failMetadata('RAW_ADMISSION'); }
       }
     });
   server.on('tlsClientError',
@@ -313,11 +321,25 @@ export async function startLocalHttpsProxy(material, options = {}, observer, run
     (error, socket) => socket.destroy());
   server.on('error',
     /** Sau bind, lỗi listener đóng bridge fail-closed; trước bind do once(listening) trả lỗi cho owner. */
-    () => { failed = true; if (listeningAcquired) void close(); else unavailable.abort(); });
+    () => {
+      if (httpMetadata && !failureReported) {
+        failureReported = true;
+        console.error('NATIVE_PROXY_FAILURE_LISTENER_ERROR');
+      }
+      failed = true;
+      if (listeningAcquired) void close(); else unavailable.abort();
+    });
   server.on('listening', /** Chốt ownership bind trước lỗi listener để shutdown đúng nhánh. */ () => { listeningAcquired = true; });
   server.on('close', /** Listener đóng ngoài yêu cầu là failure, vẫn giữ cleanup owned tới terminal. */ () => {
     listenerClosed = true;
-    if (!stopping) { failed = true; void close(); }
+    if (!stopping) {
+      if (httpMetadata && !failureReported) {
+        failureReported = true;
+        console.error('NATIVE_PROXY_FAILURE_UNEXPECTED_LISTENER_CLOSE');
+      }
+      failed = true;
+      void close();
+    }
   });
   // Cấp ownership trước async bind để caller vẫn cleanup được khi bind lỗi, chỉ chốt port sau readiness.
   const owner = { port: undefined, close, closed, terminal, signal: unavailable.signal };

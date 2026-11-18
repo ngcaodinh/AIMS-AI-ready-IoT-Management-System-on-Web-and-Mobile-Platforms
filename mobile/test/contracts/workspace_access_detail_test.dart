@@ -73,7 +73,7 @@ void checkSharedDetailFixtures() {
     File('../contracts/fixtures/auth/workspace-scenarios.json')
         .readAsStringSync(),
   ) as Map<String, dynamic>;
-  expect(fixture['contractVersion'], '0.2.1');
+  expect(fixture['contractVersion'], '0.2.2');
   var matched = 0;
   for (final raw in fixture['scenarios'] as List<dynamic>) {
     final scenario = raw as Map<String, dynamic>;

@@ -30,8 +30,11 @@ function failure() {
  * Param: frame — READY do owned child gửi, không file/journal.
  * Output: copy metadata5accounts có canonical UUID và email đúng run.
  */
-function parseReady(frame) {
-  assert.ok(exactKeys(frame, ['kind','runId','userIds','emails']) && frame.kind === 'READY' &&
+function parseReady(frame, profile) {
+  const expired = profile === 'offline-expired';
+  assert.ok(exactKeys(frame, expired
+    ? ['kind','runId','userIds','emails','expiredSessionId','expiredSessionExpiresAt']
+    : ['kind','runId','userIds','emails']) && frame.kind === 'READY' &&
     typeof frame.runId === 'string' && uuid.test(frame.runId) &&
     Array.isArray(frame.userIds) && frame.userIds.length === 5 && new Set(frame.userIds).size === 5 &&
     frame.userIds.every(/** Param: id — UUID synthetic của account theo vị trí. */
@@ -45,7 +48,17 @@ function parseReady(frame) {
        * Output: email khớp namespace.
        */
       (email, index) => email === `probe-${frame.runId}-${index}@example.invalid`));
-  return { kind: 'READY', runId: frame.runId, userIds: [...frame.userIds], emails: [...frame.emails] };
+  const ready = { kind: 'READY', runId: frame.runId, userIds: [...frame.userIds], emails: [...frame.emails] };
+  if (expired) {
+    const expiry = frame.expiredSessionExpiresAt;
+    const parsed = typeof expiry === 'string' ? Date.parse(expiry) : NaN;
+    assert.ok(typeof frame.expiredSessionId === 'string' && uuid.test(frame.expiredSessionId) &&
+      typeof expiry === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expiry) &&
+      Number.isFinite(parsed) && new Date(parsed).toISOString() === expiry && parsed < Date.now() - 60_000);
+    ready.expiredSessionId = frame.expiredSessionId;
+    ready.expiredSessionExpiresAt = expiry;
+  }
+  return ready;
 }
 
 /**
@@ -138,8 +151,8 @@ function parseEvidence(frame, offline = false) {
  * Output: controller target/suspend/snapshot và parser hook, chưa là native business oracle.
  */
 export function createNativeMembershipFixture({ workDeadline, send, wait, available, close, profile = 'membership-stale', now = /** Clock mặc định monotonic của host, không lấy wallclock hoặc packet. */ () => performance.now() }) {
-  assert.ok(['membership-stale', 'offline-login'].includes(profile));
-  const offline = profile === 'offline-login';
+  assert.ok(['membership-stale', 'offline-login', 'offline-expired'].includes(profile));
+  const offline = profile !== 'membership-stale';
   assert.ok(Number.isFinite(workDeadline) && [send, wait, available, close, now].every(
     /** Param: capability — dependency phải là function do host sở hữu. */ (capability) => typeof capability === 'function'));
   let identity; let baseline; let pending; let targetSent = false; let suspendSent = false;
@@ -174,7 +187,7 @@ export function createNativeMembershipFixture({ workDeadline, send, wait, availa
     try {
       if (frame.kind === 'READY') {
         assert.ok(!failed && !identity && !pending && available() === true && sample() < workDeadline);
-        identity = parseReady(frame); return;
+        identity = parseReady(frame, profile); return;
       }
       let receipt;
       if (offline) assert.ok(frame.kind === 'MEMBERSHIP_SESSION_EVIDENCE');
@@ -200,15 +213,15 @@ export function createNativeMembershipFixture({ workDeadline, send, wait, availa
   /**
    * Admission và commit một command local, chưa coi observer timeout là SQL terminal.
    * Input
-   * Param: kind — fixed response enum, target/suspend hoặc snapshot.
+   * Param: kind — fixed response enum cho target, suspend, evidence hoặc snapshot.
    * Param: scope — account enum chỉ áp snapshot.
    * Output: copy receipt sau clock/lifecycle fence, failure chỉ trả sau owned close đã settle.
    */
-  async function command(kind, scope) {
+  async function command(kind, scope, sessionId) {
     let owner;
     try {
       assert.ok(!failed && identity && !pending && available() === true);
-      if (offline) assert.equal(kind, 'MEMBERSHIP_SESSION_EVIDENCE');
+      if (offline) assert.ok(kind === 'MEMBERSHIP_SESSION_EVIDENCE');
       const cap = kind === 'MEMBERSHIP_SUSPENDED' ? 20_000 : 130_000;
       const current = sample();
       assert.ok(workDeadline - current >= cap);
@@ -222,7 +235,7 @@ export function createNativeMembershipFixture({ workDeadline, send, wait, availa
       } else {
         assert.ok(kind === 'SNAPSHOT' && Object.hasOwn(scopes, scope)); literal = scopes[scope];
       }
-      owner = { kind, scope, deadline: current + cap, received: false };
+      owner = { kind, scope, sessionId, deadline: current + cap, received: false };
       pending = owner;
       send(literal);
       assert.ok(!failed && available() === true && sample() < owner.deadline);
@@ -244,7 +257,7 @@ export function createNativeMembershipFixture({ workDeadline, send, wait, availa
       () => {
         try {
           if (failed || !identity || available() !== true || sample() >= workDeadline) throw failure();
-          return parseReady(identity);
+          return parseReady(identity, profile);
         } catch { failed = true; throw failure(); }
       },
     target: /** Resolve B đúng một lần, không mở selector/UUID từ caller. */ () => command('MEMBERSHIP_TARGET'),

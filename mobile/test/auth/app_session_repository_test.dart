@@ -119,55 +119,126 @@ final class SessionStoreFake implements SessionTokenStore {
   /// Param: events — ledger in-memory dùng chứng minh clear/write/delete ACK order.
   SessionStoreFake(this.events);
   final List<String> events;
-  String? value;
+  StoredSessionCredential? storedSession;
+  PendingLogoutIntent? logoutIntent;
+
+  /// Đọc active token trong fake fixture để assertion không lộ vào repository API.
+  String? get value => storedSession?.token;
+
+  /// Gán fixture phiên giả với expiry đã biết, tránh metadata tùy ý trong test.
+  /// Input
+  /// Param: token — bearer tổng hợp hoặc null để giả lập active key vắng.
+  set value(String? token) {
+    storedSession = token == null
+        ? null
+        : StoredSessionCredential(
+            token: token,
+            expiresAt: initialTime.add(const Duration(hours: 1)),
+          );
+  }
+
   bool failRead = false;
   bool failWrite = false;
   bool failDelete = false;
+  bool failOutboxWrite = false;
+  int? failOutboxWriteAtCall;
+  bool writeOutboxBeforeFailure = false;
+  bool failOutboxDelete = false;
+  bool deleteOutboxBeforeFailure = false;
   bool writeBeforeAck = false;
   Completer<void>? writeGate;
   Completer<void>? deleteGate;
+  Completer<void>? outboxWriteGate;
   int reads = 0;
   int deletes = 0;
+  int outboxWrites = 0;
+  int outboxDeletes = 0;
   final writtenTokens = <String>[];
 
   /// Read error khác null thật; value không là bằng chứng session đã được admission.
   /// Output: key trong RAM hoặc null thật; lỗi read vẫn được phát riêng.
   @override
-  Future<String?> read() async {
+  Future<StoredSessionCredential?> readSession() async {
     reads++;
     events.add('store.read');
     if (failRead)
       throw const SessionStorageException(SessionStorageOperation.read);
-    return value;
+    return storedSession;
   }
 
-  /// Side effect có thể xảy ra trước gate/error; repository phải giữ ownership tới cuối ACK.
+  /// Side effect phiên có thể xảy ra trước gate/error; repository giữ ownership tới ACK.
   /// Input
-  /// Param: token — candidate của intent hiện tại, dùng mô phỏng side effect trước ACK.
+  /// Param: session — candidate bearer và expiry của intent hiện tại.
   /// Errors: lỗi write có thể phát sau khi value đã đổi; không rollback giả trong fake.
   @override
-  Future<void> write(String token) async {
-    writtenTokens.add(token);
+  Future<void> writeSession(StoredSessionCredential session) async {
+    writtenTokens.add(session.token);
     events.add('store.write.begin');
-    if (writeBeforeAck) value = token;
+    if (writeBeforeAck) storedSession = session;
     await writeGate?.future;
     if (failWrite)
       throw const SessionStorageException(SessionStorageOperation.write);
-    value = token;
+    storedSession = session;
     events.add('store.write.ack');
   }
 
   /// Chỉ ACK mới chứng minh own auth key đã clear; failure giữ nguyên value để bắt quarantine bypass.
   /// Errors: lỗi delete giữ key và không ghi ACK; gate cho phép kiểm ownership khi chờ.
   @override
-  Future<void> delete() async {
+  Future<void> deleteSession() async {
     deletes++;
     events.add('store.delete.begin');
     await deleteGate?.future;
     if (failDelete)
       throw const SessionStorageException(SessionStorageOperation.delete);
-    value = null;
+    storedSession = null;
     events.add('store.delete.ack');
+  }
+
+  /// Đọc tombstone riêng để test startup luôn ưu tiên phiên đang được thu hồi.
+  /// Output: intent fake hiện hành; lỗi đọc dùng chung boundary storage.
+  @override
+  Future<PendingLogoutIntent?> readLogoutIntent() async {
+    events.add('store.outbox.read');
+    if (failRead) {
+      throw const SessionStorageException(SessionStorageOperation.read);
+    }
+    return logoutIntent;
+  }
+
+  /// Ghi revoke record với ACK riêng, cho phép test chứng minh thứ tự trước active delete.
+  /// Input
+  /// Param: intent — bearer/expiry/retry state synthetic của một session cụ thể.
+  @override
+  Future<void> writeLogoutIntent(PendingLogoutIntent intent) async {
+    outboxWrites++;
+    events.add('store.outbox.write.begin');
+    await outboxWriteGate?.future;
+    // Có thể nhắm lỗi vào lần ghi quota/deadline để test ACK trước POST.
+    final shouldFail =
+        failOutboxWrite &&
+        (failOutboxWriteAtCall == null ||
+            outboxWrites == failOutboxWriteAtCall);
+    if (shouldFail && writeOutboxBeforeFailure) logoutIntent = intent;
+    if (shouldFail) {
+      throw const SessionStorageException(SessionStorageOperation.write);
+    }
+    logoutIntent = intent;
+    events.add('store.outbox.write.ack');
+  }
+
+  /// Xóa tombstone chỉ khi repository đã nhận terminal response và cleanup ACK.
+  /// Errors: fake failure giữ record để startup có thể retry.
+  @override
+  Future<void> deleteLogoutIntent() async {
+    outboxDeletes++;
+    events.add('store.outbox.delete.begin');
+    if (deleteOutboxBeforeFailure) logoutIntent = null;
+    if (failOutboxDelete) {
+      throw const SessionStorageException(SessionStorageOperation.delete);
+    }
+    logoutIntent = null;
+    events.add('store.outbox.delete.ack');
   }
 }
 
@@ -177,12 +248,19 @@ final class SessionHarness {
   SessionHarness() {
     api = SessionApiFake(events);
     store = SessionStoreFake(events);
-    repository = AppSessionRepository(api: api, tokenStore: store, now: now);
+    timers = SessionTimerScheduler(now);
+    repository = AppSessionRepository(
+      api: api,
+      tokenStore: store,
+      now: now,
+      retryTimerFactory: timers.create,
+    );
   }
   final events = <String>[];
   DateTime clock = initialTime;
   late final SessionApiFake api;
   late final SessionStoreFake store;
+  late final SessionTimerScheduler timers;
   late final AppSessionRepository repository;
 
   /// Cấp thời gian UTC điều khiển được để expiry không phụ thuộc đồng hồ máy.
@@ -200,6 +278,77 @@ final class SessionHarness {
 Future<void> settleSession() async {
   await Future<void>.delayed(Duration.zero);
   await Future<void>.delayed(Duration.zero);
+}
+
+/// Timer giả chỉ chạy khi test tiến clock tới deadline, không chờ wall-clock hoặc native event loop.
+final class SessionTimerFake implements Timer {
+  /// Gắn deadline và callback retry của một lần hẹn duy nhất.
+  /// Input
+  /// Param: dueAt — thời điểm UTC scheduler cho phép callback chạy.
+  /// Param: callback — worker repository đã sở hữu retry hiện hành.
+  SessionTimerFake(this.dueAt, this._callback);
+
+  final DateTime dueAt;
+  final void Function() _callback;
+  bool _active = true;
+
+  /// Output: true khi timer chưa bị hủy hoặc kích hoạt.
+  @override
+  bool get isActive => _active;
+
+  /// Output: tick không dùng trong test; deadline được kiểm qua clock fixture.
+  @override
+  int get tick => 0;
+
+  /// Hủy timer giống lifecycle suspend/dispose của Timer nền tảng.
+  @override
+  void cancel() {
+    _active = false;
+  }
+
+  /// Kích hoạt một lần để callback repository nạp lại outbox bền vững.
+  void fire() {
+    if (!_active) return;
+    _active = false;
+    _callback();
+  }
+}
+
+/// Scheduler deterministic cho retry jitter và quota; không khởi chạy timer thật trong test.
+final class SessionTimerScheduler {
+  /// Nhận clock của fixture để deadline không phụ thuộc đồng hồ host.
+  /// Input
+  /// Param: now — giờ UTC do test điều khiển.
+  SessionTimerScheduler(this.now);
+  final DateTime Function() now;
+  final timers = <SessionTimerFake>[];
+
+  /// Tạo timer có deadline xác định từ delay mà repository đã persist.
+  /// Input
+  /// Param: duration — khoảng chờ backoff/Retry-After.
+  /// Param: callback — worker retry cần chạy khi clock đến hạn.
+  /// Output: timer có thể cancel như Timer thật.
+  Timer create(Duration duration, void Function() callback) {
+    final timer = SessionTimerFake(now().add(duration), callback);
+    timers.add(timer);
+    return timer;
+  }
+
+  /// Chạy mọi callback đã đến hạn, giữ nguyên các timer tương lai hoặc đã hủy.
+  void fireDue() {
+    for (final timer in timers.toList()) {
+      if (timer.isActive && !timer.dueAt.isAfter(now())) timer.fire();
+    }
+  }
+
+  /// Output: số timer còn active để kiểm quota dừng retry tự động.
+  int get activeCount {
+    var count = 0;
+    for (final timer in timers) {
+      if (timer.isActive) count++;
+    }
+    return count;
+  }
 }
 
 /// Các phase locked không được mang full profile hoặc lộ candidate/password qua state.
@@ -317,7 +466,7 @@ Future<void> checkRestoreBoundaries() async {
   }
 }
 
-/// Logout đóng protected data ngay, chờ revoke204 và delete ACK mới được signedOut.
+/// Logout ghi outbox trước active delete, rồi chỉ signedOut sau terminal response.
 Future<void> checkLogoutOrder() async {
   final harness = SessionHarness();
   harness.store.value = sessionToken;
@@ -331,15 +480,25 @@ Future<void> checkLogoutOrder() async {
   expect(harness.repository.state.phase, AppSessionPhase.loggingOut);
   expect(harness.repository.state.profile, isNull);
   expect(harness.repository.busy, isTrue);
-  expect(harness.store.deletes, 0);
-  server.complete();
-  await settleSession();
-  expect(harness.repository.state.phase, isNot(AppSessionPhase.signedOut));
+  expect(harness.store.logoutIntent?.sessionToken, sessionToken);
+  expect(harness.store.value, sessionToken);
+  expect(harness.store.deletes, 1);
+  expect(harness.api.logoutTokens, isEmpty);
+  expect(
+    harness.events.indexOf('store.outbox.write.ack'),
+    lessThan(harness.events.indexOf('store.delete.begin')),
+  );
   deletion.complete();
+  await settleSession();
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.repository.state.phase, AppSessionPhase.loggingOut);
+  server.complete();
   await intent;
   expect(harness.repository.state.phase, AppSessionPhase.signedOut);
   expect(harness.api.logoutTokens.single == sessionToken, isTrue);
   expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.store.outboxDeletes, 1);
   await harness.repository.dispose();
 }
 
@@ -383,7 +542,7 @@ Future<void> checkLoginFailureClassification() async {
   }
 }
 
-/// Read error không giả thành signedOut; recover chỉ clear own key, không nhận profile của key đọc lại.
+/// Outbox read error không giả thành signedOut; recover chỉ clear own key, không nhận profile.
 Future<void> checkStorageReadFailure() async {
   final harness = SessionHarness();
   harness.store.value = alternateToken;
@@ -394,7 +553,7 @@ Future<void> checkStorageReadFailure() async {
   harness.store.failRead = false;
   await harness.repository.recover();
   expect(harness.repository.state.phase, AppSessionPhase.signedOut);
-  expect(harness.store.reads, 1);
+  expect(harness.store.reads, 0);
   expect(harness.api.profileTokens, isEmpty);
   expect(harness.store.value, isNull);
   await harness.repository.dispose();
@@ -709,7 +868,7 @@ Future<void> checkDisposeDrainsCandidate() async {
   }
 }
 
-/// Logout unknown không tự replay; người dùng retry phải dùng token đang sở hữu, không key account khác.
+/// Unknown outcome giữ secure outbox; explicit recovery gửi lại đúng token đã lưu.
 Future<void> checkLogoutPendingOwnership() async {
   final harness = SessionHarness();
   harness.store.value = sessionToken;
@@ -723,13 +882,17 @@ Future<void> checkLogoutPendingOwnership() async {
   expectLocked(harness.repository);
   await settleSession();
   expect(harness.api.logoutTokens, [sessionToken]);
-  harness.store.value = alternateToken;
+  expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent?.sessionToken, sessionToken);
+  final nextAttemptAt = harness.store.logoutIntent!.nextAttemptAt;
+  harness.clock = nextAttemptAt;
   harness.api.logoutFailure = null;
-  await harness.repository.logout();
+  await harness.repository.recover();
   expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
   expect(harness.api.profileTokens, [sessionToken]);
   expect(harness.repository.state.phase, AppSessionPhase.signedOut);
   expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent, isNull);
   await harness.repository.dispose();
 }
 
@@ -770,134 +933,409 @@ Future<void> checkResumeAfterSecondSuspend() async {
   await harness.repository.dispose();
 }
 
-/// Lifecycle không tự mở lại UI sau logout unknown; chỉ recover chủ động hoặc401+delete ACK giải quyết.
+/// Lifecycle retry outbox đúng token nhưng không gọi profile hoặc mở lại protected state.
 Future<void> checkPendingLogoutLifecycleFence() async {
-  for (final result in ['full', 'limited', 'expired']) {
-    final harness = SessionHarness();
-    harness.store.value = sessionToken;
-    await harness.repository.restore();
-    harness.api.logoutFailure = const AppAuthFailure(
-      AppAuthFailureKind.unavailable,
-      outcomeUnknown: true,
-    );
-    await harness.repository.logout();
-    expect(harness.repository.state.phase, AppSessionPhase.pending);
-    harness.api.profileFailure = switch (result) {
-      'limited' => const AppAuthFailure(
-        AppAuthFailureKind.passwordChangeRequired,
-      ),
-      'expired' => const AppAuthFailure(AppAuthFailureKind.sessionExpired),
-      _ => null,
-    };
-    final deletion = Completer<void>();
-    if (result == 'expired') harness.store.deleteGate = deletion;
-    harness.repository.suspend();
-    final resumed = harness.repository.resume();
-    await settleSession();
-    expectLocked(harness.repository);
-    if (result == 'expired') {
-      expect(harness.repository.state.phase, isNot(AppSessionPhase.signedOut));
-      expect(harness.repository.busy, isTrue);
-      deletion.complete();
-    }
-    await resumed;
-    expect(harness.api.logoutTokens, [sessionToken]);
-    expect(harness.api.loginInputs, isEmpty);
-    if (result == 'expired') {
-      expect(harness.repository.state.phase, AppSessionPhase.signedOut);
-      expect(harness.store.value, isNull);
-    } else {
-      expect(harness.repository.state.phase, AppSessionPhase.pending);
-      expect(harness.store.value == sessionToken, isTrue);
-      // User recover mới có quyền mở lại phiên server còn hợp lệ; resume chỉ là lifecycle.
-      await harness.repository.recover();
-      expect(
-        harness.repository.state.phase,
-        result == 'limited' ? AppSessionPhase.limited : AppSessionPhase.full,
-      );
-    }
-    await harness.repository.dispose();
-  }
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.unavailable,
+    outcomeUnknown: true,
+  );
+  await harness.repository.logout();
+  final firstRetryAt = harness.store.logoutIntent!.nextAttemptAt;
+  harness.clock = firstRetryAt;
+  harness.repository.suspend();
+  final resumed = harness.repository.resume();
+  await resumed;
+  expectLocked(harness.repository);
+  expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
+  expect(harness.api.profileTokens, [sessionToken]);
+  expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent?.sessionToken, sessionToken);
+  final secondRetryAt = harness.store.logoutIntent!.nextAttemptAt;
+  harness.clock = secondRetryAt;
+  harness.api.logoutFailure = null;
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.api.logoutTokens, [sessionToken, sessionToken, sessionToken]);
+  expect(harness.api.profileTokens, [sessionToken]);
+  await harness.repository.dispose();
 }
 
-/// Restore thông thường không hủy logout unknown; chỉ recover chủ động mới opt-in admission lại.
-Future<void> checkPlainRestorePreservesPendingLogout() async {
-  for (final limited in [false, true]) {
-    final harness = SessionHarness();
-    harness.store.value = sessionToken;
-    await harness.repository.restore();
-    harness.api.logoutFailure = const AppAuthFailure(
-      AppAuthFailureKind.unavailable,
-      outcomeUnknown: true,
-    );
-    await harness.repository.logout();
-    if (limited) {
-      harness.api.profileFailure = const AppAuthFailure(
-        AppAuthFailureKind.passwordChangeRequired,
-      );
-    }
-    await harness.repository.restore();
-    expect(harness.repository.state.phase, AppSessionPhase.pending);
-    expectLocked(harness.repository);
-    expect(harness.api.logoutTokens, [sessionToken]);
-    expect(harness.store.value == sessionToken, isTrue);
-    await harness.repository.recover();
-    expect(
-      harness.repository.state.phase,
-      limited ? AppSessionPhase.limited : AppSessionPhase.full,
-    );
-    expect(harness.api.loginInputs, isEmpty);
-    await harness.repository.dispose();
-  }
+/// Restore xử lý outbox trước profile; 401 session-expired là terminal và dọn record.
+Future<void> checkRestoreClearsTerminalLogoutOutbox() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.unavailable,
+    outcomeUnknown: true,
+  );
+  await harness.repository.logout();
+  harness.clock = harness.store.logoutIntent!.nextAttemptAt;
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.sessionExpired,
+  );
+  await harness.repository.restore();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
+  expect(harness.api.profileTokens, [sessionToken]);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.store.value, isNull);
+  await harness.repository.dispose();
 }
 
-/// Read error/null sau logout unknown không là server ACK; retry vẫn phải revoke chính token cũ.
+/// Lỗi đọc outbox khóa restore; khi storage phục hồi, server terminal mới xóa intent.
 Future<void> checkPendingLogoutSurvivesStorageQuarantine() async {
-  for (final (readFails, expired) in [
-    (true, false),
-    (true, true),
-    (false, false),
-    (false, true),
-  ]) {
-    final harness = SessionHarness();
-    harness.store.value = sessionToken;
-    await harness.repository.restore();
-    harness.api.logoutFailure = const AppAuthFailure(
-      AppAuthFailureKind.unavailable,
-      outcomeUnknown: true,
-    );
-    await harness.repository.logout();
-    harness.store.failRead = readFails;
-    if (!readFails) harness.store.value = null;
-    harness.repository.suspend();
-    await harness.repository.resume();
-    expectLocked(harness.repository);
-    await harness.repository.recover();
-    expect(harness.repository.state.phase, AppSessionPhase.pending);
-    expect(harness.store.deletes, 0);
-    expect(harness.store.value == sessionToken, readFails);
-    expect(harness.store.reads, 2);
-    expect(harness.api.profileTokens, [sessionToken]);
-    harness.api.logoutFailure = expired
-        ? const AppAuthFailure(AppAuthFailureKind.sessionExpired)
-        : null;
-    final deletion = Completer<void>();
-    harness.store.deleteGate = deletion;
-    // Quarantine không được chặn user retry revoke A; 401 cũng xác nhận A không còn hiệu lực.
-    final retry = harness.repository.logout();
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.unavailable,
+    outcomeUnknown: true,
+  );
+  await harness.repository.logout();
+  final retryAt = harness.store.logoutIntent!.nextAttemptAt;
+  harness.store.failRead = true;
+  harness.repository.suspend();
+  await harness.repository.resume();
+  expect(harness.repository.state.phase, AppSessionPhase.storageFailure);
+  expect(harness.store.logoutIntent?.sessionToken, sessionToken);
+  expect(harness.store.value, isNull);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  harness.store.failRead = false;
+  harness.clock = retryAt;
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.sessionExpired,
+  );
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
+  expect(harness.store.logoutIntent, isNull);
+  await harness.repository.dispose();
+}
+
+/// Dựng repository mới trên fake outbox để kiểm pending ưu tiên profile và active key.
+Future<void> checkRepositoryReconstructionFromPendingLogout() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.networkUnavailable,
+    outcomeUnknown: true,
+  );
+  await harness.repository.logout();
+  final pending = harness.store.logoutIntent;
+  expect(harness.repository.state.phase, AppSessionPhase.pending);
+  expect(pending?.sessionToken, sessionToken);
+  expect(pending?.expiresAt, initialTime.add(const Duration(hours: 1)));
+  expect(harness.store.value, isNull);
+  // Fake này chỉ mô phỏng trạng thái lưu lại khi process được dựng lại, không phải native persistence.
+  harness.store.value = sessionToken;
+  await harness.repository.dispose();
+
+  harness.clock = pending!.nextAttemptAt;
+  final restartedApi = SessionApiFake(harness.events);
+  final restarted = AppSessionRepository(
+    api: restartedApi,
+    tokenStore: harness.store,
+    now: harness.now,
+  );
+  await restarted.restore();
+  expect(restarted.state.phase, AppSessionPhase.signedOut);
+  expect(restartedApi.profileTokens, isEmpty);
+  expect(restartedApi.logoutTokens, [sessionToken]);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.store.value, isNull);
+  expect(
+    harness.events.lastIndexOf('store.delete.ack'),
+    lessThan(harness.events.lastIndexOf('api.logout')),
+  );
+  await restarted.dispose();
+}
+
+/// Giữ revoke intent qua expiry và restart offline; chỉ server-terminal mới mở khóa app.
+Future<void> checkExpiredLogoutIntentSurvivesOfflineRestart() async {
+  final harness = SessionHarness();
+  final expiresAt = initialTime.add(const Duration(hours: 1));
+  harness.clock = expiresAt.add(const Duration(days: 2));
+  harness.store.logoutIntent = PendingLogoutIntent(
+    intentId: 'logout-synthetic-expired',
+    sessionToken: sessionToken,
+    expiresAt: expiresAt,
+    attemptCount: 5,
+    nextAttemptAt: initialTime,
+  );
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.networkUnavailable,
+    outcomeUnknown: true,
+  );
+  final restarted = AppSessionRepository(
+    api: harness.api,
+    tokenStore: harness.store,
+    now: harness.now,
+  );
+
+  await restarted.restore();
+
+  expect(restarted.state.phase, AppSessionPhase.pending);
+  expectLocked(restarted);
+  expect(harness.api.profileTokens, isEmpty);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.store.logoutIntent?.sessionToken, sessionToken);
+  expect(harness.store.logoutIntent?.expiresAt, expiresAt);
+  expect(harness.store.value, isNull);
+
+  harness.clock = harness.store.logoutIntent!.nextAttemptAt;
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.sessionExpired,
+  );
+  await restarted.recover();
+  expect(restarted.state.phase, AppSessionPhase.signedOut);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.store.value, isNull);
+  await restarted.dispose();
+}
+
+/// Retry-After là deadline sớm nhất; explicit recovery không gửi POST sớm hơn.
+Future<void> checkLogoutRespectsRetryAfter() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.rateLimited,
+    retryAfterSeconds: 60,
+  );
+  await harness.repository.logout();
+  final retryAt = harness.store.logoutIntent!.nextAttemptAt;
+  expect(retryAt, initialTime.add(const Duration(seconds: 60)));
+  expect(harness.api.logoutTokens, [sessionToken]);
+
+  harness.clock = retryAt.subtract(const Duration(seconds: 1));
+  harness.api.logoutFailure = null;
+  await harness.repository.recover();
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.repository.state.phase, AppSessionPhase.pending);
+
+  harness.clock = retryAt;
+  await harness.repository.recover();
+  expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  await harness.repository.dispose();
+}
+
+/// Kiểm tra retry cùng bearer có jitter bounded, tôn trọng deadline và dừng sau năm lần.
+Future<void> checkAutomaticLogoutRetryLimit() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.networkUnavailable,
+    outcomeUnknown: true,
+  );
+  final firstFailureAt = harness.clock;
+  await harness.repository.logout();
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.timers.activeCount, 1);
+
+  final firstDueAt = harness.store.logoutIntent!.nextAttemptAt;
+  expect(firstDueAt.difference(firstFailureAt), const Duration(seconds: 1));
+  harness.repository.suspend();
+  expect(harness.timers.activeCount, 0);
+  harness.clock = firstDueAt;
+  await harness.repository.resume();
+  expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
+  expect(harness.store.logoutIntent?.attemptCount, 1);
+  expect(harness.timers.activeCount, 1);
+
+  for (var expectedCount = 2; expectedCount <= 5; expectedCount++) {
+    final pending = harness.store.logoutIntent!;
+    expect(pending.attemptCount, expectedCount - 1);
+    final retryDueAt = pending.nextAttemptAt;
+    final requestCountBeforeRetry = harness.api.logoutTokens.length;
+    harness.clock = retryDueAt.subtract(const Duration(milliseconds: 1));
+    harness.timers.fireDue();
     await settleSession();
-    expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
-    expectLocked(harness.repository);
-    expect(harness.repository.state.phase, isNot(AppSessionPhase.signedOut));
-    expect(harness.repository.busy, isTrue);
-    expect(harness.store.deletes, 1);
-    deletion.complete();
-    await retry;
-    expect(harness.repository.state.phase, AppSessionPhase.signedOut);
-    expect(harness.store.value, isNull);
-    expect(harness.api.loginInputs, isEmpty);
-    await harness.repository.dispose();
+    expect(harness.api.logoutTokens.length, requestCountBeforeRetry);
+    expect(harness.timers.activeCount, 1);
+
+    harness.clock = retryDueAt;
+    harness.timers.fireDue();
+    await settleSession();
+    expect(harness.api.logoutTokens.length, expectedCount + 1);
+    expect(harness.api.logoutTokens.last, sessionToken);
+    expect(harness.store.logoutIntent?.attemptCount, expectedCount);
+
+    final nextRetryDelay = harness.store.logoutIntent!.nextAttemptAt.difference(
+      harness.clock,
+    );
+    final maximumJitterDelay = Duration(seconds: 1 << (expectedCount - 1));
+    expect(nextRetryDelay >= const Duration(seconds: 1), isTrue);
+    expect(nextRetryDelay <= maximumJitterDelay, isTrue);
   }
+  expect(harness.timers.activeCount, 0);
+  expect(harness.repository.state.phase, AppSessionPhase.pending);
+
+  final nextCycleAt = harness.store.logoutIntent!.nextAttemptAt;
+  harness.repository.suspend();
+  harness.clock = nextCycleAt;
+  harness.api.logoutFailure = null;
+  await harness.repository.resume();
+  expect(harness.api.logoutTokens.length, 7);
+  expect(harness.api.logoutTokens.last, sessionToken);
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.store.logoutIntent, isNull);
+  await harness.repository.dispose();
+}
+
+/// Write thất bại giữ active key nhưng khóa dữ liệu; recovery chỉ tiến sau outbox ACK.
+Future<void> checkOutboxWriteFailureKeepsLocked() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.store.failOutboxWrite = true;
+  await harness.repository.logout();
+  expect(harness.repository.state.phase, AppSessionPhase.storageFailure);
+  expectLocked(harness.repository);
+  expect(harness.store.value, sessionToken);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.api.logoutTokens, isEmpty);
+
+  harness.store.failOutboxWrite = false;
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  await harness.repository.dispose();
+}
+
+/// Lỗi khi ghi quota trước POST phải giữ local lock và không gửi request chưa bền vững.
+Future<void> checkPreRequestOutboxWriteFailureKeepsLocked() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.store
+    ..failOutboxWrite = true
+    ..failOutboxWriteAtCall = 2;
+
+  await harness.repository.logout();
+
+  expect(harness.repository.state.phase, AppSessionPhase.storageFailure);
+  expectLocked(harness.repository);
+  expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent?.attemptCount, 0);
+  expect(harness.api.logoutTokens, isEmpty);
+  expect(harness.timers.activeCount, 0);
+
+  harness.store.failOutboxWrite = false;
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.store.logoutIntent, isNull);
+  await harness.repository.dispose();
+}
+
+/// Lỗi ghi retry deadline không được tạo timer hoặc mở local state trước storage recovery.
+Future<void> checkRetryDeadlineWriteFailureKeepsLocked() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.networkUnavailable,
+    outcomeUnknown: true,
+  );
+  harness.store
+    ..failOutboxWrite = true
+    ..failOutboxWriteAtCall = 3;
+
+  await harness.repository.logout();
+
+  expect(harness.repository.state.phase, AppSessionPhase.storageFailure);
+  expectLocked(harness.repository);
+  expect(harness.store.logoutIntent?.attemptCount, 1);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.timers.activeCount, 0);
+
+  harness.store.failOutboxWrite = false;
+  harness.api.logoutFailure = const AppAuthFailure(
+    AppAuthFailureKind.sessionExpired,
+  );
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.api.logoutTokens, [sessionToken, sessionToken]);
+  expect(harness.store.logoutIntent, isNull);
+  await harness.repository.dispose();
+}
+
+/// ACK ghi outbox thất lạc vẫn khóa account và recovery dùng lại đúng intent đã lưu.
+Future<void> checkOutboxWriteLostAckRecovery() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.store
+    ..failOutboxWrite = true
+    ..writeOutboxBeforeFailure = true;
+  await harness.repository.logout();
+  expect(harness.repository.state.phase, AppSessionPhase.storageFailure);
+  expectLocked(harness.repository);
+  expect(harness.store.value, sessionToken);
+  expect(harness.store.logoutIntent?.sessionToken, sessionToken);
+  expect(harness.api.logoutTokens, isEmpty);
+
+  harness.store.failOutboxWrite = false;
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.api.profileTokens, [sessionToken]);
+  expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent, isNull);
+  await harness.repository.dispose();
+}
+
+/// Lost delete ACK sau 204 được recover bằng terminal proof nếu key đã thực sự biến mất.
+Future<void> checkOutboxDeleteLostAckRecovery() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.store
+    ..failOutboxDelete = true
+    ..deleteOutboxBeforeFailure = true;
+  await harness.repository.logout();
+  expect(harness.repository.state.phase, AppSessionPhase.storageFailure);
+  expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.api.logoutTokens, [sessionToken]);
+
+  harness.store.failOutboxDelete = false;
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  expect(harness.api.profileTokens, [sessionToken]);
+  await harness.repository.dispose();
+}
+
+/// Khôi phục tombstone còn lại sau cleanup lỗi mà không gửi lại logout đã terminal.
+Future<void> checkOutboxDeleteFailureRetainsTerminalTombstone() async {
+  final harness = SessionHarness();
+  harness.store.value = sessionToken;
+  await harness.repository.restore();
+  harness.store.failOutboxDelete = true;
+
+  await harness.repository.logout();
+
+  expect(harness.repository.state.phase, AppSessionPhase.storageFailure);
+  expect(harness.store.value, isNull);
+  expect(harness.store.logoutIntent?.sessionToken, sessionToken);
+  expect(harness.api.logoutTokens, [sessionToken]);
+
+  harness.store.failOutboxDelete = false;
+  await harness.repository.recover();
+  expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+  expect(harness.store.logoutIntent, isNull);
+  expect(harness.api.logoutTokens, [sessionToken]);
+  await harness.repository.dispose();
 }
 
 /// Own key không phải token68 cần quarantine trước network; recover clear key thay vì protocol-loop.
@@ -945,7 +1383,7 @@ void main() {
     checkRestoreBoundaries,
   );
   test(
-    'logout waits server and local delete ACK before signed out',
+    'logout writes secure outbox before local delete and waits terminal server ACK',
     checkLogoutOrder,
   );
   test(
@@ -997,16 +1435,56 @@ void main() {
     checkResumeAfterSecondSuspend,
   );
   test(
-    'lifecycle cannot admit an unresolved logout without explicit recovery',
+    'lifecycle retries logout intent without admitting profile state',
     checkPendingLogoutLifecycleFence,
   );
   test(
-    'plain restore preserves unresolved logout until explicit recovery',
-    checkPlainRestorePreservesPendingLogout,
+    'restore clears terminal logout outbox without profile bootstrap',
+    checkRestoreClearsTerminalLogoutOutbox,
   );
   test(
-    'pending logout survives storage quarantine until server and delete ACK',
+    'outbox read failure keeps logout locked until storage recovers',
     checkPendingLogoutSurvivesStorageQuarantine,
+  );
+  test(
+    'repository reconstruction prioritizes the pending logout outbox',
+    checkRepositoryReconstructionFromPendingLogout,
+  );
+  test(
+    'expired revoke intent survives offline restart until terminal server response',
+    checkExpiredLogoutIntentSurvivesOfflineRestart,
+  );
+  test(
+    'logout retry honors Retry-After during explicit recovery',
+    checkLogoutRespectsRetryAfter,
+  );
+  test(
+    'automatic logout retries stop at five and resume starts a new cycle',
+    checkAutomaticLogoutRetryLimit,
+  );
+  test(
+    'outbox write failure keeps local state locked until recover',
+    checkOutboxWriteFailureKeepsLocked,
+  );
+  test(
+    'pre-request outbox quota write failure prevents logout POST',
+    checkPreRequestOutboxWriteFailureKeepsLocked,
+  );
+  test(
+    'retry deadline write failure keeps state locked without a timer',
+    checkRetryDeadlineWriteFailureKeepsLocked,
+  );
+  test(
+    'lost outbox write ACK recovers the committed tombstone',
+    checkOutboxWriteLostAckRecovery,
+  );
+  test(
+    'lost outbox delete ACK recovers after terminal logout response',
+    checkOutboxDeleteLostAckRecovery,
+  );
+  test(
+    'outbox delete failure retains terminal intent without replay',
+    checkOutboxDeleteFailureRetainsTerminalTombstone,
   );
   test(
     'malformed stored bearer is recoverable without a protocol retry loop',

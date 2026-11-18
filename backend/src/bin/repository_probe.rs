@@ -257,7 +257,7 @@ async fn verify(
  * Param: password — credential tổng hợp chỉ trong bộ nhớ.
  * Param: web — phiên Web cần kiểm stale-context/logout idempotency.
  * Param: checks — evidence chỉ thêm sau invariant đạt.
- * Output: hoàn thành kiểm hoặc lỗi đã lọc, không log credential/verifier.
+ * Output: known revoked session trả SessionRevoked; token unknown vẫn là SessionInvalid, không log credential/verifier.
  */
 async fn session_checks(
     service: &AuthService,
@@ -302,9 +302,10 @@ async fn session_checks(
         .await?;
     service.logout(&proof, config.run_id).await?;
     service.logout(&proof, config.run_id).await?;
+    // Digest đã biết và có revoked_at phải giữ mã riêng để caller phân biệt revoke với token chưa tồn tại.
     if !matches!(
         service.list_workspaces(&proof, None, 20).await,
-        Err(ApplicationError::SessionInvalid)
+        Err(ApplicationError::SessionRevoked)
     ) {
         return Err(ApplicationError::Conflict);
     }
@@ -405,7 +406,7 @@ async fn realtime_checks(
 }
 
 /**
- * Kiểm sai password không logout, limited recovery và credential cũ bị chặn sau commit.
+ * Kiểm sai password không logout, limited recovery và credential cũ bị revoke sau commit.
  * Input
  * Param: service — use case dùng ports thật, không sửa trực tiếp bảng User/Session.
  * Param: config — email account tạm và marker/correlation của fixture.
@@ -455,9 +456,10 @@ async fn password_checks(
             config.run_id,
         )
         .await?;
+    // Password change đặt revoked_at cho session cũ; giữ distinct error như logout chủ động.
     if !matches!(
         service.list_workspaces(&proof, None, 20).await,
-        Err(ApplicationError::SessionInvalid)
+        Err(ApplicationError::SessionRevoked)
     ) || !matches!(
         service
             .login(
@@ -976,9 +978,10 @@ async fn password_revocation_checks(
             config.run_id,
         )
         .await?;
+    // Cả session Web cũ đều có revoked_at sau commit; probe khóa semantics chính xác của known revoked token.
     if !matches!(
         service.list_workspaces(&web_proof, None, 20).await,
-        Err(ApplicationError::SessionInvalid)
+        Err(ApplicationError::SessionRevoked)
     ) {
         return Err(ApplicationError::Conflict);
     }

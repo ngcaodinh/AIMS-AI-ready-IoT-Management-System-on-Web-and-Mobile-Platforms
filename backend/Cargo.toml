@@ -44,7 +44,7 @@ path = "src/bin/auth_lab.rs"
 required-features = ["http-server"]
 
 [dependencies]
-axum = { version = "=0.8.6", default-features = false, features = ["http1", "json", "query", "tokio"] }
+axum = { version = "=0.8.6", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
 iot-domain = { path = "crates/domain" }
 iot-application = { path = "crates/application" }
 iot-postgres = { path = "crates/postgres" }

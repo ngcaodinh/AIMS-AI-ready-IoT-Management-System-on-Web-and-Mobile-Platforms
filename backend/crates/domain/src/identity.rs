@@ -65,6 +65,8 @@ pub enum AccountStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccessFailure {
     SessionInvalid,
+    SessionExpired,
+    SessionRevoked,
     ContextMismatch,
     PasswordChangeRequired,
     Forbidden,
@@ -159,7 +161,8 @@ impl SessionSnapshot {
      * Param: `allow_limited` — chỉ bật cho use case phục hồi như đổi mật khẩu.
      * Output: principal đã xác thực hoặc lý do từ chối; không tạo quyền workspace tại đây.
      * # Errors
-     * Trả lỗi từ chối hoặc lỗi đã mô tả ở trên; không chứa dữ liệu nhạy cảm.
+     * `SessionInvalid` nếu account/identity không còn hợp lệ, `SessionRevoked` nếu phiên đã thu hồi,
+     * `SessionExpired` nếu hết hạn, hoặc lỗi context/limited; không chứa dữ liệu nhạy cảm.
      */
     pub fn authorize(
         &self,
@@ -168,12 +171,15 @@ impl SessionSnapshot {
         now: DateTime<Utc>,
         allow_limited: bool,
     ) -> Result<Principal, AccessFailure> {
-        if self.user_id != account.user_id
-            || account.status != AccountStatus::Active
-            || self.revoked_at.is_some()
-            || self.expires_at <= now
-        {
+        if self.user_id != account.user_id || account.status != AccountStatus::Active {
             return Err(AccessFailure::SessionInvalid);
+        }
+        // Chỉ phân biệt revoked/expired sau khi account của session vẫn hợp lệ; session sai/disabled giữ lỗi tổng quát.
+        if self.revoked_at.is_some() {
+            return Err(AccessFailure::SessionRevoked);
+        }
+        if self.expires_at <= now {
+            return Err(AccessFailure::SessionExpired);
         }
         if self.client_type == ClientType::Web
             && proof.expected_context != Some(self.auth_context_id)

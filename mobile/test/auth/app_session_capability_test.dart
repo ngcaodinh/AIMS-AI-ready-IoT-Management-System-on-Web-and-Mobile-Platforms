@@ -487,11 +487,27 @@ Future<void> checkPasswordUnknownStorageRecovery() async {
     } else {
       await harness.repository.restore();
       await harness.repository.recover();
-      expect(harness.repository.state.phase, AppSessionPhase.pending);
+      // Lỗi đọc outbox phải báo storageFailure; key vắng giữ pending vì bearer RAM vẫn cho phép logout.
+      final expectedRecoveryPhase = variant == 'readError'
+          ? AppSessionPhase.storageFailure
+          : AppSessionPhase.pending;
+      expect(
+        harness.repository.state.phase,
+        expectedRecoveryPhase,
+        reason: 'variant=$variant',
+      );
       final deletes = harness.store.deletes;
       if (variant == 'deleteFailure') harness.store.failDelete = true;
+      expect(harness.repository.canLogout, isTrue, reason: 'variant=$variant');
       await harness.repository.logout();
-      expect(harness.auth.logoutTokens, [session.sessionToken]);
+      if (variant == 'deleteFailure') {
+        // Không gửi revoke khi active-key delete chưa ACK; outbox giữ bearer cho lần recovery.
+        expect(harness.auth.logoutTokens, isEmpty);
+        expect(harness.store.value, session.sessionToken);
+        expect(harness.store.logoutIntent?.sessionToken, session.sessionToken);
+      } else {
+        expect(harness.auth.logoutTokens, [session.sessionToken]);
+      }
       expect(harness.store.deletes, deletes + 1);
       expect(
         harness.repository.state.phase,
@@ -503,6 +519,9 @@ Future<void> checkPasswordUnknownStorageRecovery() async {
         harness.store.failDelete = false;
         await harness.repository.recover();
         expect(harness.repository.state.phase, AppSessionPhase.signedOut);
+        expect(harness.auth.logoutTokens, [session.sessionToken]);
+        expect(harness.store.value, isNull);
+        expect(harness.store.logoutIntent, isNull);
         expect(harness.capability.passwordCalls.length, 1);
       }
     }

@@ -1,5 +1,5 @@
 {
-  "contractVersion": "0.2.1",
+  "contractVersion": "0.2.2",
   "fixtureKind": "synthetic-contract-example",
   "note": "Các marker <...> không hoạt động; fixture không phải bằng chứng provider/client đã chạy.",
   "scenarios": [

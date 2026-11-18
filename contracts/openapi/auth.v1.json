@@ -2,11 +2,27 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Nexa IoT authentication and bootstrap contract",
-    "version": "0.2.1",
-    "description": "Hợp đồng P1 của FEAT-TN-001/002/004/041. Bản đề xuất auth-context Web sau REV-AUTH-001/002 chờ CP-01 owner review, provider-client test và G1; không chứng minh API đã chạy."
+    "version": "0.2.2",
+    "description": "Hợp đồng P1 của FEAT-TN-001/002/004/041. Bản đề xuất auth-context Web và realtime ticket sau REV-AUTH-001/002 chờ CP-01 owner review, provider-client test và G1; không chứng minh API đã chạy."
   },
   "servers": [{"url": "/"}],
   "tags": [{"name": "Global authentication"}],
+  "x-websocket-handshake": {
+    "path": "/api/v1/realtime",
+    "ticketFrame": {
+      "direction": "client-to-server",
+      "position": 0,
+      "messageType": "text",
+      "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "serverFramesBeforeValidation": [],
+    "validationTimeoutSeconds": 5,
+    "invalidTicketClose": {"code": 1008, "reason": "Authentication required."},
+    "validatedAck": "AUTHENTICATED",
+    "sessionRevocationClose": {"code": 1008, "reason": "Authentication required."},
+    "ticketInUrl": false,
+    "ticketInLogs": false
+  },
   "paths": {
     "/api/v1/auth/login": {
       "post": {
@@ -217,6 +233,34 @@
         }
       }
     },
+    "/api/v1/realtime/tickets": {
+      "post": {
+        "tags": ["Global authentication"],
+        "operationId": "createRealtimeTicket",
+        "summary": "Cấp ticket realtime dùng một lần",
+        "description": "Body phải vắng hoặc dài 0 byte. Yêu cầu session hiện hành, `X-Workspace-Id` đúng workspace ACTIVE và membership hiện hành; workspace là selector, không tự cấp quyền. WEB phải khớp `X-Auth-Context-Id`, exact same-origin và CSRF bound session; bearer Android không gửi context/CSRF. Ticket opaque 64 ký tự hex, sống 30 giây, chỉ trả sau DB commit, không ghi log hoặc URL. WebSocket gửi ticket trong frame text đầu tiên; server im lặng cho tới khi consume và recheck session thành công.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/AuthContext"},
+          {"$ref": "#/components/parameters/CsrfToken"},
+          {"$ref": "#/components/parameters/WorkspaceId"}
+        ],
+        "responses": {
+          "201": {
+            "description": "Ticket single-use đã commit; response no-store, raw ticket chỉ có ở body response này.",
+            "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RealtimeTicketResponse"}}}
+          },
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/SessionInvalid"},
+          "403": {"$ref": "#/components/responses/AccessDenied"},
+          "404": {"$ref": "#/components/responses/ResourceNotFound"},
+          "409": {"$ref": "#/components/responses/AuthContextMismatch"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "503": {"$ref": "#/components/responses/ServiceUnavailable"}
+        }
+      }
+    },
     "/api/v1/auth/password": {
       "post": {
         "tags": ["Global authentication"],
@@ -257,7 +301,8 @@
     },
     "parameters": {
       "CsrfToken": {"name": "X-CSRF-Token", "in": "header", "required": false, "description": "Bắt buộc với mutation dùng cookie WEB, bound session; bearer App không dùng.", "schema": {"type": "string"}},
-      "AuthContext": {"name": "X-Auth-Context-Id", "in": "header", "required": false, "description": "Bắt buộc cho protected request dùng cookie WEB, trừ GET /me discovery khi UI khóa. UUID không secret chỉ so với Session đã xác thực; thiếu/sai trả 409 AUTH_CONTEXT_MISMATCH trước dữ liệu/side effect. App bearer không gửi.", "schema": {"type": "string", "format": "uuid"}}
+      "AuthContext": {"name": "X-Auth-Context-Id", "in": "header", "required": false, "description": "Bắt buộc cho protected request dùng cookie WEB, trừ GET /me discovery khi UI khóa. UUID không secret chỉ so với Session đã xác thực; thiếu/sai trả 409 AUTH_CONTEXT_MISMATCH trước dữ liệu/side effect. App bearer không gửi.", "schema": {"type": "string", "format": "uuid"}},
+      "WorkspaceId": {"name": "X-Workspace-Id", "in": "header", "required": true, "description": "Workspace selector cho ticket realtime; server xác minh membership/grant hiện hành, không coi header là authority.", "schema": {"type": "string", "format": "uuid"}}
     },
     "responses": {
       "ValidationError": {"description": "VALIDATION_ERROR: JSON hỏng/duplicate key 400, body >64 KiB 413, content type sai 415, field thiếu/null/type/length/enum/unknown 422; mixed credential 400.", "headers": {"Cache-Control": {"schema": {"type": "string", "const": "no-store"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
@@ -312,6 +357,15 @@
           "expiresAt": {"type": "string", "format": "date-time"},
           "limited": {"type": "boolean"},
           "token": {"type": "string", "minLength": 1, "writeOnly": false, "description": "Bearer secret cấp một lần; fixture chỉ dùng placeholder không hoạt động."}
+        }
+      },
+      "RealtimeTicketResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ticket", "expiresAt"],
+        "properties": {
+          "ticket": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Capability single-use; chỉ gửi trong frame text đầu của WebSocket và giữ trong RAM tới khi gửi."},
+          "expiresAt": {"type": "string", "format": "date-time", "description": "UTC RFC3339; ticket hết hạn sau 30 giây theo clock server."}
         }
       },
       "MeProfile": {

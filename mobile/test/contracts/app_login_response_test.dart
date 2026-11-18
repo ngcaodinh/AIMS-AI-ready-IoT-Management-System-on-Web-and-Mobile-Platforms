@@ -33,7 +33,7 @@ void runContractChecks() {
     // Flutter test dùng script bootstrap khác source; cwd theo lệnh chuẩn là mobile/.
     File('../contracts/fixtures/auth/scenarios.json').readAsStringSync(),
   ) as Map<String, dynamic>;
-  verify(fixture['contractVersion'] == '0.2.1', 'fixture version');
+  verify(fixture['contractVersion'] == '0.2.2', 'fixture version');
   final scenarios = fixture['scenarios'] as List<dynamic>;
   var count = 0;
   Map<String, dynamic>? full;

@@ -308,7 +308,9 @@ def verify_login_first(port, emails, password, user_ids, run_id, checks, holders
                 expect(metadata_count(statement) == 1, prefix + '-issued-session-revoked-after-mutation', checks)
                 proof = {'Cookie': header(headers, 'set-cookie').split(';', 1)[0], 'X-Auth-Context-Id': header(headers, 'x-auth-context-id')} if client == 'WEB' else {'Authorization': 'Bearer ' + token}
                 denied, denied_headers, denied_body = request(port, 'GET', '/me', headers=proof)
-                expect(denied == 401 and has_error_only_payload(denied_body, 'SESSION_EXPIRED')
+                # Password/reset để tài khoản active nên known revoke có mã riêng; disabled vẫn giữ denial tổng quát.
+                expected_error = 'SESSION_EXPIRED' if kind == 'status' else 'SESSION_REVOKED'
+                expect(denied == 401 and has_error_only_payload(denied_body, expected_error)
                        and header(denied_headers, 'cache-control') == 'no-store', prefix + '-old-session-unusable', checks)
             finally:
                 insert_fence.stop()

@@ -24,7 +24,7 @@ void checkFullProfileConsumer() {
   final fixture = jsonDecode(
     File('../contracts/fixtures/auth/scenarios.json').readAsStringSync(),
   ) as Map<String, dynamic>;
-  expect(fixture['contractVersion'], '0.2.1');
+  expect(fixture['contractVersion'], '0.2.2');
   var cases = 0;
   var successes = 0;
   var failures = 0;

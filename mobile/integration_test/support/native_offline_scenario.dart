@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexa_iot/features/auth/data/app_auth_failure.dart';
 import 'package:nexa_iot/features/auth/data/app_auth_tls_configuration.dart';
 import 'package:nexa_iot/features/auth/data/app_session_state.dart';
+import 'package:nexa_iot/features/auth/data/session_token_store.dart';
 import 'package:nexa_iot/features/auth/presentation/app_auth_application.dart';
 import 'package:nexa_iot/features/auth/presentation/app_auth_coordinator.dart';
 import 'package:nexa_iot/features/auth/presentation/login_screen.dart';
@@ -96,7 +97,7 @@ Future<NativeOfflineRoute> observeNativeOfflineRoute() async {
   }
 }
 
-/// Bỏ reference credential kể cả lỗi trước main; không tuyên bố zeroization chuỗi Dart.
+/// Bỏ reference password/token kể cả lỗi trước main; không tuyên bố zeroization chuỗi Dart.
 /// Input
 /// Param: packet — owned RAM packet từ SDK pipe, không nhận tài khoản thật.
 /// Param: body — operation native được giữ tới completion/cleanup thật.
@@ -108,6 +109,7 @@ Future<void> withNativeOfflineCredentials(
     await body();
   } finally {
     packet['password'] = '';
+    packet['expiredSessionToken'] = '';
   }
 }
 
@@ -119,6 +121,7 @@ Future<void> withNativeOfflineCredentials(
 /// Param: checkpoint — năm fixed pauses; host chịu HTTP/DB/network và pending-owner proof trước ACK.
 /// Param: markStage — enum diagnostics không input/credential.
 /// Param: probe — canary thật mặc định; injection enum chỉ cho host boundary tests được ghi rõ.
+/// Param: tokenStore — secure store của sản phẩm; boundary test có thể cấp store synthetic in-memory.
 /// Errors: fixed StateError khi stale epoch, business state, gesture hoặc budget không đạt.
 Future<void> verifyNativeOfflineScenario(
   WidgetTester tester,
@@ -127,6 +130,7 @@ Future<void> verifyNativeOfflineScenario(
   required Future<void> Function(String stage) checkpoint,
   required void Function(String stage) markStage,
   Future<NativeOfflineRoute> Function() probe = observeNativeOfflineRoute,
+  SessionTokenStore? tokenStore,
 }) async {
   final password = packet['password'];
   final emails = packet['emails'];
@@ -166,6 +170,7 @@ Future<void> verifyNativeOfflineScenario(
   final coordinator = tester
       .widget<AppAuthApplication>(find.byType(AppAuthApplication))
       .coordinator;
+  final store = tokenStore ?? const SecureSessionTokenStore();
 
   /// Snapshot/epoch chốt trước await không được bị lifecycle hoặc intent khác thay thế.
   /// Input
@@ -237,7 +242,49 @@ Future<void> verifyNativeOfflineScenario(
     }
   }
 
-  /// Pause giữ state/epoch, ACK không tự chứng minh HTTP/SQL và không mở thêm intent.
+  /** Kiểm từng lớp outbox sau logout; stage cố định giúp cô lập failure mà không lộ bearer.
+   * Input
+   * Param: expectedExpiry — expiry ban đầu cần giữ nguyên qua thao tác ghi outbox, nếu có.
+   * Param: expectedIntentId — identity bền vững cần giữ qua retry nền, nếu có.
+   * Output: id intent cần đối chiếu sau pause offline.
+   * Errors: StateError cố định nếu intent/token, storage hoặc protected UI không khớp.
+   */
+  Future<String> pendingLogout({
+    DateTime? expectedExpiry,
+    String? expectedIntentId,
+  }) async {
+    ui.guard();
+    final intent = await store.readLogoutIntent();
+    markStage('offline-outbox-check-intent');
+    if (intent == null ||
+        intent.sessionToken.isEmpty ||
+        intent.intentId.isEmpty ||
+        intent.expiresAt == null ||
+        (expectedExpiry != null && intent.expiresAt != expectedExpiry) ||
+        (expectedIntentId != null && intent.intentId != expectedIntentId)) {
+      throw StateError('NATIVE_OFFLINE_LOGOUT_INTENT_INVALID');
+    }
+    markStage('offline-outbox-check-session');
+    if (await store.readSession() != null) {
+      throw StateError('NATIVE_OFFLINE_LOGOUT_SESSION_RETAINED');
+    }
+    markStage('offline-outbox-check-state');
+    if (!coordinator.logoutPending ||
+        coordinator.page != AppAuthPage.recovery ||
+        coordinator.session.profile != null ||
+        coordinator.session.selectedWorkspace != null ||
+        coordinator.session.workspaces.isNotEmpty) {
+      throw StateError('NATIVE_OFFLINE_LOGOUT_LOCK_INVALID');
+    }
+    markStage('offline-outbox-check-protected-ui');
+    if (find.byType(WorkspaceSelectionScreen).evaluate().isNotEmpty ||
+        find.byKey(const ValueKey('session-summary')).evaluate().isNotEmpty) {
+      throw StateError('NATIVE_OFFLINE_LOGOUT_OUTBOX_INVALID');
+    }
+    return intent.intentId;
+  }
+
+  /// Pause giữ state/epoch; checkpoint lưu outbox cho phép retry nền đổi generation, caller revalidate sau ACK.
   /// Input
   /// Param: stage — fixed stage của gate offline.
   Future<void> pause(String stage) async {
@@ -245,6 +292,10 @@ Future<void> verifyNativeOfflineScenario(
     final generation = coordinator.generation;
     ui.guard();
     await checkpoint(stage);
+    if (stage == 'offline-outbox-persisted') {
+      // Retry nền có thể tăng generation; kiểm intent và vùng protected ngay sau pause thay vì cấm retry.
+      return;
+    }
     unchanged(before, generation);
   }
 
@@ -442,8 +493,224 @@ Future<void> verifyNativeOfflineScenario(
   picker(choices);
   await act('workspace-select-${choices.b}', AppSessionPhase.checking);
   summary(choices.b, 'Nhà kính B', 'USER');
+  final storedExpiry = (await store.readSession())?.expiresAt;
+  if (storedExpiry == null) {
+    throw StateError('NATIVE_OFFLINE_SESSION_EXPIRY_MISSING');
+  }
+  await pause('offline-outbox-ready');
+  summary(choices.b, 'Nhà kính B', 'USER');
   await act('session-logout', AppSessionPhase.loggingOut);
-  signedOut();
-  await pause('offline-logged-out');
-  signedOut();
+  final logoutIntentId = await pendingLogout(expectedExpiry: storedExpiry);
+  await pause('offline-outbox-persisted');
+  await pendingLogout(
+    expectedExpiry: storedExpiry,
+    expectedIntentId: logoutIntentId,
+  );
+}
+
+/** Kiểm logout của phiên Android expired khi offline, lưu intent bền vững rồi giữ toàn bộ UI bị khóa.
+ * Input
+ * Param: tester — integration engine đã mount App composition thật.
+ * Param: packet — token, expiry và email synthetic đã strict validate từ private fixture.
+ * Param: elapsed — monotonic clock phase để giữ deadline chung sau no-CA/main.
+ * Param: checkpoint — host gate chỉ ACK sau network/HTTP/DB ownership checks.
+ * Param: observeUi — stage cùng trạng thái enum/boolean để chẩn đoán lỗi mà không lộ nội dung UI.
+ * Errors: StateError cố định khi UI, session store hoặc outbox không giữ đúng phiên expired.
+ */
+Future<void> verifyNativeOfflineExpiredLogoutScenario(
+  WidgetTester tester,
+  Map<String, Object?> packet, {
+  required Duration Function() elapsed,
+  required void Function(String stage, String snapshot) observeUi,
+  required Future<void> Function(String stage) checkpoint,
+}) async {
+  final token = packet['expiredSessionToken'];
+  final expiryText = packet['expiredSessionExpiresAt'];
+  final expiry = expiryText is String ? DateTime.tryParse(expiryText) : null;
+  if (token is! String ||
+      !RegExp(r'^[0-9a-f]{64}$').hasMatch(token) ||
+      expiry == null ||
+      !expiry.isUtc ||
+      expiry.toIso8601String() != expiryText) {
+    throw StateError('INVALID_NATIVE_OFFLINE_EXPIRED_PACKET');
+  }
+  const store = SecureSessionTokenStore();
+  final ui = NativeScenarioUi(
+    tester,
+    elapsed,
+    phaseLimit: const Duration(seconds: 675),
+    timeoutCode: 'NATIVE_OFFLINE_EXPIRED_TIMEOUT',
+  );
+  late AppAuthCoordinator coordinator;
+  await ui.wait(
+    /// Đợi restore của App thật phân loại lỗi kết nối trước khi cho user tạo intent logout.
+    () {
+      final application = find.byType(AppAuthApplication);
+      final applicationCount = application.evaluate().length;
+      if (applicationCount != 1) {
+        observeUi('WAIT_READY', applicationCount == 0 ? 'MISSING' : 'MULTIPLE');
+        return false;
+      }
+      coordinator = tester.widget<AppAuthApplication>(application).coordinator;
+      observeUi(
+        'WAIT_READY',
+        '${coordinator.page.name}:${coordinator.session.phase.name}:'
+            '${coordinator.session.failure?.kind.name ?? 'NONE'}:'
+            '${coordinator.logoutPending}:${coordinator.canLogout}',
+      );
+      return coordinator.page == AppAuthPage.recovery &&
+          coordinator.session.phase == AppSessionPhase.offline &&
+          coordinator.session.failure?.kind ==
+              AppAuthFailureKind.networkUnavailable &&
+          !coordinator.logoutPending &&
+          coordinator.canLogout;
+    },
+    const Duration(seconds: 30),
+  );
+  final stored = await store.readSession();
+  if (stored == null ||
+      stored.token != token ||
+      stored.expiresAt != expiry ||
+      await store.readLogoutIntent() != null ||
+      find.byType(WorkspaceSelectionScreen).evaluate().isNotEmpty ||
+      find.byKey(const ValueKey('session-summary')).evaluate().isNotEmpty) {
+    throw StateError('NATIVE_OFFLINE_EXPIRED_SESSION_RESTORE_INVALID');
+  }
+  // Mốc này phân biệt ACK checkpoint bị chặn với lỗi xảy ra sau khi app quay lại gesture.
+  observeUi(
+    'READY_CHECKPOINT',
+    '${coordinator.page.name}:${coordinator.session.phase.name}:'
+        '${coordinator.session.failure?.kind.name ?? 'NONE'}:'
+        '${coordinator.logoutPending}:${coordinator.canLogout}',
+  );
+  await checkpoint('offline-expired-ready');
+  observeUi(
+    'READY_ACKED',
+    '${coordinator.page.name}:${coordinator.session.phase.name}:'
+        '${coordinator.session.failure?.kind.name ?? 'NONE'}:'
+        '${coordinator.logoutPending}:${coordinator.canLogout}',
+  );
+
+  final logout = find.byKey(const ValueKey('recovery-logout'));
+  if (logout.evaluate().length != 1) {
+    throw StateError('NATIVE_OFFLINE_EXPIRED_LOGOUT_CONTROL_MISSING');
+  }
+  observeUi(
+    'LOGOUT_TAP',
+    '${coordinator.page.name}:${coordinator.session.phase.name}:'
+        '${coordinator.session.failure?.kind.name ?? 'NONE'}:'
+        '${coordinator.logoutPending}:${coordinator.canLogout}',
+  );
+  await tester.tap(logout);
+  await tester.pump();
+  observeUi(
+    'LOGOUT_TAPPED',
+    '${coordinator.page.name}:${coordinator.session.phase.name}:'
+        '${coordinator.session.failure?.kind.name ?? 'NONE'}:'
+        '${coordinator.logoutPending}:${coordinator.canLogout}',
+  );
+  await ui.wait(
+    /// Logout chỉ qua persisted pending sau write outbox và active-key delete ACK.
+    /** Ghi enum/boolean cuối của coordinator để phân biệt gesture, storage và worker timeout mà không lộ payload. */
+    () {
+      observeUi(
+        'WAIT_OUTBOX',
+        '${coordinator.page.name}:${coordinator.session.phase.name}:'
+            '${coordinator.session.failure?.kind.name ?? 'NONE'}:'
+            '${coordinator.logoutPending}:${coordinator.canLogout}',
+      );
+      return coordinator.page == AppAuthPage.recovery &&
+          coordinator.logoutPending;
+    },
+    const Duration(seconds: 20),
+  );
+  observeUi(
+    'OUTBOX_PENDING',
+    '${coordinator.page.name}:${coordinator.session.phase.name}:'
+        '${coordinator.session.failure?.kind.name ?? 'NONE'}:'
+        '${coordinator.logoutPending}:${coordinator.canLogout}',
+  );
+  await _assertOfflineLogoutLocked(ui, coordinator, store);
+  final intent = await store.readLogoutIntent();
+  if (intent == null ||
+      intent.sessionToken != token ||
+      intent.expiresAt != expiry ||
+      await store.readSession() != null) {
+    throw StateError('NATIVE_OFFLINE_EXPIRED_OUTBOX_INVALID');
+  }
+  await checkpoint('offline-expired-persisted');
+  await _assertOfflineLogoutLocked(ui, coordinator, store);
+}
+
+/** Khôi phục app offline có outbox, giữ màn khóa trước khi host bật mạng và chờ retry terminal của server.
+ * Input
+ * Param: tester — integration engine đang sở hữu app thật sau process restart.
+ * Param: elapsed — đồng hồ monotonic neo lúc host gửi packet, dùng chung cap phase.
+ * Param: checkpoint — host gate chỉ ACK sau khi DB/HTTP/network owner đã xác nhận stage.
+ * Errors: StateError cố định khi outbox mất, protected UI mở, retry không terminal hoặc cleanup sai.
+ */
+Future<void> verifyNativeOfflineLogoutResumeScenario(
+  WidgetTester tester, {
+  required Duration Function() elapsed,
+  required Future<void> Function(String stage) checkpoint,
+}) async {
+  const store = SecureSessionTokenStore();
+  final ui = NativeScenarioUi(
+    tester,
+    elapsed,
+    phaseLimit: const Duration(seconds: 675),
+    timeoutCode: 'NATIVE_OFFLINE_LOGOUT_RESUME_TIMEOUT',
+  );
+  late AppAuthCoordinator coordinator;
+  await ui.wait(() {
+    final application = find.byType(AppAuthApplication);
+    if (application.evaluate().length != 1) return false;
+    coordinator = tester.widget<AppAuthApplication>(application).coordinator;
+    return coordinator.page == AppAuthPage.recovery &&
+        coordinator.logoutPending;
+  }, const Duration(seconds: 30));
+  await _assertOfflineLogoutLocked(ui, coordinator, store);
+  await checkpoint('offline-outbox-resumed');
+
+  // Host bật mạng trước ACK checkpoint; retry hợp lệ có thể xóa outbox trước khi callback trả về.
+  await ui.wait(
+    () => coordinator.page == AppAuthPage.login && !coordinator.logoutPending,
+    elapsed() + const Duration(seconds: 90),
+  );
+  if (await store.readSession() != null ||
+      await store.readLogoutIntent() != null ||
+      find.byType(WorkspaceSelectionScreen).evaluate().isNotEmpty ||
+      find.byKey(const ValueKey('session-summary')).evaluate().isNotEmpty) {
+    throw StateError('NATIVE_OFFLINE_LOGOUT_TERMINAL_CLEANUP_INVALID');
+  }
+  await checkpoint('offline-logged-out');
+}
+
+/** Recheck secure state qua startup/pause, không cho identity cũ mở workspace khi intent chờ revoke.
+ * Input
+ * Param: ui — deadline guard neo cùng native phase, không gia hạn sau mỗi storage read.
+ * Param: coordinator — state công khai của composition app hiện tại.
+ * Param: store — secure store của app, không đọc bearer ra khỏi adapter.
+ * Errors: StateError fixed khi tombstone/session key hoặc protected UI không khớp trạng thái khóa.
+ */
+Future<void> _assertOfflineLogoutLocked(
+  NativeScenarioUi ui,
+  AppAuthCoordinator coordinator,
+  SecureSessionTokenStore store,
+) async {
+  ui.guard();
+  final intent = await store.readLogoutIntent();
+  if (intent == null ||
+      intent.sessionToken.isEmpty ||
+      intent.expiresAt == null ||
+      await store.readSession() != null ||
+      !coordinator.logoutPending ||
+      coordinator.page != AppAuthPage.recovery ||
+      coordinator.session.profile != null ||
+      coordinator.session.selectedWorkspace != null ||
+      coordinator.session.workspaces.isNotEmpty ||
+      find.byType(WorkspaceSelectionScreen).evaluate().isNotEmpty ||
+      find.byKey(const ValueKey('session-summary')).evaluate().isNotEmpty) {
+    throw StateError('NATIVE_OFFLINE_LOGOUT_RESUME_STATE_INVALID');
+  }
 }

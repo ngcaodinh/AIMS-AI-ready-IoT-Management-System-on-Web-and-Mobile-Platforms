@@ -4,8 +4,8 @@ use crate::{
     error::ApplicationError,
     identity::IdentityService,
     ports::{
-        IdentitySecurity, IdentityStore, IdentityTransaction, RealtimeTransaction,
-        WorkspaceTransaction,
+        IdentitySecurity, IdentityStore, IdentityTransaction, RealtimeSessionStore,
+        RealtimeTransaction, WorkspaceTransaction,
     },
 };
 use chrono::TimeDelta;
@@ -14,6 +14,7 @@ use iot_domain::{
     identity::{AuditRecord, SessionProof},
     realtime::{IssuedWebSocketTicket, NewWebSocketTicket, RealtimeBinding},
 };
+use std::collections::HashSet;
 use uuid::Uuid;
 
 impl<S: IdentityStore, C: IdentitySecurity> IdentityService<S, C>
@@ -78,14 +79,15 @@ where
             expires_at: ticket.expires_at,
         })
     }
+}
 
+impl<S: IdentityStore + RealtimeSessionStore, C: IdentitySecurity> IdentityService<S, C> {
     /**
-     * Chấp nhận chỉ một consume winner còn quyền hiện hành; không tự mở socket trước COMMIT ACK.
+     * Chấp nhận một consume winner còn quyền hiện hành mà không ACK trước khi storage chốt kết quả.
      * Input
-     * Param: token — ticket raw tạm từ client, không được log, đặt trong URL hoặc lưu plaintext.
-     * Output: binding sau commit để transport đăng ký socket; không là authority cached cho action tương lai.
-     * # Errors
-     * Forbidden cho ticket không nhận diện/expired/consumed/revoked/stale auth; commit unknown không giả winner.
+     * Param: token — ticket raw tạm từ frame đầu, không được log, đặt trong URL hoặc lưu plaintext.
+     * Output: binding đã commit để transport đăng ký socket; không là authority cached cho action sau.
+     * Errors: Forbidden cho ticket invalid/expired/consumed/revoked; lỗi storage/commit giữ nguyên UNKNOWN.
      */
     pub async fn consume_realtime_ticket(
         &self,
@@ -95,12 +97,43 @@ where
         if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(ApplicationError::Forbidden);
         }
-        let mut transaction = self.store.begin().await?;
-        let binding = transaction
-            .consume_ticket(self.security.token_digest(token))
+        self.store
+            .consume_realtime_ticket(self.security.token_digest(token))
             .await?
-            .ok_or(ApplicationError::Forbidden)?;
-        transaction.commit().await?;
-        Ok(binding)
+            .ok_or(ApplicationError::Forbidden)
+    }
+}
+
+impl<S: IdentityStore + RealtimeSessionStore, C: IdentitySecurity> IdentityService<S, C> {
+    /**
+     * Đối soát subset session socket của instance với trạng thái DB hiện hành để worker đóng phiên cũ.
+     * Input
+     * Param: session_ids — danh sách ID đã lấy từ socket registry local, không phải authority client.
+     * Output: ID còn active; session vắng khỏi tập kết quả phải bị đóng.
+     * Errors: storage unavailable; transport caller phải fail-closed thay vì giữ socket sống.
+     */
+    pub async fn active_realtime_sessions(
+        &self,
+        session_ids: &[Uuid],
+    ) -> Result<HashSet<Uuid>, ApplicationError> {
+        self.store
+            .active_realtime_sessions(session_ids.to_vec())
+            .await
+    }
+
+    /**
+     * Đối soát session vừa consume trước ACK để thu hồi ngay nếu logout chen giữa hai bước.
+     * Input
+     * Param: session_id — ID lấy từ binding ticket đã commit và registry local.
+     * Output: true khi session còn active; false khi revoke/hết hạn/account không hoạt động.
+     * Errors: lỗi storage đã chuẩn hóa; caller đóng socket và giữ quota tới khi adapter hoàn tất checkout.
+     */
+    pub async fn active_realtime_session_for_handshake(
+        &self,
+        session_id: Uuid,
+    ) -> Result<bool, ApplicationError> {
+        self.store
+            .active_realtime_session_for_handshake(session_id)
+            .await
     }
 }

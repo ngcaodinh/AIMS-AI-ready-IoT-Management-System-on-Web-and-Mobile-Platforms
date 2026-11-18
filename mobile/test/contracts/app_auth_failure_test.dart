@@ -215,7 +215,7 @@ void checkMutationUncertaintyAndRedaction() {
   }
 }
 
-/// Đọc error examples từ fixtures0.2.1; các fixture không thay bằng chứng provider hoặc client network.
+/// Đọc error examples từ fixtures 0.2.2; các fixture không thay bằng chứng provider hoặc client network.
 void checkSharedErrorFixtures() {
   var cases = 0;
   for (final path in [
@@ -224,7 +224,7 @@ void checkSharedErrorFixtures() {
   ]) {
     final fixture =
         jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
-    expect(fixture['contractVersion'], '0.2.1');
+    expect(fixture['contractVersion'], '0.2.2');
     for (final item in fixture['scenarios'] as List<dynamic>) {
       final response = item['response'] as Map<String, dynamic>;
       final status = response['status'] as int;

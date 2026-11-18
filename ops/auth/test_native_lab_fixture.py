@@ -9,6 +9,7 @@ import secrets
 import subprocess
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -63,17 +64,46 @@ time.sleep(.1)
             child.stderr.close()
 
     def test_packet_schema_rejects_extra_fields_and_weak_password(self):
-        """Chỉ nhận version/password CSPRNG đúng shape qua private pipe, không nhận cấu hình DB tùy ý."""
+        """Chỉ nhận credential synthetic theo scenario, không nhận cấu hình DB hoặc token ngoài profile offline."""
         packet = {'version': 1, 'password': 'Aa1' + 'a' * 32}
         self.assertEqual(fixture.parse_packet(json.dumps(packet).encode()), packet['password'])
         self.assertEqual(fixture.parse_packet(json.dumps({**packet, 'scenario': 'password'}).encode()), packet['password'])
         self.assertEqual(fixture.parse_packet(json.dumps({**packet, 'scenario': 'rate-limit'}).encode()), packet['password'])
+        self.assertEqual(fixture.parse_packet(json.dumps({**packet, 'scenario': 'offline-expired',
+                                                         'expiredSessionToken': 'a' * 64}).encode()), packet['password'])
         for scenario in ['full', 35, None, 'password-relogin']:
             with self.assertRaises(ValueError):
                 fixture.parse_packet(json.dumps({**packet, 'scenario': scenario}).encode())
+        for invalid in [
+            {**packet, 'scenario': 'password', 'expiredSessionToken': 'a' * 64},
+            {**packet, 'scenario': 'offline-login', 'expiredSessionToken': 'a' * 64},
+            {**packet, 'scenario': 'offline-expired'},
+            {**packet, 'scenario': 'offline-expired', 'expiredSessionToken': 'b' * 63},
+            {**packet, 'scenario': 'offline-expired', 'expiredSessionToken': 'g' * 64},
+        ]:
+            with self.assertRaises(ValueError):
+                fixture.parse_packet(json.dumps(invalid).encode())
         for invalid in [b'{}', b'x' * 4097, json.dumps({**packet, 'port': 9999}).encode(), json.dumps({**packet, 'password': 'weak'}).encode()]:
             with self.assertRaises(ValueError):
                 fixture.parse_packet(invalid)
+
+    def test_expired_session_token_is_limited_to_the_expired_profile(self):
+        """Chỉ profile expired được giữ bearer synthetic để seed; offline thường không nhận token thừa.
+
+        Input
+        Param: không có — profile và token đều synthetic.
+        Output: offline-expired cần token đủ dạng; offline-login không thể kích hoạt nhánh INSERT.
+        Errors: ValueError cố định nếu cấu hình profile/token vượt hợp đồng fixture.
+        """
+        token = 'd' * 64
+        with self.assertRaises(ValueError):
+            fixture.NativeFixtureControl(MagicMock(), MagicMock(), scenario='offline-login',
+                                          expired_session_token=token)
+        with self.assertRaises(ValueError):
+            fixture.NativeFixtureControl(MagicMock(), MagicMock(), scenario='offline-expired')
+        control = fixture.NativeFixtureControl(MagicMock(), MagicMock(), scenario='offline-expired',
+                                                expired_session_token=token)
+        self.assertEqual(control.expired_session_token, token)
 
     def test_coalesced_packet_and_stop_are_consumed_with_pipe_still_open(self):
         """JSON và STOP cùng một write không bị buffered prefetch nuốt; fake launcher phải thấy STOP trước EOF."""
@@ -209,7 +239,49 @@ fixture.main()
         statement = sql.call_args.args[0]
         self.assertNotIn('token', statement)
         self.assertIn(":'auth_fault_user_id'", statement)
+        self.assertIn("client_type IN ('ANDROID','WEB')", statement)
         self.assertEqual(sql.call_args.kwargs['variables'], (('auth_fault_user_id', user_ids[0]),))
+
+    def test_expired_session_seed_binds_only_digest_and_preserves_24_hour_ttl(self):
+        """Fixture chỉ INSERT verifier digest, giữ TTL24h và không phát raw bearer trong READY.
+
+        Input
+        Param: không có — token/ID/expiry đều synthetic trong RAM.
+        Output: READY chỉ chứa session ID và expiry; SQL chỉ nhận digest đã bind.
+        Errors: assertion sai nếu token thô rời RAM hoặc có UPDATE session.
+        """
+        config = synthetic_config()
+        token = 'c' * 64
+        expires_at = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(microsecond=0)
+        expires_at_text = expires_at.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        child = MagicMock()
+        child.poll.return_value = None
+        emit = MagicMock()
+        control = fixture.NativeFixtureControl(emit, MagicMock(return_value=child),
+                                               scenario='offline-expired', expired_session_token=token)
+        # SQL fake chỉ chiếu lại session UUID đã bind, không tạo selector hoặc thay query bằng cấu hình ngoài.
+        def insert(statement, **kwargs):
+            """Param: statement/kwargs — SQL binding fake, trả đúng UUID owner đã bind."""
+            variables = dict(kwargs['variables'])
+            output = json.dumps({'sessionId': variables['auth_fault_expired_session_id'],
+                                 'expiresAt': expires_at_text}) + '\n'
+            return SimpleNamespace(returncode=0, stdout=output)
+        with patch.object(fixture.launcher.lab, 'sql', side_effect=insert) as sql:
+            self.assertIs(control.start_lab(config), child)
+        ready = emit.call_args.args[0]
+        variables = dict(sql.call_args.kwargs['variables'])
+        session_id = variables['auth_fault_expired_session_id']
+        self.assertEqual(ready['expiredSessionId'], session_id)
+        self.assertEqual(ready['expiredSessionExpiresAt'], expires_at_text)
+        self.assertNotIn(token, json.dumps(ready))
+        statement = sql.call_args.args[0]
+        self.assertNotIn(token, statement)
+        self.assertNotIn(token, str(variables))
+        self.assertEqual(variables['auth_fault_token_digest'], hashlib.sha256(token.encode('ascii')).hexdigest())
+        self.assertIn("decode(:'auth_fault_token_digest','hex')", statement)
+        self.assertIn("date_trunc('milliseconds', transaction_timestamp())", statement)
+        self.assertIn("interval '24 hours'", statement)
+        self.assertNotIn('UPDATE sessions', statement)
 
     def test_snapshot_scope_uses_only_owned_fixed_accounts(self):
         """Full/disabled/empty chỉ bind UUID từ config owned, không nhận index hoặc UUID ngoài run."""
@@ -261,7 +333,7 @@ fixture.main()
                 fixture.NativeFixtureControl(MagicMock(), MagicMock(), scenario=invalid)
 
     def test_cleanup_requires_zero_readback_and_uses_owned_uuid_list(self):
-        """STOPPED cần8integer0 từ một query bound, scope chốt lúc spawn không đổi theo config mutable."""
+        """STOPPED cần13integer0 từ một query bound, scope chốt lúc spawn không đổi theo config mutable."""
         config = synthetic_config()
         user_ids = tuple(config['userIds'])
         expected_digests = tuple(hmac.new(bytes(config['signingKey']), email.encode(), hashlib.sha256).hexdigest()
@@ -273,7 +345,9 @@ fixture.main()
         config['userIds'][0] = str(uuid4())
         config['emails'][0] = 'foreign@example.invalid'
         config['signingKey'][0] = 255
-        counts = dict.fromkeys(['role', 'hba', 'users', 'sessions', 'workspaces', 'memberships', 'auditActor', 'limiterBuckets'], 0)
+        counts = dict.fromkeys(['role', 'hba', 'users', 'sessions', 'workspaces', 'memberships', 'auditActor',
+                                'limiterBuckets', 'pushInstallations', 'websocketTickets', 'outboxEvents',
+                                'outboxConsumptions', 'globalIdempotencyRecords'], 0)
         with patch.object(fixture.launcher.lab, 'sql', return_value=SimpleNamespace(returncode=0, stdout=json.dumps(counts))) as sql:
             self.assertEqual(control.verify_cleanup(), counts)
         self.assertEqual(sql.call_count, 1)
@@ -285,8 +359,15 @@ fixture.main()
         self.assertEqual(sql.call_args.args[0], fixture.CLEANUP_READBACK_SQL)
         self.assertIn("decode(digest, 'hex')", fixture.CLEANUP_READBACK_SQL)
         self.assertIn("WHERE email_digest IN (SELECT email_digest FROM owned_buckets)", fixture.CLEANUP_READBACK_SQL)
+        self.assertIn("payload->>'userId' IN (SELECT user_id::text FROM owned)", fixture.CLEANUP_READBACK_SQL)
+        self.assertIn("active_user_id IN (SELECT user_id FROM owned)", fixture.CLEANUP_READBACK_SQL)
+        self.assertNotIn("push_installations WHERE user_id", fixture.CLEANUP_READBACK_SQL)
+        for table in ('push_installations', 'websocket_tickets', 'outbox_events', 'outbox_consumptions', 'global_idempotency_records'):
+            self.assertIn(table, fixture.CLEANUP_READBACK_SQL)
         for invalid in [None, [], {}, {**counts, 'unexpected': 0},
                         *({key: value for key, value in counts.items() if key != missing} for missing in counts),
+                        *({**counts, key: 1} for key in ['pushInstallations', 'websocketTickets', 'outboxEvents',
+                                                        'outboxConsumptions', 'globalIdempotencyRecords']),
                         *({**counts, 'limiterBuckets': value} for value in [1, -1, False, None, '0', 0.1]),
                         {**counts, 'sessions': 1}, {**counts, 'users': False}]:
             with patch.object(fixture.launcher.lab, 'sql', return_value=SimpleNamespace(returncode=0, stdout=json.dumps(invalid))):

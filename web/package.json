@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test:auth": "node --experimental-transform-types --test tests/auth.test.mjs tests/password_policy.test.mjs",
+    "test:e2e:auth": "playwright test --config=playwright.config.mjs",
     "check:auth-api": "node scripts/check-auth-api-readiness.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
@@ -15,6 +16,7 @@
     "react-dom": "19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/react": "19.2.0",
     "@types/react-dom": "19.2.0",

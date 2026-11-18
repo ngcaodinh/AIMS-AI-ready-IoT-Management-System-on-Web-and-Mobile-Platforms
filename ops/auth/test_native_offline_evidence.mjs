@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { createMembershipHttpOracle } from './native_membership_evidence.mjs';
-import { createOfflineSessionOracle } from './native_offline_evidence.mjs';
+import { createOfflineExpiredSessionOracle, createOfflineSessionOracle } from './native_offline_evidence.mjs';
 
 const seed = '10000000-0000-4000-8000-000000000001';
 const app = '10000000-0000-4000-8000-000000000002';
 const a = '20000000-0000-4000-8000-000000000001';
 const b = '20000000-0000-4000-8000-000000000002';
-const stages = ['offline-ready', 'offline-result', 'offline-quiet', 'offline-picker', 'offline-logged-out'];
-const prefixes = [1, 1, 2, 5, 9];
+const stages = ['offline-ready', 'offline-result', 'offline-quiet', 'offline-picker',
+  'offline-outbox-ready', 'offline-outbox-persisted', 'offline-outbox-resumed', 'offline-logged-out'];
+const prefixes = [1, 1, 2, 5, 8, 8, 8, 9];
 const requests = [['PROFILE_READ', 401], ['PROFILE_READ', 401], ['AUTH_LOGIN', 200], ['PROFILE_READ', 200],
   ['WORKSPACE_LIST', 200], ['WORKSPACE_DETAIL', 200], ['WORKSPACE_LIST', 200], ['WORKSPACE_DETAIL', 200], ['AUTH_LOGOUT', 204]];
 
@@ -93,6 +94,9 @@ initial.sessions[0].revoked = false;
 session.negative(baseline());
 const mid = loggedIn(); session.mid(mid); mid.sessions[1].revoked = true;
 const final = loggedIn(); final.sessions[1].revoked = true; final.audit.push(audit(app, 'LOGOUT'));
+session.unchanged(loggedIn());
+session.unchanged(loggedIn());
+session.unchanged(loggedIn());
 session.final(final);
 assert.throws(/** Final không được replay để mở một acceptance mới. */ () => session.final(final));
 console.log('OFFLINE_SQL_NEGATIVE_MID_FINAL_COPY_PASS');
@@ -109,6 +113,9 @@ for (const mode of ['negative-session', 'negative-audit', 'workspace', 'mid-revo
     if (mode === 'mid-audit') live.audit.push(audit(app, 'LOGOUT'));
     if (mode === 'mid-extra') live.sessions.push({ sessionId: a, revoked: false });
     test.mid(live);
+    test.unchanged(loggedIn());
+    test.unchanged(loggedIn());
+    test.unchanged(loggedIn());
     const done = loggedIn(); done.sessions[1].revoked = mode === 'final-live' ? false : true;
     done.audit.push(audit(app, 'LOGOUT'));
     if (mode === 'final-duplicate') done.audit.push(audit(app, 'LOGOUT'));
@@ -117,4 +124,70 @@ for (const mode of ['negative-session', 'negative-audit', 'workspace', 'mid-revo
   });
   assert.throws(/** Oracle đã fail không nhận lại snapshot negative đúng. */ () => test.negative(baseline()));
   console.log('OFFLINE_SQL_' + mode.toUpperCase().replaceAll('-', '_') + '_PASS');
+}
+
+/** Output: projection SQL gồm phiên seed expired cùng session/audit login đã có khi fixture được provision. */
+function expiredBaseline(sessionId = app, revoked = false) {
+  return { sessions: [{ sessionId: seed, revoked: false }, { sessionId, revoked }],
+    audit: [audit(seed, 'LOGIN_SUCCEEDED')],
+    workspaces: [{ workspaceId: a, name: 'Phòng vận hành A', role: 'ADMIN' },
+      { workspaceId: b, name: 'Nhà kính B', role: 'USER' }] };
+}
+
+{
+  const expiresAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const oracle = createOfflineExpiredSessionOracle(expiredBaseline(), app, expiresAt);
+  assert.equal(oracle.targetWorkspaceId, b);
+  oracle.unchanged(expiredBaseline());
+  const final = expiredBaseline(app, true);
+  final.audit.push(audit(app, 'LOGOUT'));
+  oracle.final(final);
+  assert.throws(() => oracle.final(final));
+  console.log('OFFLINE_EXPIRED_SQL_FINAL_SESSION_AUDIT_PASS');
+  for (const invalid of [expiredBaseline(seed), expiredBaseline(app, true)]) {
+    assert.throws(() => createOfflineExpiredSessionOracle(invalid, app, expiresAt));
+  }
+  const targetAudit = expiredBaseline();
+  targetAudit.audit.push(audit(app, 'LOGIN_SUCCEEDED'));
+  assert.throws(() => createOfflineExpiredSessionOracle(targetAudit, app, expiresAt));
+  // Không cho E2E đạt PASS vacuous nếu fixture thiếu session/audit setup để kiểm tra preservation.
+  const missingSetup = { ...expiredBaseline(), sessions: [{ sessionId: app, revoked: false }], audit: [] };
+  assert.throws(() => createOfflineExpiredSessionOracle(missingSetup, app, expiresAt));
+  assert.throws(() => createOfflineExpiredSessionOracle(expiredBaseline(), app,
+    new Date(Date.now() + 60 * 60 * 1000).toISOString()));
+
+  const concurrentChange = expiredBaseline(app, true);
+  concurrentChange.sessions[0].revoked = true;
+  concurrentChange.audit.push(audit(app, 'LOGOUT'));
+  const preservation = createOfflineExpiredSessionOracle(expiredBaseline(), app, expiresAt);
+  assert.throws(() => preservation.final(concurrentChange));
+  console.log('OFFLINE_EXPIRED_SQL_PRESERVES_SETUP_SESSION_PASS');
+}
+
+{
+  const oracle = createMembershipHttpOracle('offline-expired');
+  let sequence = 0; let count = 0;
+  const byKind = { AUTH_LOGIN: 0, PROFILE_READ: 0, WORKSPACE_LIST: 0, PASSWORD_CHANGE: 0,
+    AUTH_LOGOUT: 0, WORKSPACE_DETAIL: 0, OTHER: 0 };
+  /** Output: snapshot capture cho phiên expired, không có protected read hoặc login request. */
+  function expiredSnapshot() {
+    return { healthy: true, sealed: false, sequence, elapsedMilliseconds: sequence, rawOpened: count + 2,
+      rawActive: 0, opened: count, active: 0, requests: count, statuses: count, closed: count,
+      incomplete: 0, byKind: { ...byKind }, proxyAvailable: true };
+  }
+  oracle.baseline({ ...expiredSnapshot(), rawOpened: 1 });
+  for (const stage of ['offline-expired-offline', 'offline-expired-ready', 'offline-expired-persisted',
+    'offline-outbox-resumed']) {
+    oracle.checkpoint(stage, expiredSnapshot()); oracle.assertCurrent(expiredSnapshot());
+  }
+  const request = { requestId: 1, kind: 'AUTH_LOGOUT', matchesTarget: false };
+  for (const event of ['REQUEST', 'STATUS', 'CLOSED']) {
+    sequence++;
+    oracle.observe({ sequence, elapsedMilliseconds: sequence, event, ...request,
+      ...(event === 'STATUS' ? { status: 204 } : {}),
+      ...(event === 'CLOSED' ? { requestObserved: true, statusObserved: true } : {}) });
+  }
+  count = 1; byKind.AUTH_LOGOUT = 1;
+  oracle.checkpoint('offline-logged-out', expiredSnapshot()); oracle.finish(expiredSnapshot());
+  console.log('OFFLINE_EXPIRED_HTTP_SINGLE_TERMINAL_LOGOUT_PASS');
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import '../../workspaces/data/available_workspace_page.dart';
 import '../../workspaces/data/workspace_access_detail.dart';
@@ -16,23 +17,27 @@ final class AppSessionRepository {
   /// Param: api — transport Android thuộc origin cố định.
   /// Param: tokenStore — own auth key, một repository sở hữu suốt app lifetime.
   /// Param: now — giờ UTC kiểm expiry DTO; mặc định clock hệ thống, test có thể điều khiển.
+  /// Param: retryTimerFactory — bộ lập lịch retry; production dùng Timer, test có thể cấp clock giả.
   /// Param: workspaceApi — capability thật chỉ khi composition đã nối; không tự mock thành công.
   /// Param: passwordApi — capability password riêng để limited không có workspace API mặc định.
   AppSessionRepository({
     required AppAuthApi api,
     required SessionTokenStore tokenStore,
     DateTime Function()? now,
+    Timer Function(Duration, void Function())? retryTimerFactory,
     AppWorkspaceApi? workspaceApi,
     AppPasswordApi? passwordApi,
   }) : _api = api,
        _store = tokenStore,
        _now = now ?? DateTime.now,
+       _retryTimerFactory = retryTimerFactory ?? _createLogoutRetryTimer,
        _workspaceApi = workspaceApi,
        _passwordApi = passwordApi;
 
   final AppAuthApi _api;
   final SessionTokenStore _store;
   final DateTime Function() _now;
+  final Timer Function(Duration, void Function()) _retryTimerFactory;
   final AppWorkspaceApi? _workspaceApi;
   final AppPasswordApi? _passwordApi;
   final _events = StreamController<AppSessionState>.broadcast();
@@ -48,7 +53,10 @@ final class AppSessionRepository {
   bool _suspended = false;
   bool _disposed = false;
   bool _logoutPending = false;
+  bool _logoutServerResolved = false;
   bool _passwordPending = false;
+  DateTime? _sessionExpiresAt;
+  Timer? _logoutRetryTimer;
   final _workspaceCursors = <String>{};
   int _workspacePageCount = 0;
   int? _requestedResumeGeneration;
@@ -70,6 +78,9 @@ final class AppSessionRepository {
 
   /// Output: true khi intent đang giữ ownership; không queue password cho thao tác trùng.
   bool get busy => _active != null || _resumeFuture != null;
+
+  /// Output: true khi repository đang giữ intent đăng xuất chờ hoàn tất trên máy chủ hoặc thiết bị.
+  bool get logoutPending => _logoutPending;
 
   /// Output: chỉ cho phát logout khi private token/lifecycle/intent cho phép; không chứng minh server đã revoke.
   bool get canLogout =>
@@ -97,28 +108,38 @@ final class AppSessionRepository {
     );
   }
 
-  /// Kiểm store/server trước admission; giữ pending logout cho tới server proof hoặc recover chủ động.
+  /// Đối soát outbox trước token active; chỉ hỏi profile khi không còn revoke intent.
   Future<void> restore() {
     if (!_canStart) return Future<void>.value();
-    return _start(AppSessionPhase.checking, _restore);
+    return _start(
+      AppSessionPhase.checking,
+      /// Đọc lại intent tồn tại trước khi kiểm session để khởi động retry có giới hạn.
+      /// Input
+      /// Param: generation — phiên restore hiện hành được phép cập nhật state.
+      (generation) => _restore(
+        generation,
+        beginLogoutRetryCycle: true,
+      ),
+    );
   }
 
-  /// Đối soát chủ động hoặc cleanup quarantine; không phát lại login/password.
+  /// Recovery chủ động ưu tiên gửi logout outbox; không phát lại login/password.
   Future<void> recover() {
     if (!_canStart) return Future<void>.value();
     return _start(
       AppSessionPhase.checking,
-
-      /// Quarantine và intent không có token chỉ được cleanup, không đọc nhận account cũ.
+      /// Đọc outbox trước active session; recovery không mở lại account khi còn revoke intent.
       /// Input
       /// Param: generation — intent recovery chủ động của người dùng.
-      (generation) => _quarantined || _token == null
-          ? _clearQuarantine(generation)
-          : _restore(generation, preserveLogoutIntent: false),
+      (generation) => _restore(
+        generation,
+        preserveLogoutIntent: false,
+        beginLogoutRetryCycle: true,
+      ),
     );
   }
 
-  /// Retry chủ động đúng private token cả khi pending logout gặp quarantine; chờ server proof rồi delete ACK.
+  /// Bắt đầu logout bằng secure tombstone trước active delete để restart không admission account cũ.
   Future<void> logout() {
     if (!canLogout) {
       return Future<void>.value();
@@ -340,9 +361,11 @@ final class AppSessionRepository {
     }
   }
 
-  /// Khóa UI ngay, làm stale intent trước đó và vẫn chờ I/O sở hữu hoàn tất.
+  /// Khóa UI ngay, hủy timer retry và giữ ownership của I/O cũ tới khi Future drain.
   void suspend() {
     if (_disposed) return;
+    _logoutRetryTimer?.cancel();
+    _logoutRetryTimer = null;
     _suspended = true;
     _generation++;
     _state = AppSessionState(
@@ -362,11 +385,13 @@ final class AppSessionRepository {
     return _resumeFuture = _resumeAfterDrain();
   }
 
-  /// Chặn publish muộn, drain I/O sở hữu và đóng stream; không xóa stable session khi app dừng.
+  /// Hủy timer, chặn publish muộn, drain I/O rồi đóng stream mà không tự xóa stable session.
   Future<void> dispose() {
     if (_disposeFuture != null) return _disposeFuture!;
     _disposed = true;
     _suspended = true;
+    _logoutRetryTimer?.cancel();
+    _logoutRetryTimer = null;
     _generation++;
     _state = AppSessionState(
       phase: AppSessionPhase.checking,
@@ -475,7 +500,12 @@ final class AppSessionRepository {
       return;
     }
     try {
-      await _store.write(candidate.token);
+      await _store.writeSession(
+        StoredSessionCredential(
+          token: candidate.token,
+          expiresAt: candidate.expiresAt,
+        ),
+      );
     } catch (_) {
       // Write có thể đã lưu trước mất ACK; không đọc token đó để vượt quarantine.
       await _rejectCandidate(generation, candidate.token, storageFailure: true);
@@ -516,6 +546,7 @@ final class AppSessionRepository {
     }
     _token = candidate.token;
     _identity = (candidate.userId, candidate.email);
+    _sessionExpiresAt = candidate.expiresAt;
     _publish(
       generation,
       candidate.limited ? AppSessionPhase.limited : AppSessionPhase.full,
@@ -523,21 +554,65 @@ final class AppSessionRepository {
     );
   }
 
-  /// Restore không lấy quyền từ cache; quarantine có precedence trước mọi read/profile.
+  /// Restore ưu tiên outbox trước active token để restart không mở lại account đang logout.
   /// Input
   /// Param: generation — intent restore hiện hành.
   /// Param: preserveLogoutIntent — lifecycle không thay action recover/retry logout chủ động.
+  /// Param: beginLogoutRetryCycle — startup/resume/recovery mở chu kỳ retry bounded mới.
   Future<void> _restore(
     int generation, {
     bool preserveLogoutIntent = true,
+    bool beginLogoutRetryCycle = false,
   }) async {
+    PendingLogoutIntent? pendingLogout;
+    try {
+      pendingLogout = await _store.readLogoutIntent();
+    } catch (_) {
+      _quarantined = true;
+      _publish(generation, AppSessionPhase.storageFailure);
+      return;
+    }
+    if (!_isCurrent(generation)) return;
+    if (pendingLogout != null) {
+      if (_logoutPending && _logoutServerResolved) {
+        // Giữ ACK terminal trong cùng tiến trình để recovery chỉ retry xóa outbox, không gọi revoke lần nữa.
+        await _completePendingLogout(generation);
+        return;
+      }
+      _logoutServerResolved = false;
+      await _processPendingLogout(
+        generation,
+        pendingLogout,
+        beginRetryCycle: beginLogoutRetryCycle,
+      );
+      return;
+    }
+    if (_logoutPending && _logoutServerResolved && _token == null) {
+      // Terminal server proof đã có; nếu outbox absent sau lost delete ACK thì có thể mở login an toàn.
+      _logoutPending = false;
+      _logoutServerResolved = false;
+      _passwordPending = false;
+      _quarantined = false;
+      _publish(generation, AppSessionPhase.signedOut);
+      return;
+    }
+    if (_logoutPending && _token != null) {
+      // Write ACK của outbox thất bại/không rõ; giữ token private trong RAM để recovery thử ghi lại.
+      await _logout(generation);
+      return;
+    }
+    if (_logoutPending) {
+      _quarantined = true;
+      _publish(generation, AppSessionPhase.pending, failure: _protocolFailure);
+      return;
+    }
     if (_quarantined) {
       await _clearQuarantine(generation);
       return;
     }
-    String? stored;
+    StoredSessionCredential? stored;
     try {
-      stored = await _store.read();
+      stored = await _store.readSession();
     } catch (_) {
       _quarantined = true;
       _publish(generation, AppSessionPhase.storageFailure);
@@ -555,25 +630,29 @@ final class AppSessionRepository {
     if (stored == null) {
       _token = null;
       _identity = null;
+      _sessionExpiresAt = null;
       _logoutPending = false;
+      _logoutServerResolved = false;
       _publish(generation, AppSessionPhase.signedOut);
       return;
     }
-    final bearerMatch = _storedBearerPattern.firstMatch(stored);
-    if (bearerMatch == null || bearerMatch.end != stored.length) {
+    final token = stored.token;
+    final bearerMatch = _storedBearerPattern.firstMatch(token);
+    if (bearerMatch == null || bearerMatch.end != token.length) {
       // Adapter cũ có thể nhận token không-whitespace nhưng sai token68; không khóa vào protocol retry vô hạn.
       _quarantined = true;
       _publish(generation, AppSessionPhase.storageFailure);
       return;
     }
-    if (_token != null && stored != _token) {
+    if (_token != null && token != _token) {
       _quarantined = true;
       _publish(generation, AppSessionPhase.pending, failure: _protocolFailure);
       return;
     }
-    _token = stored;
+    _token = token;
+    _sessionExpiresAt = stored.expiresAt;
     try {
-      final profile = await _api.getProfile(stored);
+      final profile = await _api.getProfile(token);
       if (!_isCurrent(generation)) return;
       if (_identity != null && _identity != (profile.userId, profile.email)) {
         _quarantined = true;
@@ -614,30 +693,261 @@ final class AppSessionRepository {
     }
   }
 
-  /// Thu hồi token đã chụp trước await; không thay bằng token của account/intent khác.
+  /// Ghi tombstone trước khi xóa active credential rồi gửi đúng bearer đã chụp.
   /// Input
-  /// Param: generation — intent logout hiện hành.
+  /// Param: generation — intent logout hiện hành, dùng để publish trạng thái không secret.
+  /// Side effects: khóa capability, xóa token khỏi RAM sau outbox ACK và bắt đầu revoke.
   Future<void> _logout(int generation) async {
     final token = _token!;
+    final intent = PendingLogoutIntent(
+      intentId: _newLogoutIntentId(),
+      sessionToken: token,
+      expiresAt: _sessionExpiresAt,
+      attemptCount: 0,
+      nextAttemptAt: _now().toUtc(),
+    );
     _logoutPending = true;
+    _logoutServerResolved = false;
+    _quarantined = true;
+    _logoutRetryTimer?.cancel();
+    _logoutRetryTimer = null;
     try {
-      await _api.logout(token);
-    } on AppAuthFailure catch (failure) {
-      if (failure.kind == AppAuthFailureKind.sessionExpired) {
-        // 401 từ đúng token cũng là server proof phiên không còn dùng được, vẫn cần delete ACK.
-        _logoutPending = false;
-        _passwordPending = false;
-        await _clearQuarantine(generation);
-        return;
-      }
-      _publish(generation, AppSessionPhase.pending, failure: failure);
+      await _store.writeLogoutIntent(intent);
+    } catch (_) {
+      // Chưa có write ACK thì active key không bị xóa; UI vẫn khóa và recovery giữ token RAM.
+      _publish(generation, AppSessionPhase.storageFailure);
       return;
     }
-    // Server ACK thuộc intent này vẫn cần local cleanup dù app vừa suspend.
-    _logoutPending = false;
+    _token = null;
+    _identity = null;
+    _sessionExpiresAt = null;
     _passwordPending = false;
-    await _clearQuarantine(generation);
+    if (!await _deleteKey()) {
+      _publish(generation, AppSessionPhase.storageFailure);
+      return;
+    }
+    await _processPendingLogout(
+      generation,
+      intent,
+      activeSessionDeleted: true,
+    );
   }
+
+  /// Drain outbox; worker chỉ dùng bearer cho logout nhưng server vẫn coi là credential đầy quyền.
+  /// Input
+  /// Param: generation — generation sở hữu state và retry timer.
+  /// Param: intent — outbox được đọc hoặc ghi ACK; luôn nhắm đúng phiên ban đầu.
+  /// Param: beginRetryCycle — true khi startup/resume/recovery bắt đầu quota tự động mới.
+  /// Param: activeSessionDeleted — true chỉ sau delete ACK trong logout đang chạy.
+  Future<void> _processPendingLogout(
+    int generation,
+    PendingLogoutIntent intent, {
+    bool beginRetryCycle = false,
+    bool activeSessionDeleted = false,
+  }) async {
+    _logoutPending = true;
+    _logoutServerResolved = false;
+    _passwordPending = false;
+    _quarantined = true;
+    _token = null;
+    _identity = null;
+    _sessionExpiresAt = null;
+    _logoutRetryTimer?.cancel();
+    _logoutRetryTimer = null;
+    if (!activeSessionDeleted && !await _deleteKey()) {
+      _publish(generation, AppSessionPhase.storageFailure);
+      return;
+    }
+    if (beginRetryCycle && intent.attemptCount != 0) {
+      intent = _updatedLogoutIntent(intent, attemptCount: 0);
+      try {
+        await _store.writeLogoutIntent(intent);
+      } catch (_) {
+        _publish(generation, AppSessionPhase.storageFailure);
+        return;
+      }
+    }
+    final now = _now().toUtc();
+    if (intent.nextAttemptAt.isAfter(now)) {
+      _publish(generation, AppSessionPhase.pending);
+      _scheduleLogoutRetry(generation, intent, now);
+      return;
+    }
+    if (intent.attemptCount >= 5) {
+      _publish(generation, AppSessionPhase.pending);
+      return;
+    }
+    final attempt = _updatedLogoutIntent(
+      intent,
+      attemptCount: intent.attemptCount + 1,
+      nextAttemptAt: now,
+    );
+    try {
+      // Ghi quota trước network I/O để process death không làm mất dấu lần gửi đã nhận ownership.
+      await _store.writeLogoutIntent(attempt);
+    } catch (_) {
+      _publish(generation, AppSessionPhase.storageFailure);
+      return;
+    }
+    try {
+      await _api.logout(attempt.sessionToken);
+      await _completePendingLogout(generation);
+    } on AppAuthFailure catch (failure) {
+      if (failure.kind == AppAuthFailureKind.sessionExpired) {
+        // 401 revoke/expired là terminal cho đúng bearer, kể cả khi server đã commit trước timeout.
+        await _completePendingLogout(generation);
+        return;
+      }
+      await _recordLogoutFailure(generation, attempt, failure);
+    } catch (_) {
+      await _recordLogoutFailure(generation, attempt, _protocolFailure);
+    }
+  }
+
+  /// Ghi lần thử kế tiếp bền vững và chỉ tự lên lịch lỗi có thể hồi phục.
+  /// Input
+  /// Param: generation — generation được phép nhận state/timer hiện hành.
+  /// Param: intent — attempt đã ghi trước request, không chứa account context khác.
+  /// Param: failure — mã lỗi đã loại payload, dùng để chọn Retry-After hoặc full jitter.
+  Future<void> _recordLogoutFailure(
+    int generation,
+    PendingLogoutIntent intent,
+    AppAuthFailure failure,
+  ) async {
+    final retryable =
+        failure.kind == AppAuthFailureKind.networkUnavailable ||
+        failure.kind == AppAuthFailureKind.unavailable ||
+        failure.kind == AppAuthFailureKind.rateLimited ||
+        failure.outcomeUnknown;
+    final delaySeconds = failure.kind == AppAuthFailureKind.rateLimited
+        ? failure.retryAfterSeconds
+        : null;
+    final waitSeconds = delaySeconds ?? _fullJitterSeconds(intent.attemptCount);
+    final now = _now().toUtc();
+    final scheduled = _updatedLogoutIntent(
+      intent,
+      nextAttemptAt: now.add(Duration(seconds: waitSeconds)),
+    );
+    try {
+      await _store.writeLogoutIntent(scheduled);
+    } catch (_) {
+      _publish(generation, AppSessionPhase.storageFailure, failure: failure);
+      return;
+    }
+    _publish(generation, AppSessionPhase.pending, failure: failure);
+    if (retryable && intent.attemptCount < 5) {
+      _scheduleLogoutRetry(generation, scheduled, now);
+    }
+  }
+
+  /// Xóa tombstone sau server terminal; active key đã được xóa trước POST và ACK xác nhận.
+  /// Input
+  /// Param: generation — logout intent có server resolution terminal.
+  Future<void> _completePendingLogout(int generation) async {
+    // Server terminal và active-key delete đã ACK; lost outbox delete ACK cần recovery riêng.
+    _logoutServerResolved = true;
+    try {
+      await _store.deleteLogoutIntent();
+    } catch (_) {
+      _publish(generation, AppSessionPhase.storageFailure);
+      return;
+    }
+    _logoutPending = false;
+    _logoutServerResolved = false;
+    _passwordPending = false;
+    _quarantined = false;
+    _token = null;
+    _identity = null;
+    _sessionExpiresAt = null;
+    _logoutRetryTimer?.cancel();
+    _logoutRetryTimer = null;
+    _publish(generation, AppSessionPhase.signedOut);
+  }
+
+  /// Lên lịch retry đúng thời điểm persisted, tối đa năm lần tự động trong một chu kỳ.
+  /// Input
+  /// Param: generation — generation mà timer không được vượt qua khi callback tới muộn.
+  /// Param: intent — retry record đã ghi bền vững.
+  /// Param: now — clock hiện tại dùng tính khoảng chờ, không dùng để xóa intent hết hạn.
+  void _scheduleLogoutRetry(
+    int generation,
+    PendingLogoutIntent intent,
+    DateTime now,
+  ) {
+    if (!_isCurrent(generation) || intent.attemptCount >= 5) return;
+    _logoutRetryTimer?.cancel();
+    final delay = intent.nextAttemptAt.difference(now);
+    // Timer được đánh thức theo lát tối đa một ngày, nhưng worker luôn tái kiểm Retry-After trước POST.
+    final boundedDelay = delay > const Duration(days: 1)
+        ? const Duration(days: 1)
+        : delay;
+    _logoutRetryTimer = _retryTimerFactory(
+      boundedDelay.isNegative ? Duration.zero : boundedDelay,
+      _runScheduledLogoutRetry,
+    );
+  }
+
+  /// Bắt đầu timer retry sau khi intent cũ kết thúc và lifecycle còn ở foreground.
+  void _runScheduledLogoutRetry() {
+    _logoutRetryTimer = null;
+    if (!_canStart || !_logoutPending) return;
+    _start(
+      AppSessionPhase.pending,
+      /// Callback timer đọc lại durable state để không dùng snapshot đã bị thay thế.
+      /// Input
+      /// Param: generation — generation mới chỉ của worker retry hiện hành.
+      (generation) async {
+        PendingLogoutIntent? intent;
+        try {
+          intent = await _store.readLogoutIntent();
+        } catch (_) {
+          _quarantined = true;
+          _publish(generation, AppSessionPhase.storageFailure);
+          return;
+        }
+        if (!_isCurrent(generation)) return;
+        if (intent == null) {
+          _quarantined = true;
+          _publish(generation, AppSessionPhase.storageFailure);
+          return;
+        }
+        await _processPendingLogout(generation, intent);
+      },
+    );
+  }
+
+  /// Tạo thời gian chờ full jitter tăng dần, chặn trần tại 60 giây theo OQ-LOGOUT-003.
+  /// Input
+  /// Param: attemptCount — lần gửi đã ghi bền vững, bắt đầu từ một.
+  /// Output: số giây trong khoảng 1..min(2^(attemptCount-1), 60).
+  int _fullJitterSeconds(int attemptCount) {
+    final exponent = attemptCount <= 1 ? 0 : attemptCount - 1;
+    final ceiling = exponent >= 6 ? 60 : 1 << exponent;
+    return Random().nextInt(ceiling) + 1;
+  }
+
+  /// Sao chép retry metadata mà vẫn giữ nguyên intent/token/expiry ban đầu.
+  /// Input
+  /// Param: intent — record hiện hành đã được đọc từ secure outbox.
+  /// Param: attemptCount — counter mới nếu bắt đầu chu kỳ hoặc ghi attempt.
+  /// Param: nextAttemptAt — thời điểm retry mới; mặc định giữ lịch hiện tại.
+  /// Output: record bất biến dùng cho lần ghi secure tiếp theo.
+  PendingLogoutIntent _updatedLogoutIntent(
+    PendingLogoutIntent intent, {
+    int? attemptCount,
+    DateTime? nextAttemptAt,
+  }) => PendingLogoutIntent(
+    intentId: intent.intentId,
+    sessionToken: intent.sessionToken,
+    expiresAt: intent.expiresAt,
+    attemptCount: attemptCount ?? intent.attemptCount,
+    nextAttemptAt: nextAttemptAt ?? intent.nextAttemptAt,
+  );
+
+  /// Sinh id local duy nhất trong tiến trình mà không cấp authority hoặc chứa account data.
+  /// Output: id ASCII hợp lệ cho outbox; bearer không tham gia vào id.
+  String _newLogoutIntentId() =>
+      'logout-${_now().microsecondsSinceEpoch}-${_generation + 1}';
 
   /// Candidate thất bại/stale không trở thành stable token dù storage đã ghi thành công.
   /// Input
@@ -683,17 +993,19 @@ final class AppSessionRepository {
     }
     _token = null;
     _identity = null;
+    _sessionExpiresAt = null;
     _logoutPending = false;
+    _logoutServerResolved = false;
     _passwordPending = false;
     _quarantined = false;
     _publish(generation, AppSessionPhase.signedOut);
   }
 
-  /// Xóa own key và giữ ownership tới ACK thật, không timeout rồi cho write mới chen vào.
+  /// Xóa active-session key và giữ ownership tới ACK thật, không cho write mới chen vào.
   /// Output: true chỉ khi plugin trả ACK; không giữ exception native hoặc giả deleteAll.
   Future<bool> _deleteKey() async {
     try {
-      await _store.delete();
+      await _store.deleteSession();
       return true;
     } catch (_) {
       return false;
@@ -733,7 +1045,11 @@ final class AppSessionRepository {
           /// Resume kiểm server nhưng không tự hủy ý định logout đang pending.
           /// Input
           /// Param: generation — restore mới sau khi intent cũ đã drain.
-          (generation) => _restore(generation, preserveLogoutIntent: true),
+          (generation) => _restore(
+            generation,
+            preserveLogoutIntent: true,
+            beginLogoutRetryCycle: true,
+          ),
         );
         if (_requestedResumeGeneration == requestedGeneration) return;
       }
@@ -788,6 +1104,14 @@ final class AppSessionRepository {
     _events.add(_state);
   }
 }
+
+/// Dùng timer của Dart cho retry production; repository có thể thay clock scheduler trong test.
+/// Input
+/// Param: duration — khoảng chờ đã được kiểm bằng `nextAttemptAt`.
+/// Param: callback — worker retry sẽ đọc lại secure outbox trước POST.
+/// Output: Timer có thể hủy khi suspend/dispose.
+Timer _createLogoutRetryTimer(Duration duration, void Function() callback) =>
+    Timer(duration, callback);
 
 const _protocolFailure = AppAuthFailure(
   AppAuthFailureKind.protocol,

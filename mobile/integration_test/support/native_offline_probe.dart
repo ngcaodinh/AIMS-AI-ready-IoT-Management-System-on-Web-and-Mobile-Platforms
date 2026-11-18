@@ -1,23 +1,44 @@
 /// Gate riêng của offline integration; không điều khiển App, network, SQL hoặc cấp quyền session.
 /// Host vẫn phải chứng minh HTTP/DB và drain các operation trước khi gửi ACK.
 final class NativeOfflineCheckpoint {
-  /// Tạo gate sau ARM hoặc nhận clock675s đã neo ARM từ entry; không neo lại theo sample đầu.
+  /// Tạo gate đúng phase để restart dùng stage riêng nhưng vẫn giữ một clock675s không reset.
   /// Input
   /// Param: elapsed — monotonic elapsed cùng phase, injection chỉ cho host unit test.
-  NativeOfflineCheckpoint({Duration Function()? elapsed}) {
+  /// Param: profile — profile stage cố định cho outbox, expired hoặc resume, không nhận từ packet.
+  NativeOfflineCheckpoint({
+    Duration Function()? elapsed,
+    String profile = 'offline-outbox',
+  }) {
     _watch.start();
     _elapsed = elapsed ?? _readElapsed;
+    _stages = switch (profile) {
+      'offline-outbox' => _offlineOutboxStages,
+      'offline-expired' => _offlineExpiredStages,
+      'offline-resume' => _offlineResumeStages,
+      _ => throw StateError('NATIVE_OFFLINE_CHECKPOINT_PROFILE_INVALID'),
+    };
   }
 
   static const _phaseLimit = Duration(seconds: 675);
-  static const _stages = {
+  static const _offlineOutboxStages = {
     'offline-ready': Duration(seconds: 110),
     'offline-result': Duration(seconds: 110),
     'offline-quiet': Duration(seconds: 170),
     'offline-picker': Duration(seconds: 170),
-    'offline-logged-out': Duration(seconds: 5),
+    'offline-outbox-ready': Duration(seconds: 170),
+    'offline-outbox-persisted': Duration(seconds: 170),
+  };
+  static const _offlineResumeStages = {
+    'offline-outbox-resumed': Duration(seconds: 170),
+    'offline-logged-out': Duration(seconds: 120),
+  };
+  static const _offlineExpiredStages = {
+    'offline-expired-offline': Duration(seconds: 110),
+    'offline-expired-ready': Duration(seconds: 170),
+    'offline-expired-persisted': Duration(seconds: 170),
   };
   final _watch = Stopwatch();
+  late final Map<String, Duration> _stages;
   late final Duration Function() _elapsed;
   Duration _last = Duration.zero;
   Duration? _deadline;

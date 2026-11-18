@@ -1,6 +1,7 @@
 //! HTTP adapter cho IAM; business rule vẫn thuộc application/domain, không mở CORS ambient.
 
 mod input;
+mod realtime;
 mod security;
 mod sessions;
 
@@ -32,6 +33,7 @@ pub(super) type AuthService = IdentityService<PgIdentityStore, CryptoService>;
 #[derive(Clone)]
 pub struct HttpState {
     pub(super) auth: AuthService,
+    realtime: realtime::RealtimeHub,
     pub(super) signing_key: Arc<[u8; 32]>,
     pub(super) origin: Arc<str>,
 }
@@ -62,7 +64,7 @@ impl HttpState {
      * Param: `signing_key` — key auth trong RAM, không xuất qua observer.
      * Param: `origin` — Web origin phải qua validation hiện có.
      * Param: `diagnostics` — optional sink; None giữ default-off, sink phải inactive trong startup.
-     * Output: state cùng observer qua clones; startup dummy hash chỉ vào window nếu caller mở sai thời điểm.
+     * Output: state cùng observer qua clones; quota handshake DB lấy từ pool và chừa một connection cho auth/reconcile.
      * # Errors
      * Origin/crypto cấu hình không hợp lệ, giữ mapping hiện có và không log key hoặc SQL.
      */
@@ -74,6 +76,9 @@ impl HttpState {
     ) -> Result<Self, ApplicationError> {
         security::validate_origin(origin).map_err(|_| ApplicationError::InvalidInput)?;
         let mut passwords = PasswordService::default();
+        // Chừa một kết nối tối đa cho login/logout và reconciler; cap realtime không vượt hai truy vấn đồng thời.
+        let handshake_db_capacity =
+            realtime::handshake_db_capacity(pool.options().get_max_connections());
         let mut store = PgIdentityStore::new(pool);
         if let Some(sink) = diagnostics {
             passwords = passwords.with_diagnostics(sink.clone());
@@ -82,6 +87,7 @@ impl HttpState {
         let crypto = CryptoService::new(passwords, signing_key).await?;
         Ok(Self {
             auth: IdentityService::new(store, crypto),
+            realtime: realtime::RealtimeHub::with_handshake_db_capacity(handshake_db_capacity),
             signing_key: Arc::new(signing_key),
             origin: Arc::from(origin),
         })
@@ -112,9 +118,17 @@ impl HttpError {
     fn unavailable() -> Self {
         Self::code(503, "SERVICE_UNAVAILABLE")
     }
-    /** Lỗi phiên chung cho token unknown/revoked/expired. */
+    /** Lỗi chung cho credential vắng, unknown, malformed hoặc transport không khớp. */
     fn session_invalid() -> Self {
+        Self::session_expired()
+    }
+    /** Lỗi cho session đã nhận diện nhưng hết hạn theo clock server. */
+    fn session_expired() -> Self {
         Self::code(401, "SESSION_EXPIRED")
+    }
+    /** Lỗi cho session đã nhận diện và thu hồi; không trả thêm metadata về session. */
+    fn session_revoked() -> Self {
+        Self::code(401, "SESSION_REVOKED")
     }
     /** Context sai phải từ chối trước profile hoặc side effect. */
     fn context_mismatch() -> Self {
@@ -154,6 +168,8 @@ impl From<ApplicationError> for HttpError {
                 ..Self::code(429, "RATE_LIMITED")
             },
             ApplicationError::SessionInvalid => Self::session_invalid(),
+            ApplicationError::SessionExpired => Self::session_expired(),
+            ApplicationError::SessionRevoked => Self::session_revoked(),
             ApplicationError::PasswordChangeRequired => Self::code(403, "PASSWORD_CHANGE_REQUIRED"),
             ApplicationError::Conflict => Self::context_mismatch(),
             ApplicationError::Forbidden | ApplicationError::ResourceNotFound => {
@@ -225,6 +241,35 @@ pub(super) async fn read_json(request: Request) -> Result<Map<String, Value>, Ht
         Value::Object(fields) => Ok(fields),
         _ => Err(HttpError::validation(422, "", "TYPE")),
     }
+}
+
+/**
+ * Chặn body trên mutation bodyless theo cùng giới hạn và phân biệt MIME đã dùng cho logout.
+ * Input
+ * Param: request — request mạng chưa tin cậy; chỉ đọc content type và tối đa64KiB body.
+ * Output: Ok khi body vắng hoặc dài0 byte.
+ * Errors: 413 quá lớn, 415 MIME không hỗ trợ, 400 JSON hỏng/duplicate, 422 JSON hợp lệ nhưng body bị cấm.
+ */
+pub(super) async fn require_empty_body(request: Request) -> Result<(), HttpError> {
+    let content_type =
+        security::single_header(request.headers(), "content-type")?.map(str::to_owned);
+    let bytes = to_bytes(request.into_body(), 65_536)
+        .await
+        .map_err(|_| HttpError::code(413, "VALIDATION_ERROR"))?;
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    if !content_type.as_deref().is_some_and(|value| {
+        value
+            .split(';')
+            .next()
+            .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"))
+    }) {
+        return Err(HttpError::code(415, "VALIDATION_ERROR"));
+    }
+    serde_json::from_slice::<input::StrictValue>(&bytes)
+        .map_err(|_| HttpError::code(400, "VALIDATION_ERROR"))?;
+    Err(HttpError::code(422, "VALIDATION_ERROR"))
 }
 
 /** Lấy field chuỗi strict; Input: fields JSON, key/path cố định. Không coerce null/number/bool. */
@@ -299,7 +344,7 @@ async fn login(
             .num_seconds()
             .clamp(0, 86_400);
         if remaining == 0 {
-            return Err(HttpError::session_invalid());
+            return Err(HttpError::session_expired());
         }
         let cookie = format!(
             "iot_session={}; Secure; HttpOnly; SameSite=Lax; Path=/api/v1; Max-Age={remaining}",
@@ -332,9 +377,15 @@ pub(super) fn session_headers(
     Ok(())
 }
 
-/** Tạo router auth thật; Input: state có core/pool/key được composition root khởi tạo. */
+/**
+ * Tạo auth router và chạy DB reconciler cho socket của instance này.
+ * Input: state dùng chung auth/pool/key và registry local do composition root khởi tạo.
+ * Side effects: một reconciler bounded được spawn; task kết thúc khi state/router được drop.
+ */
 pub fn auth_router(state: HttpState) -> Router {
+    state.realtime.start_reconciliation(state.auth.clone());
     sessions::routes()
+        .merge(realtime::routes())
         .route("/api/v1/auth/login", post(login))
         .with_state(state)
 }

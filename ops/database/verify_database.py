@@ -18,6 +18,7 @@ IMAGE = "postgres@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133
 CONTAINER = "iot-postgres17-database"
 DATABASE = "iot_database_lab"
 PURPOSE = "iot-platform-database-plan"
+DOCKER_CLI_CONFIG = ROOT / "ops/auth/.auth-lab-docker-config"
 ADMIN = "iot_lab_owner"
 MIGRATOR = "iot_migrator"
 RUNTIME = "iot_runtime"
@@ -27,6 +28,17 @@ TEST_SQL = ROOT / "backend/tests/database/draft_auth.sql"
 DATA_DIRECTORY = "/tmp/iot-postgres17-data"
 
 
+# Cố định config CLI về đường dẫn rỗng riêng để Docker không đọc credential mặc định của người chạy.
+def docker_argv(*arguments):
+    """Tạo argv Docker an toàn để mọi fixture dùng config cô lập, không kế thừa registry token cá nhân.
+
+    Input
+    Param: arguments — các lệnh/đối số Docker nội bộ đã chọn bởi caller.
+    Output: argv không qua shell, trỏ `--config` vào namespace Auth Lab.
+    """
+    return ["docker", "--config", str(DOCKER_CLI_CONFIG), *arguments]
+
+
 # Chạy argv riêng và nhận stdin UTF-8; không mở shell hoặc đọc/cấp environment.
 def docker(*arguments, input_text=None, check=True):
     """Input: arguments là argv nội bộ, input_text là SQL tổng hợp, check điều khiển lỗi.
@@ -34,7 +46,7 @@ def docker(*arguments, input_text=None, check=True):
     Side effects: chỉ thực hiện thao tác Docker được caller chọn trong namespace lab.
     """
     result = subprocess.run(
-        ["docker", *arguments], input=input_text, text=True, encoding="utf-8",
+        docker_argv(*arguments), input=input_text, text=True, encoding="utf-8",
         capture_output=True, timeout=120,
     )
     if check and result.returncode:
@@ -84,7 +96,7 @@ def sql(statement, role=MIGRATOR, database=DATABASE, check=True, variables=()):
     Param: role — một trong owner/migrator/runtime của lab, không principal tùy ý.
     Param: database — đích lab được kiểm namespace trước khi chạy Docker.
     Param: check — True truyền lỗi psql cho caller; False cho fault harness lọc lỗi an toàn.
-    Param: variables — value hữu hạn dùng qua quote :'name'; binding bucket lab chỉ nhận6digest tổng hợp khác nhau.
+    Param: variables — value hữu hạn dùng qua quote :'name'; tên và định dạng đều phải thuộc allowlist.
     Output: CompletedProcess để kiểm exit/SQLSTATE; không tự log row hoặc value.
     Side effects: mutation theo SQL nội bộ đã chọn, không mở owner TCP hoặc đọc credential/env.
     """
@@ -104,6 +116,13 @@ def sql(statement, role=MIGRATOR, database=DATABASE, check=True, variables=()):
         ) or (
             name == "auth_fault_user_id" and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value)
         ) or (
+            # Chỉ bind ID của session/context synthetic; caller không thể chọn UUID tùy ý ngoài hình dạng chuẩn.
+            name in ("auth_fault_expired_session_id", "auth_fault_expired_context_id")
+            and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value)
+        ) or (
+            # Bearer không qua psql; chỉ SHA-256 lowercase của fixture expired được bind làm verifier.
+            name == "auth_fault_token_digest" and re.fullmatch(r"[0-9a-f]{64}", value)
+        ) or (
             name == "auth_fault_bucket_digest" and re.fullmatch(r"[0-9a-f]{64}", value)
         ) or (
             # 5email fixture và1unknown: đúng6hex digest/389ký tự, không mở danh sách tùy ý hoặc nối SQL.
@@ -113,6 +132,17 @@ def sql(statement, role=MIGRATOR, database=DATABASE, check=True, variables=()):
         ) or (
             # Mảng UUID request bounded8 của fault suite; quote ở SQL rồi cast uuid[] kiểm kiểu lần nữa.
             name == "auth_fault_correlations" and re.fullmatch(r"(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(?:,[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}){0,7}|", value)
+        ) or (
+            # Oracle logout chỉ nhận một đến ba session UUID đã xác minh từ fixture.
+            name == "auth_fault_session_ids" and re.fullmatch(
+                r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?:,[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}){0,2}",
+                value,
+            )
+        ) or (
+            # Installation fixture được xóa theo đúng UUID ngẫu nhiên do test vừa tạo.
+            name in ("auth_fault_installation_id", "auth_fault_survivor_installation_id") and re.fullmatch(
+                r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value
+            )
         )
         if not valid:
             raise ValueError("Unexpected psql variable")

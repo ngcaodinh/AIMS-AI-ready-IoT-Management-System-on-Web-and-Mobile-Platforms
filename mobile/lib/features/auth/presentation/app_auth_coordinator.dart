@@ -93,6 +93,9 @@ final class AppAuthCoordinator extends ChangeNotifier {
   /// Output: intent hiện hành không chứa input.
   AppAuthIntent get intent => _intent;
 
+  /// Output: true khi repository đang giữ quy trình đăng xuất chưa hoàn tất qua các bước đối soát hoặc resume.
+  bool get logoutPending => _repository.logoutPending;
+
   /// Output: chỉ hiển thị logout khi repository có intent hợp lệ, không tiết lộ bearer.
   bool get canLogout =>
       !_disposed &&

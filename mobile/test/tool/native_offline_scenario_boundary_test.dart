@@ -43,9 +43,25 @@ final class OfflineApi implements AppAuthApi, AppWorkspaceApi {
   Future<FullSessionProfile> getProfile(String token) =>
       _delegate.getProfile(token);
 
-  /// Input Param: token — chỉ revoke synthetic own session, không có DB side effect.
+  /// Giữ logout ở trạng thái chưa rõ kết quả như kết nối đứt sau khi gửi, để producer phải giữ outbox.
+  /// Input
+  /// Param: token — bearer synthetic, chỉ dùng để mô phỏng request và không ghi vào ledger.
+  /// Errors: networkUnavailable/outcomeUnknown buộc repository lưu ý định thu hồi chờ đối soát.
   @override
-  Future<void> logout(String token) => _delegate.logout(token);
+  Future<void> logout(String token) {
+    events.add('logout-offline');
+    final result = Completer<void>();
+    replies.add(
+      /// Response giả có độ trễ transport hữu hạn để UI busy mới có thể được quan sát trong producer test.
+      () => result.completeError(
+        const AppAuthFailure(
+          AppAuthFailureKind.networkUnavailable,
+          outcomeUnknown: true,
+        ),
+      ),
+    );
+    return result.future;
+  }
 
   /// Input Param: token — synthetic authority của repository test.
   /// Param: cursor — cursor test được chuyển nguyên, producer không tự phân trang.
@@ -95,34 +111,59 @@ final class OfflineStore implements SessionTokenStore {
   OfflineStore(this.replies, {this.immediateDelete = false});
   final List<void Function()> replies;
   final bool immediateDelete;
-  String? value;
+  StoredSessionCredential? session;
+  PendingLogoutIntent? logoutIntent;
+
+  /// Đọc bearer synthetic để assertion ngoài repository kiểm session đã bị xóa.
+  String? get value => session?.token;
 
   /// Output: giá trị RAM synthetic, không phải evidence secure storage.
   @override
-  Future<String?> read() async => value;
+  Future<StoredSessionCredential?> readSession() async => session;
 
-  /// Input Param: token — candidate synthetic của repository, không log/persist.
+  /// Lưu bearer/expiry synthetic của repository, không log hoặc gọi native storage.
+  /// Input
+  /// Param: value — candidate credential đã parse của luồng đang kiểm.
   @override
-  Future<void> write(String token) async {
-    value = token;
+  Future<void> writeSession(StoredSessionCredential value) async {
+    session = value;
   }
 
   /// Giữ ACK qua một busy frame để producer kiểm gesture recovery, không sửa clock/App.
   @override
-  Future<void> delete() {
+  Future<void> deleteSession() {
     if (immediateDelete) {
-      value = null;
+      session = null;
       return Future<void>.value();
     }
     final result = Completer<void>();
     replies.add(
       /// Timer case sở hữu actual callback; chỉ ACK sau khi clear own RAM value.
       () {
-        value = null;
+        session = null;
         result.complete();
       },
     );
     return result.future;
+  }
+
+  /// Trả tombstone fixture nếu flow logout đã ghi durable intent.
+  /// Output: record RAM synthetic hoặc null khi chưa có logout.
+  @override
+  Future<PendingLogoutIntent?> readLogoutIntent() async => logoutIntent;
+
+  /// Ghi tombstone fixture trước khi repository xóa active session.
+  /// Input
+  /// Param: intent — bearer đầy quyền chỉ được repository dùng trong worker logout, cùng metadata retry synthetic.
+  @override
+  Future<void> writeLogoutIntent(PendingLogoutIntent intent) async {
+    logoutIntent = intent;
+  }
+
+  /// Xóa record fixture sau terminal response.
+  @override
+  Future<void> deleteLogoutIntent() async {
+    logoutIntent = null;
   }
 }
 
@@ -138,6 +179,7 @@ Map<String, Object?> packet() => {
 };
 
 /// Chạy producer qua App/repository/coordinator thật với API/store/canary synthetic đã ghi rõ.
+/// Side effects: chỉ RAM/host widget; không gọi plugin storage, Auth hoặc PostgreSQL.
 void main() {
   for (final fails in [false, true]) {
     test(
@@ -191,6 +233,11 @@ void main() {
             api: api,
             workspaceApi: api,
             tokenStore: store,
+
+            retryTimerFactory:
+                /// Timer giả giữ retry ngoài cửa sổ assertion để test đúng state pending hiện tại.
+                (duration, callback) =>
+                    Timer(const Duration(days: 30), callback),
 
             /// Candidate synthetic hợp lệ trong host case, không đổi server clock.
             now: () => DateTime.utc(2026, 11, 12),
@@ -249,6 +296,7 @@ void main() {
                       ? NativeOfflineRoute.unavailable
                       : NativeOfflineRoute.reachable;
                 },
+            tokenStore: store,
           );
           if (mode == 'success' || mode == 'fast-delete') {
             await pending;
@@ -257,7 +305,8 @@ void main() {
               'offline-result',
               'offline-quiet',
               'offline-picker',
-              'offline-logged-out',
+              'offline-outbox-ready',
+              'offline-outbox-persisted',
             ]);
             expect(api.events, [
               'offline-login',
@@ -267,11 +316,13 @@ void main() {
               'detail-a',
               'list',
               'detail-b',
-              'logout',
+              'logout-offline',
             ]);
             expect(probes, 3);
             expect(api.attempts, 2);
             expect(store.value, isNull);
+            expect(store.logoutIntent?.sessionToken, isNotEmpty);
+            expect(store.logoutIntent?.expiresAt, isNotNull);
             expect(
               watch.elapsed,
               greaterThanOrEqualTo(const Duration(seconds: 30)),

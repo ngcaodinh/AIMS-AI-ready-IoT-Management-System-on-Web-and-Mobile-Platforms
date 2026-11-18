@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { nativePhaseBudget, runNativePhase } from './run_native_e2e.mjs';
+import { containsNativeSecret, nativePhaseBudget, runNativePhase } from './run_native_e2e.mjs';
 
 const password = 'Aa1' + 'c'.repeat(32);
 const runId = 'aaaaaaaa-1111-4111-8111-111111111111';
@@ -13,17 +13,35 @@ const stages = ['membership-before-login', 'membership-picker', 'membership-deni
  * Mô phỏng đúng pipe/process/clock boundary cho consumer thật, không SDK/ADB/SQL hoặc auth API.
  * Input
  * Param: mode — fault cố định của test, chỉ metadata synthetic.
- * Param: phase — membership mặc định hoặc offline-login, chỉ điều chỉnh SDK metadata của fake nội bộ.
+ * Param: phase — membership/offline outbox/offline resume, chỉ điều chỉnh SDK metadata synthetic.
  * Output: trusted runtime cùng state do case sở hữu và terminal event giả phải quan sát rõ.
  */
 export function createFakeMembershipRuntime(mode, phase = 'membership-stale') {
-  assert.ok(['membership-stale', 'offline-login'].includes(phase));
-  const offline = phase === 'offline-login';
-  const phaseStages = offline ? ['offline-ready', 'offline-result', 'offline-quiet', 'offline-picker', 'offline-logged-out'] : stages;
+  assert.ok(['membership-stale', 'offline-login', 'offline-expired', 'offline-resume'].includes(phase));
+  const offline = ['offline-login', 'offline-expired'].includes(phase);
+  const offlineOutboxStages = ['offline-ready', 'offline-result', 'offline-quiet', 'offline-picker',
+    'offline-outbox-ready', 'offline-outbox-persisted'];
+  const offlineResumeStages = ['offline-outbox-resumed', 'offline-logged-out'];
+  const offlineExpiredStages = ['offline-expired-offline', 'offline-expired-ready', 'offline-expired-persisted'];
   const offlineCaps = { 'offline-ready': 110_000, 'offline-result': 110_000, 'offline-quiet': 170_000,
-    'offline-picker': 170_000, 'offline-logged-out': 5000 };
+    'offline-picker': 170_000, 'offline-outbox-ready': 170_000, 'offline-outbox-persisted': 170_000,
+    'offline-expired-offline': 110_000, 'offline-expired-ready': 170_000,
+    'offline-expired-persisted': 170_000,
+    'offline-outbox-resumed': 170_000, 'offline-logged-out': 120_000 };
   const state = { clock: 0, spawned: 0, accepted: [], callbacks: [], fixtureWrites: 0,
-    commands: [], index: 0, sdkExited: false, returned: false };
+    commands: [], index: 0, sdkExited: false, returned: false,
+    activePhase: phase === 'offline-resume' ? 'resume' : phase };
+  /** Chọn chuỗi checkpoint gắn với packet hiện hành, để mỗi process khởi động lại từ stage đầu. */
+  function currentPhaseStages() {
+    if (state.activePhase === 'offline-login') return offlineOutboxStages;
+    if (state.activePhase === 'offline-expired') return offlineExpiredStages;
+    if (state.activePhase === 'resume') return offlineResumeStages;
+    return stages;
+  }
+  /** Xác định phase cần gate thời gian offline mà không làm thay clock liên tiến trình. */
+  function currentPhaseIsOffline() {
+    return state.activePhase === 'offline-login' || state.activePhase === 'offline-expired' || state.activePhase === 'resume';
+  }
   const external = new AbortController();
   if (mode === 'external-pre-spawn') external.abort();
   const child = new EventEmitter();
@@ -65,24 +83,26 @@ export function createFakeMembershipRuntime(mode, phase = 'membership-stale') {
       let result;
       if (extension.endsWith('.fixture')) {
         const packet = JSON.parse(request.params.params.packet);
+        if (packet.version === 1 && packet.phase === 'resume') state.activePhase = 'resume';
         result = { accepted: packet.version === 1 && state.fixtureWrites++ === 0 };
         if (mode === 'channel-late') state.clock += 25_000;
       } else if (extension.endsWith('.checkpoint')) {
         const params = request.params.params;
-        const expected = phaseStages[state.index];
+        const expected = currentPhaseStages()[state.index];
         const accepted = Object.keys(params).length === 1 && params.stage === expected;
         if (accepted) { state.accepted.push(expected); state.index++; }
         result = { accepted };
         if (mode === 'ack-total' && state.reportedStage === 'membership-picker') state.clock += 6000;
       } else {
-        result = { phase, status: 'WAITING', nativeProcessId: 8123,
-          ...(offline && state.fixtureWrites < 2 ? { preArmRemainingMilliseconds: 240_000 } : {}) };
+        result = { phase: state.activePhase, status: 'WAITING', nativeProcessId: 8123,
+          ...(['offline-login', 'offline-expired'].includes(state.activePhase) && state.fixtureWrites < 2
+            ? { preArmRemainingMilliseconds: 240_000 } : {}) };
         if (state.fixtureWrites >= 2) {
-          if (state.index === phaseStages.length || mode === 'early-pass') result.status = 'PASS';
+          if (state.index === currentPhaseStages().length || mode === 'early-pass') result.status = 'PASS';
           else {
-            let stage = phaseStages[state.index];
-            if (mode === 'stage-order') stage = phaseStages[1];
-            const remaining = offline ? offlineCaps[stage] : stage === 'membership-picker' ? 210_000 : 5000;
+            let stage = currentPhaseStages()[state.index];
+            if (mode === 'stage-order') stage = currentPhaseStages()[1];
+            const remaining = currentPhaseIsOffline() ? offlineCaps[stage] : stage === 'membership-picker' ? 210_000 : 5000;
             result.checkpoint = stage; state.reportedStage = stage;
             result.checkpointRemainingMilliseconds = remaining;
             if (mode === 'oversized' || (mode === 'picker-oversized' && stage === 'membership-picker')) result.checkpointRemainingMilliseconds = remaining + 1;
@@ -93,7 +113,7 @@ export function createFakeMembershipRuntime(mode, phase = 'membership-stale') {
           if (mode === 'foreign-phase') result.phase = 'full';
           if (mode === 'foreign-pid' || (mode === 'final-foreign-pid' && result.status === 'PASS')) result.nativeProcessId = 8124;
           if (mode === 'final-foreign-phase' && result.status === 'PASS') result.phase = 'full';
-          if (mode === 'phase-late') state.clock += offline ? 675_000 : 420_000;
+          if (mode === 'phase-late') state.clock += currentPhaseIsOffline() ? 675_000 : 420_000;
         }
         if (mode === 'channel-late') state.clock += 25_000;
       }
@@ -144,6 +164,17 @@ export function createFakeMembershipRuntime(mode, phase = 'membership-stale') {
        */
       (command, arguments_, options) => {
         state.spawned++;
+        const configuredPhase = arguments_.find(
+          /** Param: argument — fixed Flutter define carrying only the current integration phase. */
+          (argument) => argument.startsWith('--dart-define=AUTH_E2E_PHASE='),
+        )?.slice('--dart-define=AUTH_E2E_PHASE='.length);
+        assert.ok(configuredPhase);
+        if (configuredPhase !== state.activePhase) {
+          state.activePhase = configuredPhase;
+          state.fixtureWrites = 0;
+          state.index = 0;
+          state.reportedStage = undefined;
+        }
         assert.ok(command.endsWith('dart.exe'));
         assert.equal(options.shell, false);
         assert.ok(!arguments_.join(' ').includes(password));
@@ -168,6 +199,7 @@ export function createFakeMembershipRuntime(mode, phase = 'membership-stale') {
 /** Kiểm async consumer thật và mọi failure vẫn own pending callback sau SDK cleanup, chỉ host fake. */
 async function main() {
   assert.deepEqual(nativePhaseBudget('membership-stale'), { testMilliseconds: 420_000, reserveMilliseconds: 895_000 });
+  assert.deepEqual(nativePhaseBudget('offline-expired'), { testMilliseconds: 675_000, reserveMilliseconds: 1_150_000 });
   console.log('MEMBERSHIP_PHASE_BUDGET_PASS');
   for (const mode of ['success', 'insufficient', 'slow-pid-admission', 'startup-late', 'channel-late', 'stage-order',
     'oversized', 'picker-oversized', 'picker-send-anchor', 'missing-remaining', 'status-late', 'foreign-phase', 'foreign-pid', 'final-foreign-pid', 'final-foreign-phase', 'phase-late',
@@ -283,6 +315,33 @@ async function main() {
       }
     }
     console.log('MEMBERSHIP_CONSUMER_' + mode.toUpperCase().replaceAll('-', '_') + '_PASS');
+  }
+
+  {
+    const { state, runtime } = createFakeMembershipRuntime('success', 'offline-expired');
+    runtime.beforePacket =
+      /** Offline phase phải hoàn tất owned preparation trước token packet và Android main. */
+      async (admission) => { admission.assertActive(); };
+    const expiredToken = 'a'.repeat(64);
+    const expiredPacket = { version: 1, phase: 'offline-expired', password,
+      emails: stages.slice(0, 5).map(
+        /** Param: stage/index — chỉ dựng email synthetic theo cùng namespace của runner. */
+        (stage, index) => 'probe-' + runId + '-' + index + '@example.invalid'),
+      expiredSessionToken: expiredToken, expiredSessionId: 'bbbbbbbb-2222-4222-8222-222222222222',
+      expiredSessionExpiresAt: new Date(Date.now() - 3_600_000).toISOString() };
+    const result = await runNativePhase(expiredPacket, 'PUBLIC_CERTIFICATE',
+      /** Param: pid/admission — completion fake sau exact checkpoint và SDK exit. */
+      async (pid, admission) => { assert.equal(pid, 8123); admission.assertActive(); },
+      [password, expiredToken],
+      /** Param: stage/admission — host test chỉ ACK chuỗi expiry cố định đã được profile pin. */
+      async (stage, admission) => { state.callbacks.push(stage); admission.assertActive(); },
+      runtime);
+    assert.equal(result, 8123);
+    assert.deepEqual(state.accepted, ['offline-expired-offline', 'offline-expired-ready',
+      'offline-expired-persisted']);
+    assert.deepEqual(state.callbacks, state.accepted);
+    assert.equal(containsNativeSecret('prefix' + expiredToken + 'suffix', [password, expiredToken]), true);
+    console.log('OFFLINE_EXPIRED_CONSUMER_CHECKPOINTS_PASS');
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

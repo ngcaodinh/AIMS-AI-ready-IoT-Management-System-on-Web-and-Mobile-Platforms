@@ -1,8 +1,8 @@
 //! Session bootstrap và picker dùng current authority; không sử dụng profile/cursor như capability.
 
 use super::{
-    HttpError, HttpState, allowed_fields, no_store, read_json, security, session_headers,
-    string_field,
+    HttpError, HttpState, allowed_fields, no_store, read_json, require_empty_body, security,
+    session_headers, string_field,
 };
 use axum::{
     Json, Router,
@@ -49,7 +49,7 @@ async fn protected_unavailable(
 }
 
 /** Resolve credential source trước current session admission; discovery chỉ dành /me thiếu hẳn header. */
-async fn inspect(
+pub(super) async fn inspect(
     state: &HttpState,
     headers: &HeaderMap,
     discovery: bool,
@@ -90,7 +90,7 @@ async fn me(State(state): State<HttpState>, headers: HeaderMap) -> Result<Respon
 }
 
 /** Xác minh origin và tag CSRF constant-time chỉ cho ambient cookie, trước mọi mutation. */
-fn check_mutation(
+pub(super) fn check_mutation(
     state: &HttpState,
     headers: &HeaderMap,
     transport: ClientType,
@@ -111,29 +111,13 @@ fn check_mutation(
     Ok(())
 }
 
-/** Logout chỉ clear đúng cookie sau revoke+audit commit xác nhận; expired/revoked vẫn idempotent. */
+/** Logout clear đúng cookie và đóng socket local chỉ sau revoke+audit commit; expired/revoked vẫn idempotent. */
 async fn logout(
     State(state): State<HttpState>,
     headers: HeaderMap,
     request: Request,
 ) -> Result<Response, HttpError> {
-    let media_type = security::single_header(&headers, "content-type")?.map(str::to_owned);
-    let bytes = axum::body::to_bytes(request.into_body(), 65_536)
-        .await
-        .map_err(|_| HttpError::code(413, "VALIDATION_ERROR"))?;
-    if !bytes.is_empty() {
-        if !media_type.as_deref().is_some_and(|value| {
-            value
-                .split(';')
-                .next()
-                .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"))
-        }) {
-            return Err(HttpError::code(415, "VALIDATION_ERROR"));
-        }
-        serde_json::from_slice::<super::input::StrictValue>(&bytes)
-            .map_err(|_| HttpError::code(400, "VALIDATION_ERROR"))?;
-        return Err(HttpError::code(422, "VALIDATION_ERROR"));
-    }
+    require_empty_body(request).await?;
     if !security::has_credential(&headers)? {
         security::check_read_origin(&headers, &state.origin)?;
         let mut response = StatusCode::NO_CONTENT.into_response();
@@ -148,6 +132,7 @@ async fn logout(
         .logout(&proof, correlation_id)
         .await
         .map_err(|error| HttpError::from(error).correlated(correlation_id))?;
+    state.realtime.close_session(session.session_id).await;
     Ok(mutation_success(transport))
 }
 

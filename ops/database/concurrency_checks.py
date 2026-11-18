@@ -7,6 +7,8 @@ import threading
 import time
 from uuid import uuid4
 
+import verify_database as lab
+
 
 class SqlSession:
     """Giữ một psql connection để kiểm snapshot và thời điểm commit giữa hai transaction."""
@@ -18,12 +20,12 @@ class SqlSession:
         Param: role — migrator lab, không phải credential.
         Param: database — DB test mới của lần chạy.
         Param: isolation — READ COMMITTED hoặc REPEATABLE READ được test.
-        Side effects: mở psql và transaction riêng; không đọc environment hoặc app data thật.
+        Side effects: mở psql và transaction riêng qua config Docker cô lập; không đọc environment hoặc app data thật.
         """
         if isolation not in ("READ COMMITTED", "REPEATABLE READ"):
             raise ValueError("Unexpected test isolation")
         self.process = subprocess.Popen(
-            ["docker", "exec", "-i", container, "psql", "-X", "-q", "-A", "-t", "-w", "-v", "ON_ERROR_STOP=1", "-h", "/tmp", "-U", role, "-d", database],
+            lab.docker_argv("exec", "-i", container, "psql", "-X", "-q", "-A", "-t", "-w", "-v", "ON_ERROR_STOP=1", "-h", "/tmp", "-U", role, "-d", database),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", bufsize=1,
         )

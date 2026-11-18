@@ -9,14 +9,14 @@ import re
 import sys
 import threading
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import run_local as launcher
 from native_membership_operation import NativeMembershipOperation
 
 
-# Cùng một SELECT cho positive diagnostic và cleanup: UUID/digest chỉ qua quoted psql bindings,
-# bytea giải mã hex đúng schema; không đọc key/token, không mở selector hoặc mutation từ journal.
+# Cùng SELECT cho cleanup: UUID/digest chỉ qua bound psql variables; từng bảng nghiệp vụ dùng user UUID của fixture,
+# outbox consumption join theo event đã scope; không đọc key/token hoặc cho journal quyết định selector.
 CLEANUP_READBACK_SQL = """WITH owned AS (
 SELECT unnest(string_to_array(:'auth_fault_correlations', ',')::uuid[]) AS user_id),
 owned_buckets AS (
@@ -31,7 +31,15 @@ SELECT json_build_object(
 'memberships',(SELECT count(*) FROM memberships WHERE user_id IN (SELECT user_id FROM owned)),
 'auditActor',(SELECT count(*) FROM audit_events WHERE actor_user_id IN (SELECT user_id FROM owned)),
 'limiterBuckets',(SELECT count(*) FROM login_attempt_buckets
-WHERE email_digest IN (SELECT email_digest FROM owned_buckets)));"""
+WHERE email_digest IN (SELECT email_digest FROM owned_buckets)),
+'pushInstallations',(SELECT count(*) FROM push_installations WHERE active_user_id IN (SELECT user_id FROM owned)),
+'websocketTickets',(SELECT count(*) FROM websocket_tickets WHERE user_id IN (SELECT user_id FROM owned)),
+'outboxEvents',(SELECT count(*) FROM outbox_events WHERE event_type='SESSION_REVOKED'
+AND payload->>'userId' IN (SELECT user_id::text FROM owned)),
+'outboxConsumptions',(SELECT count(*) FROM outbox_consumptions WHERE outbox_event_id IN
+(SELECT outbox_event_id FROM outbox_events WHERE event_type='SESSION_REVOKED'
+AND payload->>'userId' IN (SELECT user_id::text FROM owned))),
+'globalIdempotencyRecords',(SELECT count(*) FROM global_idempotency_records WHERE user_id IN (SELECT user_id FROM owned)));"""
 
 
 def build_cleanup_scope(config):
@@ -65,18 +73,32 @@ def build_cleanup_scope(config):
 
 
 def parse_packet(raw):
-    """Kiểm packet private trước mọi DB I/O; chỉ cho mật khẩu synthetic CSPRNG đã thống nhất.
+    """Kiểm packet private trước mọi DB I/O; chỉ nhận credential synthetic có schema theo scenario.
 
     Input
     Param: raw — JSON bytes tối đa4KiB từ pipe của owned runner, không argv/env/file.
-    Output: password trong RAM; không trả hoặc log packet qua stdout.
+    Output: password trong RAM; token expired chỉ được fixture giữ nếu profile offline đã bind.
     Errors: ValueError cho encoding/schema/password sai, không kèm dữ liệu gốc.
     """
     try:
         if len(raw) > 4096:
             raise ValueError()
         packet = json.loads(raw)
-        if not isinstance(packet, dict) or set(packet) not in ({'version', 'password'}, {'version', 'password', 'scenario'}) or ('scenario' in packet and packet['scenario'] not in ('password', 'rate-limit', 'membership-stale', 'offline-login')) or type(packet['version']) is not int or packet['version'] != 1 or not isinstance(packet['password'], str) or not re.fullmatch(r'Aa1[0-9a-f]{32}', packet['password']):
+        allowed = ({'version', 'password'}, {'version', 'password', 'scenario'},
+                   {'version', 'password', 'scenario', 'expiredSessionToken'})
+        if (not isinstance(packet, dict) or set(packet) not in allowed
+                or ('scenario' in packet and packet['scenario'] not in
+                    ('password', 'rate-limit', 'membership-stale', 'offline-login', 'offline-expired'))
+                or type(packet['version']) is not int or packet['version'] != 1
+                or not isinstance(packet['password'], str)
+                or not re.fullmatch(r'Aa1[0-9a-f]{32}', packet['password'])):
+            raise ValueError()
+        # Bearer chỉ được nhận ở profile expired vì chỉ profile này cần kiểm chứng token đã seed.
+        if 'expiredSessionToken' in packet and (packet.get('scenario') != 'offline-expired'
+                or not isinstance(packet['expiredSessionToken'], str)
+                or not re.fullmatch(r'[0-9a-f]{64}', packet['expiredSessionToken'])):
+            raise ValueError()
+        if packet.get('scenario') == 'offline-expired' and 'expiredSessionToken' not in packet:
             raise ValueError()
         return packet['password']
     except (ValueError, TypeError, UnicodeError):
@@ -86,22 +108,32 @@ def parse_packet(raw):
 class NativeFixtureControl:
     """Giữ STOP xuyên startup và chỉ xuất metadata cần cho oracle của đúng child đã sở hữu."""
 
-    def __init__(self, emit, start_backend, scenario='default'):
+    def __init__(self, emit, start_backend, scenario='default', expired_session_token=None):
         """Nhận output và spawn capability từ adapter, không tự tìm hoặc chiếm process khác.
 
         Input
         Param: emit — callback đồng bộ chỉ nhận public metadata/fixed enum.
         Param: start_backend — hàm launcher gốc có guard và startup cleanup.
         Param: scenario — default20/password35/rate-limit40 hoặc membership-stale20phút; membership neo trước spawn, rate sau ARM.
+        Param: expired_session_token — bearer synthetic chỉ profile offline; chỉ digest được bind vào câu INSERT.
         """
-        if scenario not in ('default', 'password', 'rate-limit', 'membership-stale', 'offline-login'):
+        if scenario not in ('default', 'password', 'rate-limit', 'membership-stale', 'offline-login', 'offline-expired'):
             raise ValueError('INVALID_NATIVE_LAB_SCENARIO')
+        # Chặn đường seed ngoài profile expired để offline-login không thể tạo session phụ ngoài kịch bản.
+        if expired_session_token is not None and (scenario != 'offline-expired'
+                or not isinstance(expired_session_token, str)
+                or not re.fullmatch(r'[0-9a-f]{64}', expired_session_token)):
+            raise ValueError('INVALID_NATIVE_LAB_EXPIRED_SESSION')
+        if scenario == 'offline-expired' and expired_session_token is None:
+            raise ValueError('INVALID_NATIVE_LAB_EXPIRED_SESSION')
         self.scenario = scenario
-        self.work_seconds = {'default': 1200, 'password': 2100, 'rate-limit': 2400, 'membership-stale': 1200, 'offline-login': 1200}[scenario]
+        self.expired_session_token = expired_session_token
+        self.work_seconds = {'default': 1200, 'password': 2100, 'rate-limit': 2400, 'membership-stale': 1200,
+                             'offline-login': 1200, 'offline-expired': 1200}[scenario]
         # Rate startup15phút gồm READY transport/chờ ARM; event chỉ đánh thức, không mở lại deadline khi thread trễ.
         self.startup_deadline = time.monotonic() + 900 if scenario == 'rate-limit' else None
         # Membership neo20phút trước launcher build/spawn, không cộng lại sau READY.
-        self.work_deadline = time.monotonic() + 1200 if scenario in ('membership-stale', 'offline-login') else None
+        self.work_deadline = time.monotonic() + 1200 if scenario in ('membership-stale', 'offline-login', 'offline-expired') else None
         self.state_changed = threading.Event()
         self.emit = emit
         self.start_backend = start_backend
@@ -124,7 +156,7 @@ class NativeFixtureControl:
         Param: config — config launcher sinh trong RAM, gồm secrets không được đưa ra output.
         Param: pool_budget — giữ signature launcher; adapter chỉ gọi normal run, không bật fault mode.
         Output: owned backend handle; pendingSTOP không được raise trước khi caller ghi nhận handle.
-        Errors: config malformed bị từ chối trước spawn; projection chỉ chốt sau capability trả child.
+        Errors: config/seed malformed bị từ chối; session expired được INSERT với TTL24h nguyên vẹn trước READY.
         """
         cleanup_scope = build_cleanup_scope(config)
         child = self.start_backend(config, pool_budget)
@@ -137,7 +169,10 @@ class NativeFixtureControl:
             pending_stop = self.stopping.is_set()
             if not pending_stop:
                 try:
-                    self.emit({'kind': 'READY', 'runId': config['runId'], 'userIds': config['userIds'], 'emails': config['emails']})
+                    ready = {'kind': 'READY', 'runId': config['runId'], 'userIds': config['userIds'], 'emails': config['emails']}
+                    if self.expired_session_token is not None:
+                        ready.update(self._seed_expired_session())
+                    self.emit(ready)
                     self.ready.set()
                 except BaseException:
                     # Child đã spawn nhưng run chưa append handle; lỗi output phải STOP và vẫn return child.
@@ -146,6 +181,68 @@ class NativeFixtureControl:
         if pending_stop:
             self.stop()
         return child
+
+    def _seed_expired_session(self):
+        """Chèn một bearer synthetic đã hết hạn với issued_at/expires_at bất biến theo constraint hiện hành.
+
+        Output: session UUID và expiry ISO UTC từ PostgreSQL, không trả token hoặc digest.
+        Errors: fixed fixture error nếu INSERT không trả đúng một row thuộc user/run đang sở hữu.
+        Side effects: đúng một INSERT trong DB lab, trước READY và dưới role hiện hành.
+        """
+        token = self.expired_session_token
+        if token is None or self.scenario != 'offline-expired' or self.config is None:
+            raise RuntimeError('NATIVE_LAB_EXPIRED_SESSION_UNAVAILABLE')
+        session_id = str(uuid4())
+        context_id = str(uuid4())
+        token_digest = hashlib.sha256(token.encode('ascii')).hexdigest()
+        statement = """BEGIN;
+SET LOCAL statement_timeout='20s';
+SET LOCAL lock_timeout='5s';
+WITH fixture_scope AS (
+ SELECT string_to_array(:'auth_fault_correlations',',')::uuid[] AS ids
+), expiry_clock AS (
+ SELECT date_trunc('milliseconds', transaction_timestamp())-interval '1 hour' AS expiry
+), inserted AS (
+ INSERT INTO sessions(session_id,user_id,token_digest,auth_context_id,limited,client_type,issued_at,expires_at)
+ SELECT :'auth_fault_expired_session_id'::uuid,owned.user_id,
+        decode(:'auth_fault_token_digest','hex'),:'auth_fault_expired_context_id'::uuid,
+        false,'ANDROID',expiry_clock.expiry-interval '24 hours',expiry_clock.expiry
+ FROM users owned CROSS JOIN expiry_clock CROSS JOIN fixture_scope
+ WHERE owned.user_id=:'auth_fault_user_id'::uuid
+   AND owned.user_id=fixture_scope.ids[2]
+   AND owned.account_status='ACTIVE'
+   AND owned.activation_provenance='AUTH_HTTP_LAB:'||fixture_scope.ids[1]::text
+   AND owned.email_normalized='probe-'||fixture_scope.ids[1]::text||'-0@example.invalid'
+ RETURNING session_id,expires_at
+)
+SELECT json_build_object('sessionId',session_id::text,
+ 'expiresAt',to_char(expires_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')) FROM inserted;
+COMMIT;"""
+        try:
+            result = launcher.lab.sql(statement, database=launcher.DATABASE, check=False, variables=(
+                ('auth_fault_expired_session_id', session_id),
+                ('auth_fault_expired_context_id', context_id),
+                ('auth_fault_token_digest', token_digest),
+                ('auth_fault_user_id', str(UUID(self.config['userIds'][0]))),
+                ('auth_fault_correlations', ','.join(self._membership_scope)),
+            ))
+            if (type(result.returncode) is not int or result.returncode != 0
+                    or not isinstance(result.stdout, str) or len(result.stdout) > 1024):
+                raise ValueError()
+            receipt = json.loads(result.stdout.strip())
+            expiry = receipt.get('expiresAt') if isinstance(receipt, dict) else None
+            if (not isinstance(receipt, dict) or set(receipt) != {'sessionId', 'expiresAt'}
+                    or str(UUID(receipt['sessionId'])) != receipt['sessionId']
+                    or receipt['sessionId'] != session_id
+                    or not isinstance(expiry, str)
+                    or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z', expiry)):
+                raise ValueError()
+            return {'expiredSessionId': session_id, 'expiredSessionExpiresAt': expiry}
+        except (ValueError, TypeError, KeyError, AttributeError, OSError,
+                launcher.subprocess.SubprocessError):
+            raise RuntimeError('NATIVE_LAB_EXPIRED_SESSION_UNAVAILABLE') from None
+        finally:
+            self.expired_session_token = None
 
     def stop(self):
         """Giữ intent STOP trước READY và dừng đúng owned child, không coi timeout là terminal.
@@ -179,7 +276,7 @@ class NativeFixtureControl:
 
         Input
         Param: scope — full0/disabled1/limited2/empty3; UUID chỉ lấy config owned sau READY.
-        Output: tối đa16 UUID/revoked boolean, không bearer/token verifier hoặc profile người dùng thật.
+        Output: tối đa16 phiên ANDROID/WEB dạng UUID/revoked, không bearer/token verifier hoặc profile người dùng thật.
         Errors: ValueError cho scope khác allowlist trước SQL; chưa ready/đang STOP hoặc DB/schema lỗi phải FAIL.
         """
         account_indexes = {'full': 0, 'disabled': 1, 'limited': 2, 'empty': 3}
@@ -187,14 +284,14 @@ class NativeFixtureControl:
             raise ValueError('INVALID_NATIVE_LAB_SCOPE')
         with self.lock:
             if (not self.ready.is_set() or self.stopping.is_set() or self.process.poll() is not None
-                    or (self.scenario in ('rate-limit', 'membership-stale', 'offline-login') and
+                    or (self.scenario in ('rate-limit', 'membership-stale', 'offline-login', 'offline-expired') and
                         (self.work_deadline is None or time.monotonic() >= self.work_deadline))):
                 raise RuntimeError('NATIVE_LAB_SNAPSHOT_UNAVAILABLE')
             user_id = str(UUID(self.config['userIds'][account_indexes[scope]]))
-            # UUID qua psql quoted variable đã whitelist; chỉ projection public, không SELECT token_digest.
+            # Cùng fixture phải đọc được S1 Web và S2 Android; UUID bind an toàn, chỉ projection public, không đọc token_digest.
             statement = """SELECT coalesce(json_agg(row), '[]'::json) FROM (
 SELECT session_id AS "sessionId", (revoked_at IS NOT NULL) AS revoked
-FROM sessions WHERE user_id=:'auth_fault_user_id'::uuid AND client_type='ANDROID'
+FROM sessions WHERE user_id=:'auth_fault_user_id'::uuid AND client_type IN ('ANDROID','WEB')
 ORDER BY session_id LIMIT 17) row;"""
             rows = json.loads(launcher.lab.sql(statement, database=launcher.DATABASE, variables=(('auth_fault_user_id', user_id),)).stdout.strip())
             if not isinstance(rows, list) or len(rows) > 16:
@@ -212,7 +309,7 @@ ORDER BY session_id LIMIT 17) row;"""
         """
         if (not self.ready.is_set() or self.stopping.is_set() or self.process is None
                 or self.process.poll() is not None or self._membership_scope is None
-                or (self.scenario in ('rate-limit', 'membership-stale', 'offline-login') and
+                or (self.scenario in ('rate-limit', 'membership-stale', 'offline-login', 'offline-expired') and
                     (self.work_deadline is None or time.monotonic() >= self.work_deadline))):
             raise RuntimeError('NATIVE_LAB_MEMBERSHIP_UNAVAILABLE')
 
@@ -305,7 +402,7 @@ COMMIT;"""
         """
         with self.lock:
             try:
-                offline = self.scenario == 'offline-login'
+                offline = self.scenario in ('offline-login', 'offline-expired')
                 if not offline and (self.scenario != 'membership-stale' or self._membership_target is None):
                     raise RuntimeError()
                 self._require_membership_available()
@@ -454,7 +551,7 @@ audit_rows AS (""")
                     self.stop()
                     return
                 self.state_changed.wait(remaining)
-        if self.scenario in ('membership-stale', 'offline-login'):
+        if self.scenario in ('membership-stale', 'offline-login', 'offline-expired'):
             remaining = max(0, self.work_deadline - time.monotonic())
             if not self.ready.wait(min(900, remaining)):
                 self.stop()
@@ -488,7 +585,7 @@ audit_rows AS (""")
 
         Input
         Param: input_stream — private raw stdin do main sở hữu, command tối đa64bytes.
-        Side effects: SNAPSHOT/target metadata, membership-stale thêm SUSPEND_B/session evidence; STOP/EOF/lỗi drain owner.
+        Side effects: SNAPSHOT/membership evidence và STOP; EOF/lỗi drain owner.
         """
         try:
             while not self.stopping.is_set():
@@ -496,9 +593,9 @@ audit_rows AS (""")
                 scopes = {b'SNAPSHOT\n': 'full', b'SNAPSHOT_DISABLED\n': 'disabled', b'SNAPSHOT_LIMITED\n': 'limited', b'SNAPSHOT_EMPTY\n': 'empty'}
                 if command == b'ARM\n' and self.scenario == 'rate-limit':
                     self.arm()
-                elif command == b'MEMBERSHIP_TARGET\n' and self.scenario != 'offline-login':
+                elif command == b'MEMBERSHIP_TARGET\n' and self.scenario not in ('offline-login', 'offline-expired'):
                     self.emit({'kind': 'MEMBERSHIP_TARGET', 'target': self.membership_target()})
-                elif command == b'MEMBERSHIP_SESSION_EVIDENCE\n' and self.scenario in ('membership-stale', 'offline-login'):
+                elif command == b'MEMBERSHIP_SESSION_EVIDENCE\n' and self.scenario in ('membership-stale', 'offline-login', 'offline-expired'):
                     self.emit({'kind': 'MEMBERSHIP_SESSION_EVIDENCE', **self.membership_session_evidence()})
                 elif command == b'SUSPEND_B\n' and self.scenario == 'membership-stale':
                     self.emit({'kind': 'MEMBERSHIP_SUSPENDED', 'target': self.suspend_b()})
@@ -519,7 +616,7 @@ audit_rows AS (""")
     def verify_cleanup(self):
         """Readback sau launcher finally để STOPPED chứng minh role/HBA/graph/bucket owned đã dọn.
 
-        Output: đúng8count public của5fixture users và6bucket; mọi count phải integer0 trước ACK.
+        Output: đúng13count public của5fixture users và6bucket; mọi count phải integer0 trước ACK.
         Errors: thiếu projection/child terminal, SQL/schema hoặc dữ liệu còn lại chỉ trả fixed failure.
         """
         try:
@@ -534,7 +631,8 @@ audit_rows AS (""")
             if type(result.returncode) is not int or result.returncode != 0:
                 raise RuntimeError()
             counts = json.loads(result.stdout.strip())
-            expected = {'role', 'hba', 'users', 'sessions', 'workspaces', 'memberships', 'auditActor', 'limiterBuckets'}
+            expected = {'role', 'hba', 'users', 'sessions', 'workspaces', 'memberships', 'auditActor', 'limiterBuckets',
+                        'pushInstallations', 'websocketTickets', 'outboxEvents', 'outboxConsumptions', 'globalIdempotencyRecords'}
             if not isinstance(counts, dict) or set(counts) != expected or any(type(value) is not int or value != 0 for value in counts.values()):
                 raise RuntimeError()
             return counts
@@ -568,7 +666,12 @@ def main():
     input_stream = sys.stdin.buffer.raw
     raw_packet = input_stream.readline(4097)
     password = parse_packet(raw_packet)
-    scenario = json.loads(raw_packet).get('scenario', 'default')
+    packet = json.loads(raw_packet)
+    scenario = packet.get('scenario', 'default')
+    expired_session_token = packet.get('expiredSessionToken')
+    if 'expiredSessionToken' in packet:
+        packet['expiredSessionToken'] = ''
+    packet = None
     raw_packet = b''
     output = sys.stdout
     output_lock = threading.Lock()
@@ -584,7 +687,9 @@ def main():
             output.write(json.dumps(value) + '\n')
             output.flush()
 
-    control = NativeFixtureControl(emit, launcher.start_lab, scenario=scenario)
+    control = NativeFixtureControl(emit, launcher.start_lab, scenario=scenario,
+                                   expired_session_token=expired_session_token)
+    expired_session_token = ''
 
     def fixture_password(prompt):
         """Cấp fixture password từ packet private cho getpass của launcher, không hỏi terminal.
@@ -603,7 +708,7 @@ def main():
         threading.Thread(target=control.read_commands, args=(input_stream,), daemon=True).start()
         threading.Thread(target=control.watchdog, daemon=True).start()
         with contextlib.redirect_stdout(DiscardOutput()):
-            if scenario in ('membership-stale', 'offline-login'):
+            if scenario in ('membership-stale', 'offline-login', 'offline-expired'):
                 # Registry cố định trước run để cả child chết sớm vẫn drain control trước graph cleanup.
                 launcher.run(False, 3000, operation_holders=[control])
             else:
@@ -612,7 +717,7 @@ def main():
     finally:
         try:
             # Run có thể lỗi trước registry-drain của launcher, membership vẫn phải giữ trách nhiệm owned operation.
-            if scenario in ('membership-stale', 'offline-login'):
+            if scenario in ('membership-stale', 'offline-login', 'offline-expired'):
                 control.stop()
             else:
                 control.stopping.set()
@@ -620,6 +725,7 @@ def main():
             launcher.start_lab = original_start
             launcher.getpass.getpass = original_getpass
             password = ''
+            control.expired_session_token = None
 
 
 if __name__ == '__main__':

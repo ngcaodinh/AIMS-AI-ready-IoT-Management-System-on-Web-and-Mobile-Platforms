@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { assertNativePid } from './run_native_e2e.mjs';
+import { assertNativePid, nativePidQueryFailureCategory } from './run_native_e2e.mjs';
 
 /**
  * Tạo OS boundary giả để kiểm receipt PID, không gọi ADB hoặc tác động device.
@@ -35,6 +35,15 @@ function main() {
   assert.throws(
     /** Exit1 không receipt vẫn bị từ chối kể cả stderr không có nội dung. */
     () => assertNativePid(null, fakeCommand({ status: 1, stdout: '', stderr: '' })));
+  const spawnFailure = Object.assign(new Error('private OS path'), { code: 'ENOENT' });
+  assert.equal(nativePidQueryFailureCategory({ error: spawnFailure, status: null, stdout: '', stderr: 'private output' }), 'SPAWN_ENOENT');
+  assert.equal(nativePidQueryFailureCategory({ status: 1, stdout: '', stderr: 'private device output' }), 'COMMAND_FAILED_STDERR_PRESENT');
+  assert.equal(nativePidQueryFailureCategory({ status: 1, stdout: '', stderr: 'error: device offline' }), 'DEVICE_OFFLINE');
+  assert.equal(nativePidQueryFailureCategory({ status: 1, stdout: '', stderr: "error: device 'emulator-5554' not found" }), 'DEVICE_NOT_FOUND');
+  assert.equal(nativePidQueryFailureCategory({ status: 1, stdout: '', stderr: 'error: device unauthorized' }), 'DEVICE_UNAUTHORIZED');
+  assert.equal(nativePidQueryFailureCategory({ status: 1, stdout: '', stderr: 'no devices/emulators found' }), 'DEVICE_UNAVAILABLE');
+  assert.equal(nativePidQueryFailureCategory({ status: 1, stdout: '', stderr: 'cannot connect to daemon' }), 'ADB_SERVER_UNAVAILABLE');
+  console.log('NATIVE_PID_QUERY_FAILURE_CLASSIFICATION_SECRET_SAFE_PASS');
   assert.doesNotThrow(
     /** Chỉ shell thành công với literal absent mới cho phép phase tiếp theo. */
     () => assertNativePid(null, fakeCommand({ status: 0, stdout: 'NATIVE_PACKAGE_ABSENT\r\n', stderr: '' })));

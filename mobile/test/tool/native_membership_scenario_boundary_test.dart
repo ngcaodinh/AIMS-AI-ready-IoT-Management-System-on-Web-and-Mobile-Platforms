@@ -170,23 +170,45 @@ final class MembershipApi implements AppAuthApi, AppWorkspaceApi {
 
 /// Store RAM synthetic giúp repository thật kiểm write/delete ACK, không secure-storage evidence.
 final class MembershipStore implements SessionTokenStore {
-  String? value;
+  StoredSessionCredential? session;
+  PendingLogoutIntent? logoutIntent;
+  /// Đọc bearer synthetic để test khẳng định local key đã clear sau logout.
+  String? get value => session?.token;
 
   /// Output: giá trị test hiện hành, bootstrap bắt đầu null.
   @override
-  Future<String?> read() async => value;
+  Future<StoredSessionCredential?> readSession() async => session;
 
   /// Input
-  /// Param: token — candidate synthetic được repository admission sau API success.
+  /// Param: value — bearer/expiry candidate synthetic sau API success.
   @override
-  Future<void> write(String token) async {
-    value = token;
+  Future<void> writeSession(StoredSessionCredential value) async {
+    session = value;
   }
 
   /// Xóa own candidate test sau logout ACK, không tác động key native.
   @override
-  Future<void> delete() async {
-    value = null;
+  Future<void> deleteSession() async {
+    session = null;
+  }
+
+  /// Trả tombstone fixture để restore không mở profile sau logout pending.
+  /// Output: record synthetic hoặc null nếu chưa phát logout.
+  @override
+  Future<PendingLogoutIntent?> readLogoutIntent() async => logoutIntent;
+
+  /// Ghi intent synthetic theo thứ tự logout repository.
+  /// Input
+  /// Param: intent — bearer đầy quyền chỉ được repository dùng trong worker logout và retry metadata của scenario.
+  @override
+  Future<void> writeLogoutIntent(PendingLogoutIntent intent) async {
+    logoutIntent = intent;
+  }
+
+  /// Xóa tombstone fixture sau terminal response.
+  @override
+  Future<void> deleteLogoutIntent() async {
+    logoutIntent = null;
   }
 }
 

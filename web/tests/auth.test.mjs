@@ -261,20 +261,25 @@ test('login200 followed by me401 stays unknown instead of credential rejection',
 );
 
 test('lost logout followed by terminal me401 permits a new login',
-  /** Credential terminal không còn dùng được giải phóng marker mà không giả đã quan sát commit. */
+  /** SESSION_EXPIRED/REVOKED terminal phải giải phóng marker trước login mới mà không giả đã thấy commit. */
   async () => {
-    const harness = setup([
-      ...fullReplies(), new TypeError('synthetic lost logout'),
-      response({ error: { code: 'SESSION_EXPIRED' } }, 401, {}),
-    ]);
-    await harness.coordinator.restore();
-    await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
-    await harness.coordinator.signOut();
-    await harness.coordinator.restore();
-    await harness.coordinator.discover();
-    assert.equal(harness.getState().phase, 'login');
-    assert.equal(harness.getState().error, 'LOGOUT_TERMINAL');
-    assert.equal(harness.storage.size, 0);
+    for (const code of ['SESSION_EXPIRED', 'SESSION_REVOKED']) {
+      const harness = setup([
+        ...fullReplies(), new TypeError('synthetic lost logout'),
+        response({ error: { code } }, 401, {}), ...fullReplies(),
+      ]);
+      await harness.coordinator.restore();
+      await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+      await harness.coordinator.signOut();
+      await harness.coordinator.restore();
+      await harness.coordinator.discover();
+      assert.equal(harness.getState().phase, 'login', code);
+      assert.equal(harness.getState().error, 'LOGOUT_TERMINAL', code);
+      assert.equal(harness.storage.size, 0, code);
+      await harness.coordinator.signIn('member@example.test', 'synthetic-password-123');
+      assert.equal(harness.getState().phase, 'picker', code);
+      assert.equal(harness.getState().error, '', code);
+    }
   },
 );
 

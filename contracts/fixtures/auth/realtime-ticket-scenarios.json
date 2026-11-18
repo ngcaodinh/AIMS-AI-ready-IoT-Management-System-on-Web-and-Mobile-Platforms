@@ -1,0 +1,95 @@
+{
+  "contractVersion": "0.2.2",
+  "fixtureKind": "synthetic-contract-example",
+  "scenarios": [
+    {
+      "id": "RT-TICKET-WEB-201",
+      "operationId": "createRealtimeTicket",
+      "request": {
+        "clientType": "WEB",
+        "credentialState": "active",
+        "body": null,
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-000000000101",
+          "X-Auth-Context-Id": "00000000-0000-4000-8000-000000000001",
+          "X-CSRF-Token": "<nonfunctional-csrf>"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "ticket": "0000000000000000000000000000000000000000000000000000000000000000",
+          "expiresAt": "2026-11-16T12:00:30Z"
+        }
+      },
+      "expectedEffects": {"singleUse": true, "boundSession": "S1", "boundWorkspace": "W1"},
+      "assertions": ["no-store", "ticket-not-in-url", "ticket-not-logged"]
+    },
+    {
+      "id": "RT-TICKET-SCOPE-MISSING",
+      "operationId": "createRealtimeTicket",
+      "request": {
+        "clientType": "ANDROID",
+        "credentialState": "active",
+        "body": null,
+        "headers": {}
+      },
+      "response": {
+        "status": 422,
+        "headers": {"Cache-Control": "no-store"},
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Thông tin yêu cầu chưa hợp lệ.",
+            "details": {"fieldErrors": [{"path": "/headers/X-Workspace-Id", "code": "REQUIRED"}]},
+            "correlationId": "00000000-0000-4000-8000-000000000901"
+          }
+        }
+      },
+      "expectedEffects": {"ticketRows": 0},
+      "assertions": ["no-side-effect", "no-ticket-in-error"]
+    },
+    {
+      "id": "RT-WS-FIRST-FRAME-VALID",
+      "boundary": "websocket",
+      "given": {"ticketState": "unused-valid", "firstFrameType": "text"},
+      "expected": {
+        "serverFramesBeforeValidation": [],
+        "serverFramesAfterValidation": ["AUTHENTICATED"],
+        "connectionState": "open"
+      },
+      "assertions": ["ticket-not-in-url", "one-time-consume", "no-event-before-validation"]
+    },
+    {
+      "id": "RT-WS-FIRST-FRAME-TIMEOUT",
+      "boundary": "websocket",
+      "given": {"ticketState": "missing", "firstFrameType": null},
+      "expected": {
+        "serverFramesBeforeValidation": [],
+        "closeCode": 1008,
+        "withinSeconds": 5,
+        "closeReason": "Authentication required."
+      },
+      "assertions": ["no-event-before-validation", "generic-close-reason"]
+    },
+    {
+      "id": "RT-WS-TICKET-REPLAY",
+      "boundary": "websocket",
+      "given": {"ticketState": "already-consumed", "firstFrameType": "text"},
+      "expected": {
+        "serverFramesBeforeValidation": [],
+        "closeCode": 1008,
+        "closeReason": "Authentication required."
+      },
+      "assertions": ["one-time-consume", "no-event-before-validation", "generic-close-reason"]
+    },
+    {
+      "id": "RT-WS-SESSION-REVOKED",
+      "boundary": "websocket",
+      "given": {"ticketState": "validated", "sessionState": "revoked"},
+      "expected": {"connectionState": "closed", "closeCode": 1008},
+      "assertions": ["only-bound-session-closed", "no-post-revoke-event"]
+    }
+  ]
+}

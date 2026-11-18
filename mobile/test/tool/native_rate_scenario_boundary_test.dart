@@ -69,20 +69,35 @@ final class RateRejectionApi implements AppAuthApi {
 final class RejectedSessionStore implements SessionTokenStore {
   /// Không có phiên lưu, caller phải hiển thị login.
   @override
-  Future<String?> read() async => null;
+  Future<StoredSessionCredential?> readSession() async => null;
 
   /// Bắt ghi bearer ngoài dự kiến sau rejected login bằng lỗi fixed.
   /// Input
-  /// Param: token — candidate caller thử đưa vào store test.
+  /// Param: session — candidate caller thử đưa vào store test.
   /// Errors
   /// StateError fixed để chặn case âm ghi nhận thành công giả.
   @override
-  Future<void> write(String token) async =>
+  Future<void> writeSession(StoredSessionCredential session) async =>
       throw StateError('UNEXPECTED_TOKEN_WRITE');
 
   /// Clear rỗng ACK ngay vì không có native storage hoặc key trong fixture.
   @override
-  Future<void> delete() async {}
+  Future<void> deleteSession() async {}
+
+  /// Outbox vắng vì test chỉ kiểm rejected login, chưa phát logout intent.
+  @override
+  Future<PendingLogoutIntent?> readLogoutIntent() async => null;
+
+  /// Rejected-login scenario không được ghi revoke outbox.
+  /// Input
+  /// Param: intent — candidate unexpected, không được persist trong fixture này.
+  @override
+  Future<void> writeLogoutIntent(PendingLogoutIntent intent) async =>
+      throw StateError('UNEXPECTED_LOGOUT_INTENT');
+
+  /// Outbox rỗng nên cleanup ACK ngay mà không có native side effect.
+  @override
+  Future<void> deleteLogoutIntent() async {}
 }
 
 /// Chỉ giành gesture CTA đã được case xác nhận để tái hiện tap bị nuốt, vẫn cho input/scroll hoạt động.

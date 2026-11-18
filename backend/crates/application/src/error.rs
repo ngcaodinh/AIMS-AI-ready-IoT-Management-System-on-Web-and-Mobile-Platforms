@@ -9,6 +9,8 @@ pub enum ApplicationError {
     InvalidCredentials,
     RateLimited { retry_after_seconds: i64 },
     SessionInvalid,
+    SessionExpired,
+    SessionRevoked,
     PasswordChangeRequired,
     Forbidden,
     Conflict,
@@ -43,6 +45,8 @@ impl From<AccessFailure> for ApplicationError {
     fn from(failure: AccessFailure) -> Self {
         match failure {
             AccessFailure::SessionInvalid => Self::SessionInvalid,
+            AccessFailure::SessionExpired => Self::SessionExpired,
+            AccessFailure::SessionRevoked => Self::SessionRevoked,
             AccessFailure::ContextMismatch => Self::Conflict,
             AccessFailure::PasswordChangeRequired => Self::PasswordChangeRequired,
             AccessFailure::Forbidden => Self::Forbidden,

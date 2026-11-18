@@ -294,7 +294,7 @@ export class AuthCoordinator {
       if (generation !== this.generation) return;
       // 401 terminal chỉ xác nhận credential hiện tại không còn dùng được, không khẳng định DB commit logout.
       if (originalMarker?.phase === 'logoutPending' && error instanceof AuthError
-        && error.status === 401 && error.code === 'SESSION_EXPIRED') {
+        && error.status === 401 && ['SESSION_EXPIRED', 'SESSION_REVOKED'].includes(error.code)) {
         try {
           if (JSON.stringify(this.readMarker()) !== JSON.stringify(originalMarker)) return;
           this.writeMarker(null);

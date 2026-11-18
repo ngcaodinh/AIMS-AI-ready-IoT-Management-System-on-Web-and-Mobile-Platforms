@@ -19,14 +19,14 @@ void expectWorkspaceProtocolError(Object? value) {
   fail('Malformed workspace page was accepted');
 }
 
-/// Parse cùng response fixtures của contract0.2.1; không giả provider/client đã tương thích runtime.
+/// Parse cùng response fixtures của contract 0.2.2; không giả provider/client đã tương thích runtime.
 void checkWorkspaceConsumer() {
   final fixture = jsonDecode(
     // Chạy Flutter test từ mobile/ như README; chỉ đọc fixture synthetic trong contracts, không environment.
     File('../contracts/fixtures/auth/workspace-scenarios.json')
         .readAsStringSync(),
   ) as Map<String, dynamic>;
-  expect(fixture['contractVersion'], '0.2.1');
+  expect(fixture['contractVersion'], '0.2.2');
   var successFixtures = 0;
   var cases = 0;
   Map<String, dynamic>? full;

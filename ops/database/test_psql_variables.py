@@ -66,15 +66,59 @@ class PsqlVariableTests(unittest.TestCase):
             run_process.assert_not_called()
 
     def test_existing_bindings_retain_their_behavior(self):
-        """Giữ migration/fault variables và semantics tên cũ khi thêm binding lab riêng."""
+        """Giữ variable hiện hữu cùng UUID giới hạn của oracle logout và fixture offline expired."""
         user_id = "aaaaaaaa-1111-4111-8111-111111111111"
+        session_id = "bbbbbbbb-2222-4222-8222-222222222222"
+        context_id = "cccccccc-3333-4333-8333-333333333333"
+        installation_id = "dddddddd-4444-4444-8444-444444444444"
+        survivor_installation_id = "eeeeeeee-5555-4555-8555-555555555555"
         bindings = (("migration_checksum", "a" * 64), ("migration_version", "test-auth-version"),
                     ("auth_fault_user_id", user_id), ("auth_fault_bucket_digest", "b" * 64),
-                    ("auth_fault_correlations", user_id), ("auth_fault_correlations", ""))
+                    ("auth_fault_expired_session_id", session_id),
+                    ("auth_fault_expired_context_id", context_id), ("auth_fault_token_digest", "d" * 64),
+                    ("auth_fault_correlations", user_id), ("auth_fault_correlations", ""),
+                    ("auth_fault_session_ids", session_id + "," + context_id + "," + installation_id),
+                    ("auth_fault_installation_id", installation_id),
+                    ("auth_fault_survivor_installation_id", survivor_installation_id))
         completed = subprocess.CompletedProcess([], 0, stdout="0\n", stderr="")
         with patch.object(database.subprocess, "run", return_value=completed) as run_process:
             database.sql("SELECT 1;", database="iot_platform_lab", variables=bindings)
             self.assertEqual(run_process.call_args.args[0].count("--set"), len(bindings))
+
+    def test_logout_oracle_bindings_reject_invalid_scope_before_spawn(self):
+        """Oracle logout chỉ nhận 1–3 UUID phiên và hai UUID installation, chặn SQL/option injection."""
+        valid_session_id = "bbbbbbbb-2222-4222-8222-222222222222"
+        invalid = (
+            ("auth_fault_session_ids", ""),
+            ("auth_fault_session_ids", valid_session_id + ",not-a-uuid"),
+            ("auth_fault_session_ids", ",".join((valid_session_id,) * 4)),
+            ("auth_fault_session_ids", valid_session_id + "' --"),
+            ("auth_fault_installation_id", "not-a-uuid"),
+            ("auth_fault_installation_id", valid_session_id + " --"),
+            ("auth_fault_survivor_installation_id", "not-a-uuid"),
+            ("auth_fault_survivor_installation_id", valid_session_id + " --"),
+        )
+        with patch.object(database.subprocess, "run") as run_process:
+            for name, value in invalid:
+                with self.subTest(name=name, value_length=len(value)):
+                    with self.assertRaises(ValueError):
+                        database.sql("SELECT 1;", database="iot_platform_lab", variables=((name, value),))
+            run_process.assert_not_called()
+
+    def test_expired_fixture_bindings_reject_malformed_values_before_spawn(self):
+        """Expired fixture chỉ nhận UUID và SHA-256 hex chặt, không cho chèn psql option/SQL."""
+        invalid = (
+            ("auth_fault_expired_session_id", "not-a-uuid"),
+            ("auth_fault_expired_context_id", "a" * 36 + "'"),
+            ("auth_fault_token_digest", "e" * 63),
+            ("auth_fault_token_digest", "f" * 63 + "g"),
+        )
+        with patch.object(database.subprocess, "run") as run_process:
+            for name, value in invalid:
+                with self.subTest(name=name, value_length=len(value)):
+                    with self.assertRaises(ValueError):
+                        database.sql("SELECT 1;", database="iot_platform_lab", variables=((name, value),))
+            run_process.assert_not_called()
 
     def test_unknown_binding_does_not_spawn(self):
         """Tên gần giống không được mở rộng thành quyền truyền psql variable tùy ý."""

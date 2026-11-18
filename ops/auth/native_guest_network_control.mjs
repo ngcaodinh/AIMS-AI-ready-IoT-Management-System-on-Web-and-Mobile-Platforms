@@ -139,16 +139,19 @@ export function createGuestNetworkControl({ execute, commandMode = 'svc', now = 
    * Disable có thứ tự; restore attempt cả data/wifi dù write đầu lỗi, lỗi được giữ sticky.
    * Input
    * Param: state — chỉ off hoặc enabled từ verifier policy đã chốt, không arbitrary SDK command.
+ * Param: admission — checkpoint authority tùy chọn, được kiểm trước từng radio write để chặn lệnh muộn.
    * Output: sau original command terminal và state convergence10s; không dựa exit0 của svc làm ACK.
    * Errors: failure sau các restore attempts/readback, không overlap cùng raw command đang pending.
    */
-  async function setState(state) {
+  async function setState(state, admission) {
     assert.ok(state === 'off' || state === 'enabled', 'GUEST_NETWORK_COMMAND_INVALID');
     const restoring = state === 'enabled'; let failed = false;
     for (const service of ['data', 'wifi']) {
       const args = commandMode === 'svc' ? ['shell', 'svc', service, restoring ? 'enable' : 'disable'] :
         service === 'data' ? ['shell', 'cmd', 'phone', 'data', restoring ? 'enable' : 'disable'] :
           ['shell', 'cmd', 'wifi', 'set-wifi-enabled', restoring ? 'enabled' : 'disabled'];
+      // Kiểm quyền giai đoạn trước từng lệnh vô tuyến vì lệnh ADB trước có thể trả về sau khi quyền hết hạn.
+      admission?.assertActive();
       try { await execute(args, 30_000); }
       catch { failed = true; if (!restoring) break; }
     }

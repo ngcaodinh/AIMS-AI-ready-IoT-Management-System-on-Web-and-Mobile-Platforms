@@ -131,8 +131,21 @@ export function scanDebugOutput(sink, bytes, canaries) {
     status: bytes.length ? 'PASS' : 'EMPTY' };
 }
 
+/** Tạo tên evidence riêng cho mỗi fixture để lượt chạy mới không ghi đè lịch sử.
+ * Input
+ * Param: runId — UUID v4 từ READY của fixture đang được sở hữu; chỉ ký tự UUID được phép đi vào đường dẫn.
+ * Output: đường dẫn repo-relative dưới `docs/test-reports/evidence/` cho receipt đã khử dữ liệu thô.
+ * Errors: UUID sai định dạng bị từ chối bằng mã cố định trước thao tác file.
+ */
+export function responseLossEvidencePath(runId) {
+  assert.ok(typeof runId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(runId),
+  'NATIVE_RUN_ID_INVALID');
+  return `docs/test-reports/evidence/native-response-loss-actual-${runId}.json`;
+}
+
 /** Chạy main Android qua fault rồi explicit recover/submit, đối chiếu orphan và revoked session cuối.
- * Side effects: fixture5users/2workspaces và proxy tạm, finally dọn cả hai trước numeric exit. */
+ * Side effects: fixture5users/2workspaces, proxy tạm và evidence riêng theo runId; finally dọn fixture/proxy. */
 async function main() {
   const materials = createCertificates();
   let password = `Aa1${randomBytes(16).toString('hex')}`;
@@ -142,8 +155,10 @@ async function main() {
   let snapshot;
   const output = { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
   let debugScan;
+  let evidencePath;
   try {
     const ready = await fixture.ready();
+    evidencePath = responseLossEvidencePath(ready.runId);
     const baseline = await fixture.snapshot();
     proxy = await startFaultProxy(materials.valid);
     const certificate = new X509Certificate(materials.valid.certificate).raw.toString('base64');
@@ -223,7 +238,9 @@ async function main() {
   assert.ok(passed);
   const receipt = { nativeMain: true, responseCommittedBeforeLoss: true, quietSeconds: 30,
     explicitSubmitOnly: true, debugScan, twoNewSessionsOneOrphanOneRevoked: true, fixtureCleanup: 'EIGHT_ZERO_AND_ORIGINAL_EXIT', ledger: proxy.ledger };
-  await writeFile('docs/test-reports/evidence/native-response-loss-actual-2026-11-15.json', JSON.stringify(receipt, null, 2));
+  // `wx` giữ nguyên artifact cũ nếu UUID tình cờ trùng thay vì âm thầm ghi đè lịch sử.
+  assert.ok(typeof evidencePath === 'string', 'NATIVE_EVIDENCE_PATH_MISSING');
+  await writeFile(evidencePath, JSON.stringify(receipt, null, 2), { flag: 'wx' });
   console.log('NATIVE_RESPONSE_LOSS_ACTUAL_CLEANUP_PASS');
 }
 

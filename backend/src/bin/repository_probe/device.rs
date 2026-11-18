@@ -117,7 +117,7 @@ impl DeviceProbe<'_> {
      * Input
      * Param: local — published snapshot tenant A.
      * Param: foreign — published snapshot tenant B cho row đang giữ unique index.
-     * Output: A bị `SessionInvalid` sau wait và không registry/runtime/actuator nào commit.
+     * Output: A bị `SessionExpired` sau wait và không registry/runtime/actuator nào commit.
      */
     async fn expiry_during_serial_wait(
         &self,
@@ -181,7 +181,8 @@ impl DeviceProbe<'_> {
             release
         );
         released?;
-        if !matches!(attempt, Err(ApplicationError::SessionInvalid)) {
+        // Deadline đã qua nhưng phiên chưa bị revoke nên authorization phải báo expiry riêng.
+        if !matches!(attempt, Err(ApplicationError::SessionExpired)) {
             return Err(ApplicationError::Conflict);
         }
         let absent: bool =
@@ -379,7 +380,7 @@ impl DeviceProbe<'_> {
     }
 
     /**
-     * Owner mất membership thì đăng ký/schema bị chặn ngay; resume chỉ khôi phục current grant hợp lệ.
+     * Owner mất membership thì đăng ký/schema bị chặn ngay; revoked session bị chặn bằng lỗi chuyên biệt.
      * Input
      * Param: winner — registry đã pin cho owner fixture A.
      * Param: version — schema A dùng intent chưa được ghi.
@@ -462,7 +463,7 @@ impl DeviceProbe<'_> {
             self.first
                 .register(&stale, self.workspace, draft, self.config.run_id)
                 .await,
-            Err(ApplicationError::SessionInvalid)
+            Err(ApplicationError::SessionRevoked)
         ) {
             return Err(ApplicationError::Conflict);
         }

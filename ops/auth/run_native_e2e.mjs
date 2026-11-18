@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { randomBytes, randomUUID, X509Certificate } from 'node:crypto';
+import { createConnection } from 'node:net';
+import { createInterface } from 'node:readline';
 import tls from 'node:tls';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createCertificates } from './memory_tls_material.mjs';
 import { startLocalHttpsProxy } from './local_https_proxy.mjs';
@@ -14,6 +17,39 @@ import { createNativeMembershipFixture } from './native_membership_fixture.mjs';
 
 const mobileDirectory = path.resolve('mobile');
 const deviceId = 'emulator-5554';
+// Origin Web cố định của fixture; không nhận origin từ packet hoặc dòng lệnh.
+const fixtureWebOrigin = 'http://localhost:5173';
+const nativeSafeFailureCodes = new Set([
+  'ERR_ASSERTION', 'ERR_INVALID_ARG_TYPE', 'ERR_INVALID_ARG_VALUE', 'ERR_OUT_OF_RANGE',
+  'ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'ENOTDIR', 'EIO', 'EPIPE',
+]);
+const nativeSafeFailureNames = new Map([
+  ['AssertionError', 'ASSERTION'], ['Error', 'ERROR'], ['TypeError', 'TYPE_ERROR'],
+  ['RangeError', 'RANGE_ERROR'], ['ReferenceError', 'REFERENCE_ERROR'],
+]);
+
+/** Phân loại lỗi preflight để tìm lớp lỗi mà không lộ thông báo, đường dẫn hay stack thô.
+ * Input
+ * Param: error — lỗi nội bộ có thể chứa path/packet; chỉ đọc code, tên và số dòng runner đã lọc.
+ * Output: mã allowlist hoặc số dòng source; lỗi lạ trả về OTHER.
+ */
+export function safeNativeFailureCategory(error) {
+  if (error === null || typeof error !== 'object') return 'OTHER';
+  const message = error.message;
+  // Chỉ thông báo mã assertion nội bộ có cú pháp cố định, không để path hoặc dữ liệu kiểm thử lọt vào log.
+  if (error.code === 'ERR_ASSERTION') {
+    const firstLine = typeof message === 'string' ? message.split(/\r?\n/, 1)[0] : '';
+    if (/^(?:NATIVE|OLD)_[A-Z0-9_]{1,100}$/.test(firstLine)) return firstLine;
+    // Chỉ giữ frame đầu tiên thuộc runner và chỉ xuất số dòng; stack path/argument không rời tiến trình.
+    const frame = typeof error.stack === 'string'
+      ? /(?:^|\n)\s*at [^\n]*run_native_e2e\.mjs:(\d+):\d+/.exec(error.stack) : null;
+    if (frame) return `ASSERTION_AT_${frame[1]}`;
+  }
+  const code = error.code;
+  if (typeof code === 'string' && nativeSafeFailureCodes.has(code)) return code;
+  const name = error.name;
+  return typeof name === 'string' ? nativeSafeFailureNames.get(name) ?? 'OTHER' : 'OTHER';
+}
 
 /**
  * Chọn budget cố định theo phase đã review trước BUILD, không nhận threshold từ CLI/packet.
@@ -22,14 +58,30 @@ const deviceId = 'emulator-5554';
  * Output: native test cap và whole-phase reserve, ms; phase khác allowlist bị từ chối.
  */
 export function nativePhaseBudget(phase) {
-  if (phase === 'offline-login') return { testMilliseconds: 675_000, reserveMilliseconds: 1_150_000 };
+  if (phase === 'offline-login' || phase === 'offline-expired') return { testMilliseconds: 675_000, reserveMilliseconds: 1_150_000 };
   if (phase === 'rate-limit') return { testMilliseconds: 1_260_000, reserveMilliseconds: 2_065_000 };
   if (phase === 'membership-stale') return { testMilliseconds: 420_000, reserveMilliseconds: 895_000 };
   if (phase === 'response-loss') return { testMilliseconds: 240_000, reserveMilliseconds: 960_000 };
   if (phase === 'password') return { testMilliseconds: 240_000, reserveMilliseconds: 960_000 };
   if (phase === 'password-relogin') return { testMilliseconds: 180_000, reserveMilliseconds: 900_000 };
+  // Access kiểm thêm A logout rồi B login, giữ giới hạn UI đủ cho cả hai identity và các nhánh denied.
+  if (phase === 'access') return { testMilliseconds: 240_000, reserveMilliseconds: 480_000 };
   assert.ok(['preflight', 'full', 'resume', 'access'].includes(phase), 'INVALID_NATIVE_PHASE');
   return { testMilliseconds: 60_000, reserveMilliseconds: 480_000 };
+}
+
+/** Tạo define riêng cho mutation S2 chỉ ở resume đủ điều kiện sau khi Web S1 đã logout.
+ * Input
+ * Param: phase — phase native đã chọn; chỉ resume mới được phép bật probe.
+ * Param: enabled — quyết định nội bộ từ orchestration, không nhận từ packet hoặc CLI.
+ * Param: offlineLogoutResume — loại resume offline không có phiên S2 để cấp ticket.
+ * Output: define cố định hoặc danh sách rỗng khi probe không được yêu cầu.
+ * Errors: phase/mode không hợp lệ bị từ chối bằng mã cố định.
+ */
+export function nativeS2RealtimeTicketArguments(phase, enabled, offlineLogoutResume = false) {
+  if (!enabled) return [];
+  assert.ok(phase === 'resume' && !offlineLogoutResume, 'NATIVE_S2_REALTIME_TICKET_PHASE_INVALID');
+  return ['--dart-define=AUTH_E2E_S2_REALTIME_TICKET=true'];
 }
 
 /**
@@ -76,11 +128,12 @@ export function calculateNativeRpcDeadline(bounds, now = performance.now()) {
 export function containsNativeSecret(value, secrets) {
   assert.ok(Array.isArray(secrets) && secrets.length >= 1 && secrets.length <= 2 && secrets.every(
     /**
-     * Chỉ scanner test dùng synthetic secret hữu hạn, không nhận empty-string làm match mọi output.
+     * Scanner chỉ nhận password synthetic và token hex synthetic; empty secret không được tắt kiểm tra.
      * Input
      * Param: secret — credential của owned fixture cần chặn xuất ra log.
      */
-    (secret) => typeof secret === 'string' && /^Aa[12][0-9a-f]{32}$/.test(secret)), 'INVALID_NATIVE_SECRET_SCAN');
+    (secret) => typeof secret === 'string' && (/^Aa[12][0-9a-f]{32}$/.test(secret) || /^[0-9a-f]{64}$/.test(secret))),
+  'INVALID_NATIVE_SECRET_SCAN');
   return secrets.some(
     /**
      * Kiểm từng credential gốc/mới mà không phản chiếu giá trị nào trong failure.
@@ -121,6 +174,456 @@ export function validateSessionDelta(baseline, full, after) {
   return added[0];
 }
 
+/** Kiểm hai phiên Android/Web cùng account qua các snapshot trước/sau logout, không lẫn baseline fixture.
+ * Input
+ * Param: baseline — session rows của account0 trước Android S2 login.
+ * Param: androidFull — snapshot sau khi native Android tạo đúng S2.
+ * Param: webLogin — snapshot sau khi Web tạo đúng S1 bên cạnh S2.
+ * Param: webLogout — snapshot sau logout Web; chỉ S1 được chuyển revoked.
+ * Param: androidLogout — tùy chọn snapshot sau native logout; S1/S2 đều revoked, baseline giữ nguyên.
+ * Output: UUID công khai của S1 Web và S2 Android để caller kiểm thứ tự và correlation nội bộ.
+ * Errors: assertion cố định nếu session bị thêm/xóa/revoke ngoài đúng client ở bất kỳ boundary nào.
+ */
+export function validateCrossClientSessionDelta(baseline, androidFull, webLogin, webLogout, androidLogout) {
+  const initial = snapshotMap(baseline);
+  const android = snapshotMap(androidFull);
+  assert.equal(android.size, initial.size + 1, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  for (const [id, revoked] of initial) assert.equal(android.get(id), revoked, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  const androidAdded = [...android.keys()].filter(
+    /** Chỉ UUID mới do Android `full` tạo mới được coi là session S2. */
+    (id) => !initial.has(id));
+  assert.equal(androidAdded.length, 1, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  const androidSessionId = androidAdded[0];
+  assert.equal(android.get(androidSessionId), false, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+
+  const web = snapshotMap(webLogin);
+  assert.equal(web.size, android.size + 1, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  for (const [id, revoked] of android) assert.equal(web.get(id), revoked, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  const webAdded = [...web.keys()].filter(
+    /** Chỉ UUID mới do Web login tạo mới được coi là session S1. */
+    (id) => !android.has(id));
+  assert.equal(webAdded.length, 1, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  const webSessionId = webAdded[0];
+  assert.equal(web.get(webSessionId), false, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+
+  const webRevoked = snapshotMap(webLogout);
+  assert.equal(webRevoked.size, web.size, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  for (const [id, revoked] of web) {
+    assert.equal(webRevoked.get(id), id === webSessionId ? true : revoked, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  }
+  assert.equal(webRevoked.get(androidSessionId), false, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+
+  if (androidLogout !== undefined) {
+    const bothRevoked = snapshotMap(androidLogout);
+    assert.equal(bothRevoked.size, webRevoked.size, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+    for (const [id, revoked] of webRevoked) {
+      assert.equal(bothRevoked.get(id), id === androidSessionId ? true : revoked,
+        'CROSS_CLIENT_SESSION_DELTA_INVALID');
+    }
+    assert.equal(bothRevoked.get(webSessionId), true, 'CROSS_CLIENT_SESSION_DELTA_INVALID');
+  }
+  return { androidSessionId, webSessionId };
+}
+
+/** Kiểm Android logout chỉ thu hồi S2 khi Web S1 còn hoạt động, rồi đóng đúng Web S1 ở cleanup.
+ * Input
+ * Param: baseline — session rows của account0 trước khi tạo Web S1.
+ * Param: webLogin — snapshot sau khi tạo đúng một Web S1 còn hoạt động.
+ * Param: androidFull — snapshot sau Android full tạo đúng một S2.
+ * Param: androidLogout — tùy chọn snapshot sau UI logout Android; S2 revoked, S1 vẫn active.
+ * Param: webLogout — tùy chọn snapshot cuối sau khi logout Web S1 để cleanup.
+ * Output: UUID của S1 Web và S2 Android; sai tập hoặc sai trạng thái làm oracle thất bại.
+ */
+export function validateAndroidLogoutPreservesWebSibling(baseline, webLogin, androidFull, androidLogout, webLogout) {
+  const webSessionId = validateSessionDelta(baseline, webLogin);
+  const androidSessionId = validateSessionDelta(webLogin, androidFull);
+  if (androidLogout !== undefined) {
+    validateSessionDelta(webLogin, androidFull, androidLogout);
+  }
+  if (webLogout !== undefined) {
+    assert.ok(androidLogout !== undefined, 'ANDROID_SIBLING_SESSION_DELTA_INVALID');
+    const afterAndroid = snapshotMap(androidLogout);
+    const terminal = snapshotMap(webLogout);
+    assert.equal(terminal.size, afterAndroid.size, 'ANDROID_SIBLING_SESSION_DELTA_INVALID');
+    for (const [id, revoked] of afterAndroid) {
+      assert.equal(terminal.get(id), id === webSessionId ? true : revoked,
+        'ANDROID_SIBLING_SESSION_DELTA_INVALID');
+    }
+    assert.equal(terminal.get(androidSessionId), true, 'ANDROID_SIBLING_SESSION_DELTA_INVALID');
+  }
+  return { androidSessionId, webSessionId };
+}
+
+/** Gửi request Web qua loopback Auth Lab với route/method allowlist và giữ response bounded trong RAM.
+ * Input
+ * Param: port — listener HTTP cố định do native fixture runner đang sở hữu.
+ * Param: method/path — một cặp literal login/logout/password/me đã được verifier chọn.
+ * Param: body — payload tổng hợp trong RAM; không đưa vào URL hoặc error/report.
+ * Param: headers — Cookie/Origin/context/CSRF chỉ thuộc session Web test hiện hành.
+ * Output: status, byte length, JSON projection và ba response headers cần cho Web session.
+ * Errors: Error cố định khi transport, body size hoặc JSON envelope không hợp lệ.
+ */
+async function requestOwnedAuthLab(port, method, path, body, headers = {}) {
+  const allowedRoutes = {
+    '/auth/login': 'POST', '/auth/logout': 'POST', '/auth/password': 'POST', '/me': 'GET',
+  };
+  assert.equal(port, 3000, 'CROSS_CLIENT_AUTH_LAB_PORT_INVALID');
+  assert.equal(allowedRoutes[path], method, 'CROSS_CLIENT_AUTH_LAB_ROUTE_INVALID');
+  const response = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
+    method,
+    headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: 'no-store',
+    redirect: 'manual',
+    signal: AbortSignal.timeout(10_000),
+  });
+  const responseChunks = [];
+  let bodyByteLength = 0;
+  if (response.body !== null) {
+    // Áp giới hạn trước khi giữ thêm chunk để response bất thường không được materialize vượt mức 16 KiB.
+    for await (const chunk of response.body) {
+      bodyByteLength += chunk.byteLength;
+      assert.ok(bodyByteLength <= 16_384, 'CROSS_CLIENT_AUTH_LAB_RESPONSE_TOO_LARGE');
+      responseChunks.push(Buffer.from(chunk));
+    }
+  }
+  const responseText = Buffer.concat(responseChunks, bodyByteLength).toString('utf8');
+  let payload = null;
+  if (responseText.length > 0) {
+    try { payload = JSON.parse(responseText); } catch { throw new Error('CROSS_CLIENT_AUTH_LAB_RESPONSE_INVALID'); }
+    assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload),
+      'CROSS_CLIENT_AUTH_LAB_RESPONSE_INVALID');
+  }
+  return {
+    status: response.status,
+    body: payload,
+    bodyByteLength,
+    headers: {
+      setCookie: response.headers.get('set-cookie'),
+      authContextId: response.headers.get('x-auth-context-id'),
+      csrfToken: response.headers.get('x-csrf-token'),
+    },
+  };
+}
+
+/** Tạo Web S1 tổng hợp để kiểm Android logout khi phiên Web cùng account vẫn sống.
+ * Input
+ * Param: email — danh tính account0 do fixture đang sở hữu.
+ * Param: password — mật khẩu fixture chỉ được giữ trong RAM.
+ * Output: cookie, context và CSRF để duy trì duy nhất Web S1 trong các request được allowlist.
+ * Errors: lỗi cố định nếu login Web, metadata hoặc cookie không đúng hợp đồng.
+ * Side effects: gửi một POST login Web qua Auth Lab và tạo session S1 trong PostgreSQL.
+ */
+async function createOwnedWebSibling(email, password) {
+  const login = await requestOwnedAuthLab(3000, 'POST', '/auth/login',
+    { email, password, clientType: 'WEB' }, { origin: fixtureWebOrigin });
+  assert.equal(login.status, 200, 'ANDROID_SIBLING_WEB_LOGIN_FAILED');
+  assert.ok(login.body && login.body.limited === false && !Object.hasOwn(login.body, 'token'),
+    'ANDROID_SIBLING_WEB_LOGIN_SHAPE_INVALID');
+  assert.ok(typeof login.headers.setCookie === 'string', 'ANDROID_SIBLING_WEB_COOKIE_MISSING');
+  const cookiePair = login.headers.setCookie.split(';', 1)[0];
+  assert.ok(cookiePair.startsWith('iot_session=') && cookiePair.length > 'iot_session='.length,
+    'ANDROID_SIBLING_WEB_COOKIE_INVALID');
+  assert.ok(typeof login.headers.authContextId === 'string' && login.headers.authContextId.length > 0 &&
+    typeof login.headers.csrfToken === 'string' && login.headers.csrfToken.length > 0,
+  'ANDROID_SIBLING_WEB_METADATA_MISSING');
+  return {
+    cookiePair,
+    authContextId: login.headers.authContextId,
+    csrfToken: login.headers.csrfToken,
+  };
+}
+
+/** Kiểm tra 204 bodyless trên byte thô trước khi HTTP client có thể ẩn phần thân theo semantics chuẩn.
+ * Input
+ * Param: rawResponse — response HTTP/1.x hoàn chỉnh, còn nguyên byte từ socket owned.
+ * Output: metadata status/body length đã chứng minh chính xác 204 không có byte sau header.
+ * Errors: assertion cố định nếu status, header separator, giới hạn kích thước hoặc raw body sai.
+ */
+export function validateRawBodyless204Response(rawResponse) {
+  assert.ok(Buffer.isBuffer(rawResponse) && rawResponse.length <= 16_384,
+    'ANDROID_SIBLING_WEB_WIRE_RESPONSE_INVALID');
+  const headerSeparator = Buffer.from('\r\n\r\n');
+  const headerEnd = rawResponse.indexOf(headerSeparator);
+  assert.ok(headerEnd >= 0, 'ANDROID_SIBLING_WEB_WIRE_RESPONSE_INVALID');
+  const statusLine = rawResponse.subarray(0, headerEnd).toString('latin1').split('\r\n', 1)[0];
+  assert.match(statusLine, /^HTTP\/1\.[01] 204(?:[ \t].*)?$/,
+    'ANDROID_SIBLING_WEB_WIRE_STATUS_INVALID');
+  const bodyByteLength = rawResponse.length - headerEnd - headerSeparator.length;
+  assert.equal(bodyByteLength, 0, 'ANDROID_SIBLING_WEB_WIRE_BODY_NOT_EMPTY');
+  return { status: 204, bodyByteLength };
+}
+
+/** Gửi đúng logout Web của fixture và đọc raw socket để xác minh 204 không có byte thân.
+ * Input
+ * Param: session — cookie/context/CSRF vừa nhận của Web S1, chỉ có quyền gọi route logout cố định.
+ * Output: status 204 cùng độ dài thân đo trực tiếp trên wire, không qua Fetch normalization.
+ * Errors: lỗi cố định nếu header metadata sai, transport timeout, response quá lớn hoặc thân không rỗng.
+ * Side effects: một POST bodyless tới Auth Lab loopback, với Connection: close để đóng ranh giới response.
+ */
+async function requestOwnedAuthLabLogoutWire(session) {
+  assert.ok(session && [session.cookiePair, session.authContextId, session.csrfToken].every(
+    /** Chặn CR/LF trong metadata trước khi ghép thành dòng HTTP header cố định. */
+    (value) => typeof value === 'string' && value.length > 0 && !/[\r\n]/.test(value)),
+  'ANDROID_SIBLING_WEB_WIRE_HEADERS_INVALID');
+  const request = [
+    'POST /api/v1/auth/logout HTTP/1.1',
+    'Host: 127.0.0.1:3000',
+    'Connection: close',
+    `Origin: ${fixtureWebOrigin}`,
+    `Cookie: ${session.cookiePair}`,
+    `X-Auth-Context-Id: ${session.authContextId}`,
+    `X-CSRF-Token: ${session.csrfToken}`,
+    'Content-Length: 0',
+    '',
+    '',
+  ].join('\r\n');
+  const socket = createConnection({ host: '127.0.0.1', port: 3000 });
+  try {
+    return await new Promise(
+      /** Đăng ký mọi handler trước khi gửi để giới hạn response và đóng đúng socket do helper tạo.
+       * Input
+       * Param: resolve — hoàn tất khi raw response chứng minh 204 bodyless.
+       * Param: reject — kết thúc khi transport, timeout hoặc response vi phạm hợp đồng.
+       */
+      (resolve, reject) => {
+        let settled = false;
+        let responseByteLength = 0;
+        const responseChunks = [];
+
+        /** Đóng socket do helper sở hữu và phát mã cố định, không giữ raw response trong lỗi.
+         * Input
+         * Param: marker — mã lỗi nội bộ được chọn theo nhánh transport hoặc response.
+         */
+        function fail(marker) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          socket.destroy();
+          reject(new Error(marker));
+        }
+
+        const timeout = setTimeout(
+          /** Giữ deadline tuyệt đối kể cả khi peer chỉ gửi từng chunk nhỏ để kéo dài lượt đọc. */
+          () => fail('ANDROID_SIBLING_WEB_WIRE_TIMEOUT'),
+          10_000,
+        );
+
+        /** Gửi request chỉ sau khi socket tới loopback đã kết nối. */
+        function onConnect() {
+          try { socket.write(request, 'latin1'); } catch { fail('ANDROID_SIBLING_WEB_WIRE_TRANSPORT_FAILED'); }
+        }
+
+        /** Đếm byte ngay khi nhận để giới hạn bộ nhớ trước khi ghép response.
+         * Input
+         * Param: chunk — mảnh byte raw vừa nhận từ socket HTTP fixture.
+         */
+        function onData(chunk) {
+          responseByteLength += chunk.length;
+          if (responseByteLength > 16_384) {
+            fail('ANDROID_SIBLING_WEB_WIRE_RESPONSE_TOO_LARGE');
+            return;
+          }
+          responseChunks.push(chunk);
+        }
+
+        /** Chỉ hoàn tất khi peer đóng chiều ghi để không bỏ sót byte thân đến ở chunk kế tiếp. */
+        function onEnd() {
+          try {
+            const rawResponse = Buffer.concat(responseChunks, responseByteLength);
+            const result = validateRawBodyless204Response(rawResponse);
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            resolve(result);
+          } catch {
+            fail('ANDROID_SIBLING_WEB_WIRE_RESPONSE_INVALID');
+          }
+        }
+
+        /** Chuyển lỗi socket thành marker cố định để không rò URI, header hoặc raw packet. */
+        function onError() {
+          fail('ANDROID_SIBLING_WEB_WIRE_TRANSPORT_FAILED');
+        }
+
+        /** Từ chối EOF bất thường nếu peer đóng mà không phát sự kiện end sau response hoàn chỉnh. */
+        function onClose() {
+          if (!settled) fail('ANDROID_SIBLING_WEB_WIRE_RESPONSE_INCOMPLETE');
+        }
+
+        socket.once('connect', onConnect);
+        socket.on('data', onData);
+        socket.once('end', onEnd);
+        socket.once('error', onError);
+        socket.once('close', onClose);
+      },
+    );
+  } finally {
+    socket.destroy();
+  }
+}
+
+/** Tạo rồi thu hồi Web S1 sau native Android S2 login và kiểm stale Web mutation/session snapshot.
+ * Input
+ * Param: email — account0 synthetic thuộc fixture đang chạy, không nhận account ngoài runner.
+ * Param: password — secret fixture chỉ giữ trong RAM và truyền tới Auth Lab login.
+ * Param: fixture — owner đã xác nhận cung cấp snapshot account0 và cleanup khi runner đóng.
+ * Param: baseline — sessions account0 trước Android login.
+ * Param: androidFull — sessions sau Android app login S2 và chọn workspace.
+ * Output: hai snapshot Web (login/logout) cùng UUID S1/S2 để chốt sau native resume.
+ * Errors: Error cố định nếu Web contract, stale denial hoặc session-isolation invariant sai.
+ * Side effects: tạo Web S1, logout/retry hai lần và gửi GET/password mutation với cookie S1 đã revoke.
+ */
+async function verifyCrossClientWebLogout(email, password, fixture, baseline, androidFull) {
+  let step = 'spawn';
+  let child;
+  let output;
+  try {
+    const uiRunnerPath = fileURLToPath(new URL('../../web/e2e/native_cross_client_ui.mjs', import.meta.url));
+    child = spawn(process.execPath, [uiRunnerPath], {
+      cwd: path.resolve('web'),
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    child.on('error',
+      /** Spawn failure chỉ được giữ cục bộ để runner phát stage hữu hạn. */
+      () => { child.spawnFailed = true; },
+    );
+    output = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    child.stdin.write(`${JSON.stringify({ email, password })}\n`);
+
+    step = 'web_ui_login';
+    assert.equal(await readCrossClientWebUiMarker(child, output), 'WEB_UI_LOGIN_COMPLETE',
+      'CROSS_CLIENT_WEB_UI_LOGIN_MARKER_INVALID');
+    step = 'web_login_snapshot';
+    const webLoginSnapshot = await fixture.snapshot();
+
+    step = 'web_ui_continue';
+    child.stdin.write('CONTINUE\n');
+    step = 'web_ui_logout';
+    assert.equal(await readCrossClientWebUiMarker(child, output), 'WEB_UI_LOGOUT_COMPLETE',
+      'CROSS_CLIENT_WEB_UI_LOGOUT_MARKER_INVALID');
+    step = 'web_ui_exit';
+    assert.equal(await waitForCrossClientWebUiExit(child), 0, 'CROSS_CLIENT_WEB_UI_EXIT_INVALID');
+
+    step = 'web_logout_snapshot';
+    const webLogoutSnapshot = await fixture.snapshot();
+    step = 'web_session_delta';
+    const sessionIds = validateCrossClientSessionDelta(baseline, androidFull, webLoginSnapshot, webLogoutSnapshot);
+    return { ...sessionIds, webLoginSnapshot, webLogoutSnapshot };
+  } catch {
+    // Chỉ stage enum hữu hạn được phát ra; lỗi UI/DB, body, cookie và credential luôn bị loại bỏ.
+    throw new Error('CROSS_CLIENT_WEB_UI_STEP_' + step.toUpperCase() + '_FAILED');
+  } finally {
+    if (child && child.exitCode === null) await stopCrossClientWebUi(child);
+    output?.close();
+  }
+}
+
+/** Đọc marker từ runner Web với deadline, không chuyển stdout tùy ý ra log native.
+ * Input
+ * Param: child — process runner Web do hàm gọi đang sở hữu.
+ * Param: output — readline chỉ đọc stdout của runner đó.
+ * Output: một marker string; caller chỉ chấp nhận marker enum dự kiến.
+ * Errors: fixed timeout/early-exit/protocol error, không kèm dòng stdout.
+ */
+async function readCrossClientWebUiMarker(child, output) {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    /** Child UI chạy trong giới hạn đã chốt; marker trễ không được gia hạn phase. */
+    () => controller.abort(),
+    120_000,
+  );
+  try {
+    if (child.exitCode !== null || child.spawnFailed) throw new Error('CROSS_CLIENT_WEB_UI_CHILD_EXITED');
+    const childExit = once(child, 'exit', { signal: controller.signal }).then(
+      /** Tiến trình thoát trước marker là lỗi giao thức; bỏ exit code khỏi output. */
+      () => { throw new Error('CROSS_CLIENT_WEB_UI_CHILD_EXITED'); },
+    );
+    const outputClose = once(output, 'close', { signal: controller.signal }).then(
+      /** EOF trước marker không chứa evidence thành công. */
+      () => { throw new Error('CROSS_CLIENT_WEB_UI_OUTPUT_CLOSED'); },
+    );
+    const [line] = await Promise.race([
+      once(output, 'line', { signal: controller.signal }),
+      childExit,
+      outputClose,
+    ]);
+    return line;
+  } catch {
+    if (controller.signal.aborted) throw new Error('CROSS_CLIENT_WEB_UI_WAIT_TIMEOUT');
+    throw new Error('CROSS_CLIENT_WEB_UI_PROTOCOL_FAILED');
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+  }
+}
+
+/** Chờ child Web kết thúc trong deadline sau marker cuối.
+ * Input
+ * Param: child — process runner Web vừa phát marker logout.
+ * Output: exit code thực tế của process.
+ * Errors: fixed timeout hoặc lỗi event; không đưa stderr/OS detail ra log.
+ */
+async function waitForCrossClientWebUiExit(child) {
+  if (child.exitCode !== null) return child.exitCode;
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    /** Cleanup Chrome/Vite sau marker cuối có deadline riêng, không chặn native owner vô hạn. */
+    () => controller.abort(),
+    20_000,
+  );
+  try {
+    const [code] = await once(child, 'exit', { signal: controller.signal });
+    return code;
+  } catch {
+    throw new Error(controller.signal.aborted ? 'CROSS_CLIENT_WEB_UI_EXIT_TIMEOUT' : 'CROSS_CLIENT_WEB_UI_EXIT_FAILED');
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+  }
+}
+
+/** Gửi ABORT cho runner Web và chỉ dừng child sở hữu nếu cleanup không kết thúc đúng hạn.
+ * Input
+ * Param: child — runner Web được tạo ngay trong verifyCrossClientWebLogout.
+ * Side effects: kết thúc stdin bằng frame cố định, đợi cleanup bounded rồi phát tín hiệu dừng child.
+ */
+async function stopCrossClientWebUi(child) {
+  try { child.stdin.end('ABORT\n'); } catch { /* Child có thể đã đóng stdin trong cleanup. */ }
+  try {
+    await waitForCrossClientWebUiExit(child);
+  } catch {
+    try {
+      child.kill();
+      await Promise.race([
+        once(child, 'exit').then(() => true, () => true),
+        delay(5_000),
+      ]);
+    } catch { /* Chỉ nhắm process handle do caller sở hữu. */ }
+  }
+}
+
+/** Kiểm snapshot terminal có đúng một session mới revoked và giữ nguyên mọi row baseline.
+ * Input
+ * Param: baseline — session rows của account fixture trước ca login/logout.
+ * Param: completed — rows cuối; chỉ được thêm một UUID mới với revoked=true.
+ * Output: UUID của session mới; mọi thay đổi baseline/tập/trạng thái khác đều FAIL.
+ */
+function validateRevokedSessionDelta(baseline, completed) {
+  const initial = snapshotMap(baseline); const final = snapshotMap(completed);
+  assert.equal(final.size, initial.size + 1, 'REVOKED_SESSION_DELTA_INVALID');
+  for (const [id, revoked] of initial) assert.equal(final.get(id), revoked, 'REVOKED_SESSION_BASELINE_CHANGED');
+  const added = [...final.keys()].filter(
+    /** Chỉ giữ UUID chưa có ở baseline để kiểm duy nhất session do ca này tạo. */
+    (id) => !initial.has(id),
+  );
+  assert.equal(added.length, 1, 'REVOKED_SESSION_DELTA_INVALID');
+  assert.equal(final.get(added[0]), true, 'REVOKED_SESSION_NOT_REVOKED');
+  return added[0];
+}
+
 /**
  * Kiểm denied account không có session delta và empty account chỉ có một phiên đã logout ACK.
  * Input
@@ -134,19 +637,20 @@ export function validateAccessSessionDelta(disabledBefore, disabledAfter, emptyB
   const deniedInitial = snapshotMap(disabledBefore); const deniedFinal = snapshotMap(disabledAfter);
   assert.equal(deniedFinal.size, deniedInitial.size, 'DENIED_SESSION_CHANGED');
   for (const [id, revoked] of deniedInitial) assert.equal(deniedFinal.get(id), revoked, 'DENIED_SESSION_CHANGED');
-  const initial = snapshotMap(emptyBefore); const completed = snapshotMap(emptyAfter);
-  assert.equal(completed.size, initial.size + 1, 'EMPTY_SESSION_DELTA_INVALID');
-  for (const [id, revoked] of initial) assert.equal(completed.get(id), revoked, 'EMPTY_BASELINE_CHANGED');
-  const added = [...completed.keys()].filter(
-    /**
-     * Chỉ row thêm từ login UI của lượt thử; seed metadata luôn giữ nguyên.
-     * Input
-     * Param: id — UUID public cần so với baseline owned.
-     */
-    (id) => !initial.has(id));
-  assert.equal(added.length, 1, 'EMPTY_SESSION_DELTA_INVALID');
-  assert.equal(completed.get(added[0]), true, 'EMPTY_SESSION_NOT_REVOKED');
-  return added[0];
+  return validateRevokedSessionDelta(emptyBefore, emptyAfter);
+}
+
+/** Kiểm account A logout trước B login; reuse exact session validator và giữ denied/empty oracle hiện hữu.
+ * Input
+ * Param: fullBefore/fullAfter — account A session snapshots trước login và sau logout UI.
+ * Param: disabledBefore/disabledAfter — disabled account snapshot không được thay đổi.
+ * Param: emptyBefore/emptyAfter — account B empty snapshot phải thêm đúng phiên cuối cùng đã logout.
+ * Output: UUID session A và B do scenario tạo; sai delta ở bất kỳ account nào ném assertion cố định.
+ */
+export function validateAccountSwitchSessionDelta(fullBefore, fullAfter, disabledBefore, disabledAfter, emptyBefore, emptyAfter) {
+  const accountASessionId = validateRevokedSessionDelta(fullBefore, fullAfter);
+  const accountBSessionId = validateAccessSessionDelta(disabledBefore, disabledAfter, emptyBefore, emptyAfter);
+  return { accountASessionId, accountBSessionId };
 }
 
 /**
@@ -154,8 +658,11 @@ export function validateAccessSessionDelta(disabledBefore, disabledAfter, emptyB
  * Output: checkpoint/finish chỉ nhận public enums/counters, không I/O hoặc credential.
  */
 export function createAccessCheckpointOracle() {
-  const stages = [['before-disabled', 0, 0, 0], ['disabled-rejected', 1, 0, 0], ['wrong-rejected', 2, 0, 0],
-    ['empty-ready', 3, 1, 0], ['empty-refreshed', 3, 2, 0], ['logged-out', 3, 2, 1]];
+  const stages = [
+    ['before-account-a', 0, 0, 0], ['account-a-ready', 1, 1, 0], ['account-a-logged-out', 1, 1, 1],
+    ['before-disabled', 1, 1, 1], ['disabled-rejected', 2, 1, 1], ['wrong-rejected', 3, 1, 1],
+    ['empty-ready', 4, 2, 1], ['empty-refreshed', 4, 3, 1], ['logged-out', 4, 3, 2],
+  ];
   let position = 0;
   /**
    * Kiểm schema counter và exact số request ở boundary đã chọn.
@@ -194,7 +701,7 @@ export function createAccessCheckpointOracle() {
        * Input
        * Param: counts — final counter snapshot cùng owned proxy.
        */
-      (counts) => { assert.equal(position, stages.length, 'ACCESS_CHECKPOINT_INCOMPLETE'); checkCounts(counts, 3, 2, 1); },
+      (counts) => { assert.equal(position, stages.length, 'ACCESS_CHECKPOINT_INCOMPLETE'); checkCounts(counts, 4, 3, 2); },
   };
 }
 
@@ -339,10 +846,17 @@ export function canSendDaemonRequest(state, method, cleanup) {
   return !state.boundaryFailed || cleanup;
 }
 
-/** Chỉ dispatch checkpoint tới một callback sở hữu; không để phase UI pause không có oracle host. */
-export function canHandleNativeCheckpoint(phase, callback) {
-  return ['full', 'access', 'password', 'password-relogin', 'response-loss',
-    'rate-limit', 'membership-stale', 'offline-login'].includes(phase) && typeof callback === 'function';
+/** Chỉ dispatch checkpoint tới callback sở hữu; resume cần cờ nội bộ để giữ thường kỳ không đổi.
+ * Input
+ * Param: phase — phase native được packet pin trước khi tạo SDK process.
+ * Param: callback — consumer host phải sở hữu oracle cho mọi pause đã phát.
+ * Param: offlineLogoutResume — quyền nội bộ mở đúng hai gate pending-outbox khi phase là resume.
+ * Output: true khi callback có thể xử lý stage, false nếu phase chưa có oracle được phép.
+ */
+export function canHandleNativeCheckpoint(phase, callback, offlineLogoutResume = false) {
+  return (['full', 'access', 'password', 'password-relogin', 'response-loss',
+    'rate-limit', 'membership-stale', 'offline-login', 'offline-expired'].includes(phase) ||
+    (phase === 'resume' && offlineLogoutResume)) && typeof callback === 'function';
 }
 
 /** Fail closed nếu request/status counter ở picker không khớp allowlist trước lần chọn workspace đầu. */
@@ -457,19 +971,27 @@ async function runPreflight() {
  * Param: onPassed — trusted oracle host; rate nhận thêm admission fence, phải kiểm trước/sau I/O và trước mọi effect.
  * Param: sensitivePassword — secret gốc hoặc list cũ/mới để scan mọi phase dù packet không còn password.
  * Param: onCheckpoint — rate/access/password sync oracle, membership cho phép async owned SQL trước ACK.
- * Param: runtime — trusted SDK/clock/pause và sync onPhaseClosing(phasePassed) cleanup intent; actual deadlines thuộc owner.
+ * Param: runtime — trusted SDK/clock/pause; s2RealtimeTicket chỉ bật probe sau Web logout; offlineLogoutResume chỉ mở checkpoint phase resume.
  * Output: native PID đã framework PASS; chỉ return sau app.stop và SDK exit0.
  */
 export async function runNativePhase(packet, certificate, onPassed, sensitivePassword = packet.password, onCheckpoint, runtime = {}) {
-  const phaseBudget = nativePhaseBudget(packet.phase);
+  const offlineLogoutResume = runtime.offlineLogoutResume === true;
+  assert.ok(!offlineLogoutResume || packet.phase === 'resume', 'NATIVE_OFFLINE_RESUME_PHASE_INVALID');
+  const s2RealtimeTicketArguments = nativeS2RealtimeTicketArguments(
+    packet.phase, runtime.s2RealtimeTicket === true, offlineLogoutResume);
+  const phaseBudget = offlineLogoutResume
+    ? { testMilliseconds: 180_000, reserveMilliseconds: 300_000 }
+    : nativePhaseBudget(packet.phase);
   assert.ok(runtime.onPhaseClosing === undefined || typeof runtime.onPhaseClosing === 'function', 'NATIVE_PHASE_CLOSING_HOOK_INVALID');
-  const membership = packet.phase === 'membership-stale';
-  const offline = packet.phase === 'offline-login';
-  const asyncCheckpoints = membership || offline;
+  const membership = ['membership-stale', 'offline-login', 'offline-expired'].includes(packet.phase);
+  const offline = packet.phase === 'offline-login' || packet.phase === 'offline-expired';
+  const offlineExpired = packet.phase === 'offline-expired';
+  const offlineControlled = offline || offlineLogoutResume;
+  const asyncCheckpoints = membership || offlineControlled;
   const controlled = packet.phase === 'rate-limit' || asyncCheckpoints;
   const sourceNow = runtime.now ?? performance.now.bind(performance);
   let lastOfflineNow = 0;
-  const monotonicNow = offline ?
+  const monotonicNow = offlineControlled ?
     /** Clock offline phải hữu hạn/không lùi xuyên pre-ARM và main; lỗi không được reset deadline để retry. */
     () => {
       const current = sourceNow();
@@ -506,8 +1028,16 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
   let rateCheckpointPendingSettled = true;
   // Giữ tên state legacy để giới hạn diff, controlled membership có sequence/cap riêng.
   const offlineCaps = { 'offline-ready': 110_000, 'offline-result': 110_000,
-    'offline-quiet': 170_000, 'offline-picker': 170_000, 'offline-logged-out': 5000 };
-  const rateCheckpointStages = offline ? Object.keys(offlineCaps) : membership ? [
+    'offline-quiet': 170_000, 'offline-picker': 170_000, 'offline-outbox-ready': 170_000,
+    'offline-outbox-persisted': 170_000, 'offline-expired-offline': 110_000,
+    'offline-expired-ready': 170_000, 'offline-expired-persisted': 170_000,
+    'offline-outbox-resumed': 170_000, 'offline-logged-out': 120_000 };
+  const offlineOutboxStages = ['offline-ready', 'offline-result', 'offline-quiet', 'offline-picker',
+    'offline-outbox-ready', 'offline-outbox-persisted'];
+  const offlineResumeStages = ['offline-outbox-resumed', 'offline-logged-out'];
+  const offlineExpiredStages = ['offline-expired-offline', 'offline-expired-ready', 'offline-expired-persisted'];
+  const rateCheckpointStages = offlineExpired ? offlineExpiredStages : offline ? offlineOutboxStages
+    : offlineLogoutResume ? offlineResumeStages : membership ? [
     'membership-before-login', 'membership-picker', 'membership-denied',
     'membership-only-a', 'membership-a-opened', 'membership-logged-out',
   ] : ['rate-before', 'rate-wrong-1', 'rate-wrong-2', 'rate-wrong-3', 'rate-wrong-4',
@@ -524,6 +1054,9 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
     (value) => value.length));
   const publicArguments = packet.phase === 'preflight' ? [] : [
     '--dart-define=AUTH_API_BASE_URL=https://10.0.2.2:8443', `--dart-define=AUTH_LAB_CA_CERT=${certificate}`];
+  // Chế độ resume offline được pin từ orchestration để App không probe cần mạng trước checkpoint đầu.
+  const offlineResumeArguments = offlineLogoutResume
+    ? ['--dart-define=AUTH_E2E_OFFLINE_LOGOUT_RESUME=true'] : [];
   // Baseline vắng mặt là admission, không phải quyền kill process khác hoặc khóa liên tiến trình.
   if (asyncCheckpoints) assertNativeTiming();
   checkPid(null);
@@ -536,7 +1069,8 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
     ['--packages=C:/src/flutter/packages/flutter_tools/.dart_tool/package_config.json',
       'C:/src/flutter/bin/cache/flutter_tools.snapshot', '--suppress-analytics', 'run', '--no-pub',
       '--machine', '-d', deviceId, '-t', 'integration_test/app_auth_e2e_test.dart',
-      `--dart-define=AUTH_E2E_PHASE=${packet.phase}`, '--dart-define=INTEGRATION_TEST_SHOULD_REPORT_RESULTS_TO_NATIVE=false', ...publicArguments],
+      `--dart-define=AUTH_E2E_PHASE=${packet.phase}`, '--dart-define=INTEGRATION_TEST_SHOULD_REPORT_RESULTS_TO_NATIVE=false',
+      ...publicArguments, ...offlineResumeArguments, ...s2RealtimeTicketArguments],
     { cwd: mobileDirectory, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const pending = new Map();
   let appId;
@@ -741,7 +1275,8 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
    * Output: fixed ACK/status đã chuẩn hóa.
    */
   async function extension(name, parameters = {}) {
-    assert.ok(['fixture', 'status'].includes(name) || (name === 'checkpoint' && canHandleNativeCheckpoint(packet.phase, onCheckpoint)));
+    assert.ok(['fixture', 'status'].includes(name) ||
+      (name === 'checkpoint' && canHandleNativeCheckpoint(packet.phase, onCheckpoint, offlineLogoutResume)));
     assertNativeTiming();
     const result = normalizeExtensionResult(await request('app.callServiceExtension',
       { appId, methodName: `ext.nexa_auth_test.${name}`, params: parameters }));
@@ -838,15 +1373,28 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
       status = await extension('status');
       if (controlled) {
         // Request id đúng chưa đủ: status phải thuộc chính phase hiện hành trước callback, ACK hoặc PASS.
+        stage = 'result-phase';
         assert.equal(status.phase, packet.phase, 'NATIVE_RATE_STATUS_PHASE_MISMATCH');
         if (asyncCheckpoints) assert.equal(status.nativeProcessId, initialNativeProcessId, 'NATIVE_MEMBERSHIP_PID_MISMATCH');
+        stage = 'result-checkpoint-shape';
         const hasCheckpoint = Object.hasOwn(status, 'checkpoint');
         const hasRemaining = Object.hasOwn(status, 'checkpointRemainingMilliseconds');
         assert.ok(hasCheckpoint === hasRemaining, 'NATIVE_RATE_CHECKPOINT_INVALID');
         if (hasCheckpoint) {
-          assert.ok(status.status === 'WAITING' && status.checkpoint === rateCheckpointStages[rateCheckpointIndex]
+          stage = 'result-checkpoint-contract';
+          const checkpointValid = status.status === 'WAITING' && status.checkpoint === rateCheckpointStages[rateCheckpointIndex]
             && Number.isSafeInteger(status.checkpointRemainingMilliseconds) && status.checkpointRemainingMilliseconds > 0
-            && status.checkpointRemainingMilliseconds <= (offline ? offlineCaps[status.checkpoint] : membership && status.checkpoint === 'membership-picker' ? 210_000 : 5000) && typeof onCheckpoint === 'function', 'NATIVE_RATE_CHECKPOINT_INVALID');
+            && status.checkpointRemainingMilliseconds <= (offlineControlled ? offlineCaps[status.checkpoint] : membership && status.checkpoint === 'membership-picker' ? 210_000 : 5000) && typeof onCheckpoint === 'function';
+          if (!checkpointValid) {
+            // Chỉ báo enum stage, bucket deadline và callback readiness; không stringify status hay SDK payload.
+            const checkpointPhase = ['WAITING', 'PASS', 'FAIL'].includes(status.status) ? status.status : 'OTHER';
+            const checkpointName = rateCheckpointStages.includes(status.checkpoint) ? status.checkpoint : 'OTHER';
+            const checkpointTime = Number.isSafeInteger(status.checkpointRemainingMilliseconds)
+              ? status.checkpointRemainingMilliseconds <= (offlineControlled ? offlineCaps[status.checkpoint] : 210_000)
+                ? 'IN_RANGE' : 'OVER_LIMIT' : 'INVALID';
+            console.error(`NATIVE_CHECKPOINT_CONTRACT_${checkpointPhase}_${checkpointName}_${checkpointTime}_${typeof onCheckpoint === 'function' ? 'CALLBACK_READY' : 'CALLBACK_MISSING'}`);
+          }
+          assert.ok(checkpointValid, 'NATIVE_RATE_CHECKPOINT_INVALID');
           // Neo remaining từ status send time để không cộng latency vào cap5s hoặc picker210s.
           rateCheckpointDeadline = Math.min(statusRequestStarted + status.checkpointRemainingMilliseconds, workDeadline, ratePhaseDeadline);
           rateCheckpointClosed = false;
@@ -919,7 +1467,7 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
         }
         if (status.status === 'PASS') assert.equal(rateCheckpointIndex, rateCheckpointStages.length, 'NATIVE_RATE_CHECKPOINT_INCOMPLETE');
       } else if (status.status === 'WAITING' && status.checkpoint && !acknowledged.has(status.checkpoint)) {
-        assert.ok(canHandleNativeCheckpoint(packet.phase, onCheckpoint), 'UNEXPECTED_NATIVE_CHECKPOINT');
+        assert.ok(canHandleNativeCheckpoint(packet.phase, onCheckpoint, offlineLogoutResume), 'UNEXPECTED_NATIVE_CHECKPOINT');
         // Native dừng trước bước tiếp; counts phải đúng trước ACK nên request ngoài stage không bù được thiếu intent.
         onCheckpoint(status.checkpoint);
         assert.equal((await extension('checkpoint', {})).accepted, false);
@@ -931,15 +1479,24 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
         acknowledged.add(status.checkpoint);
       }
       if (status.status === 'WAITING') await pause(100);
+      stage = 'result';
       assertNativeTiming();
     }
     while (status.status === 'WAITING' && (controlled ? monotonicNow() : Date.now()) < testDeadline);
-    if (status.status === 'FAIL' && ['fixture', 'no-ca', 'main', 'login', 'picker', 'workspace-a', 'workspace-b', 'logout', 'teardown',
+    // Framework PASS không đủ nếu probe bị bỏ qua; require enum được đặt sau khi request hoàn tất trong isolate.
+    if (status.status === 'PASS' && s2RealtimeTicketArguments.length > 0) {
+      assert.equal(status.s2RealtimeTicketObservation, 'PASS', 'NATIVE_S2_REALTIME_TICKET_ORACLE_INVALID');
+    }
+    if (status.status === 'FAIL' && ['fixture', 'no-ca', 'main', 'login', 'picker', 'workspace-a', 'workspace-b', 's2-realtime-ticket', 'logout', 'teardown',
+      'before-account-a', 'account-a-login', 'account-a-picker', 'account-a-summary', 'account-a-ready',
+      'account-a-logout', 'account-a-logged-out', 'account-b-login', 'account-b-logout',
       'before-disabled', 'disabled-rejected', 'wrong-rejected', 'empty-ready', 'empty-refreshed', 'logged-out',
       'password-before', 'limited-ready', 'invalid-short', 'invalid-uppercase', 'invalid-lowercase', 'invalid-digit', 'invalid-confirm',
       'current-rejected', 'password-changed', 'relogin-before', 'old-rejected', 'new-empty', 'password-logout',
       'validation-reset', 'validation-fill', 'validation-before', 'validation-submit', 'validation-result',
-      'auth-submit', 'membership-select', 'workspace-refresh', 'session-logout', 'auth-recover', 'offline-select', 'session-back', ...rateCheckpointStages].includes(status.caseStage)) {
+      'auth-submit', 'membership-select', 'workspace-refresh', 'session-logout', 'auth-recover', 'offline-select', 'session-back', 'resume-storage',
+      'offline-outbox-check-intent', 'offline-outbox-check-session', 'offline-outbox-check-state',
+      'offline-outbox-check-protected-ui', ...rateCheckpointStages].includes(status.caseStage)) {
       console.error(`NATIVE_CASE_STAGE_${status.caseStage.toUpperCase().replaceAll('-', '_')}_FAILED`);
       if (['NONE', 'BOTH', 'LENGTH_ONLY', 'TARGET_ONLY', 'NEITHER'].includes(status.validationObservation)) {
         console.error(`NATIVE_VALIDATION_OBSERVATION_${status.validationObservation}`);
@@ -949,6 +1506,51 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
           ['NONE', 'TIMEOUT', 'FLUTTER', 'OTHER'].includes(status.tapFailure) &&
           ['NONE', 'MISS', 'HIT'].includes(status.tapHit)) {
         console.error(`NATIVE_TAP_${status.tapStage}_${status.tapFailure}_${status.tapHit}`);
+      }
+      if (packet.phase === 'offline-expired' && status.caseStage === 'offline-expired-ready') {
+        // Chỉ phát trạng thái enum/boolean đã allowlist; không in text, storage hay credential của app.
+        const steps = ['WAIT_READY', 'READY_CHECKPOINT', 'READY_ACKED', 'LOGOUT_TAP',
+          'LOGOUT_TAPPED', 'WAIT_OUTBOX', 'OUTBOX_PENDING'];
+        const pages = ['loading', 'login', 'password', 'workspaces', 'summary', 'recovery'];
+        const phases = ['signedOut', 'checking', 'submitting', 'full', 'limited', 'loggingOut',
+          'pending', 'storageFailure', 'offline'];
+        const failures = ['NONE', 'invalidCredentials', 'sessionExpired', 'passwordChangeRequired',
+          'rateLimited', 'permissionDenied', 'conflict', 'cursorInvalid', 'resourceNotFound',
+          'validation', 'unavailable', 'networkUnavailable', 'protocol'];
+        const observation = typeof status.offlineExpiredUiObservation === 'string'
+          ? /^([A-Z_]+)\|([a-zA-Z]+):([a-zA-Z]+):([a-zA-Z]+):(true|false):(true|false)$/
+            .exec(status.offlineExpiredUiObservation) : null;
+        const missing = typeof status.offlineExpiredUiObservation === 'string'
+          ? /^([A-Z_]+)\|(MISSING|MULTIPLE)$/.exec(status.offlineExpiredUiObservation) : null;
+        const validObservation = observation && steps.includes(observation[1]) &&
+          pages.includes(observation[2]) && phases.includes(observation[3]) &&
+          failures.includes(observation[4]);
+        const validMissing = missing && steps.includes(missing[1]);
+        if (validObservation || validMissing) {
+          const uiState = validMissing ? `${missing[1]}_${missing[2]}` :
+            `${observation[1]}_${observation[2].toUpperCase()}_${observation[3].toUpperCase()}_` +
+            `${observation[4].toUpperCase()}_${observation[5].toUpperCase()}_${observation[6].toUpperCase()}`;
+          console.error(`NATIVE_OFFLINE_EXPIRED_UI_${uiState}`);
+        }
+      }
+      if (packet.phase === 'resume') {
+        const storageStates = ['NONE', 'SESSION_ONLY', 'SESSION_AND_INTENT', 'INTENT_ONLY', 'EMPTY', 'READ_FAILURE_READ'];
+        const pages = ['loading', 'login', 'password', 'workspaces', 'summary', 'recovery'];
+        const phases = ['signedOut', 'checking', 'submitting', 'full', 'limited', 'loggingOut',
+          'pending', 'storageFailure', 'offline'];
+        const failures = ['none', 'invalidCredentials', 'sessionExpired', 'passwordChangeRequired', 'rateLimited',
+          'permissionDenied', 'conflict', 'cursorInvalid', 'resourceNotFound', 'validation', 'unavailable',
+          'networkUnavailable', 'protocol'];
+        const observation = typeof status.resumeUiObservation === 'string'
+          ? /^([a-zA-Z]+):([a-zA-Z]+):([a-zA-Z]+)$/.exec(status.resumeUiObservation) : null;
+        const missingApp = status.resumeUiObservation === 'missing_app';
+        if (storageStates.includes(status.resumeStorageObservation) &&
+            (missingApp || (observation && pages.includes(observation[1]) &&
+              phases.includes(observation[2]) && failures.includes(observation[3])))) {
+          const uiState = missingApp ? 'MISSING_APP' :
+            `${observation[1].toUpperCase()}_${observation[2].toUpperCase()}_${observation[3].toUpperCase()}`;
+          console.error(`NATIVE_RESUME_OBSERVATION_STORAGE_${status.resumeStorageObservation}_UI_${uiState}`);
+        }
       }
     }
     assert.ok((controlled ? monotonicNow() < testDeadline : Date.now() <= testDeadline), 'NATIVE_PHASE_BUDGET_EXCEEDED');
@@ -999,10 +1601,20 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
       phase: packet.phase, stage, started, terminal, spawned, boundaryFailed, boundaryReason, appOwned: Boolean(appId), channelReady,
       startupObservations: startupDiagnostics.snapshot() }));
     // Chỉ in enum giai đoạn/lớp lỗi allowlist; không xuất actual/expected, packet hoặc SDK trace.
-    const reason = ['NATIVE_EXTENSION_RESULT_FAILED', 'NATIVE_DAEMON_RPC_FAILED',
-      'NATIVE_DAEMON_RPC_TIMEOUT', 'NATIVE_DAEMON_UNAVAILABLE'].includes(error.message)
-      ? error.message : error.code === 'ERR_ASSERTION' ? 'ASSERTION' : 'BOUNDARY';
-    console.error(`NATIVE_PREFLIGHT_STAGE_${stage.toUpperCase()}_${reason}`);
+    const knownFailureCodes = ['NATIVE_EXTENSION_RESULT_FAILED', 'NATIVE_DAEMON_RPC_FAILED',
+      'NATIVE_DAEMON_RPC_TIMEOUT', 'NATIVE_DAEMON_UNAVAILABLE', 'NATIVE_DAEMON_CLOSED',
+      'NATIVE_DAEMON_PROTOCOL_FAILED', 'NATIVE_MEMBERSHIP_EXTERNAL_UNAVAILABLE',
+      'NATIVE_RATE_EVIDENCE_UNAVAILABLE', 'NATIVE_OFFLINE_PREARM_UNAVAILABLE',
+      'NATIVE_OFFLINE_CLOCK_INVALID'];
+    const reason = knownFailureCodes.includes(error.message) ? error.message :
+      error.code === 'ERR_ASSERTION' ? 'ASSERTION' :
+        error instanceof Error && ['Error', 'TypeError', 'RangeError', 'AssertionError'].includes(error.name)
+          ? `UNEXPECTED_${error.name.toUpperCase()}` : 'UNEXPECTED_OTHER';
+    // Boundary là enum nội bộ, giúp định vị parser mà không phát exception/raw SDK payload.
+    const safeBoundary = ['NONE', 'MALFORMED_ENVELOPE', 'BRACKET_OUTPUT', 'SECRET_ECHO', 'OVERSIZE_LINE',
+      'DUPLICATE_APP', 'WRONG_APP', 'NATIVE_DAEMON_OWNERSHIP_FAILED', 'OUTPUT_BOUNDARY',
+      'OUTPUT_OBSERVER_FAILED', 'STDIN_ERROR'].includes(boundaryReason) ? boundaryReason : 'OTHER';
+    console.error(`NATIVE_PREFLIGHT_STAGE_${stage.toUpperCase()}_${reason}_BOUNDARY_${safeBoundary}`);
     throw new Error('NATIVE_PREFLIGHT_CASE_FAILED');
   } finally {
     preArmClosed = true;
@@ -1054,12 +1666,12 @@ export async function runNativePhase(packet, certificate, onPassed, sensitivePas
         await preArmPending;
       }
       if (rateCheckpointPending) {
-        if (!rateCheckpointPendingSettled) console.error(membership ? 'NATIVE_MEMBERSHIP_CHECKPOINT_IO_UNCONFIRMED' : 'NATIVE_RATE_CHECKPOINT_IO_UNCONFIRMED');
+        if (!rateCheckpointPendingSettled) console.error(membership ? 'NATIVE_MEMBERSHIP_CHECKPOINT_IO_UNCONFIRMED' : offlineControlled ? 'NATIVE_OFFLINE_CHECKPOINT_IO_UNCONFIRMED' : 'NATIVE_RATE_CHECKPOINT_IO_UNCONFIRMED');
         await rateCheckpointPending;
       }
       // SDK cleanup không chờ oracle, nhưng caller chưa được admit fixture mới khi cùng I/O Promise còn pending.
       if (rateOraclePromise) {
-        if (!rateOracleSettled) console.error(membership ? 'NATIVE_MEMBERSHIP_ORACLE_IO_UNCONFIRMED' : 'NATIVE_RATE_ORACLE_IO_UNCONFIRMED');
+        if (!rateOracleSettled) console.error(membership ? 'NATIVE_MEMBERSHIP_ORACLE_IO_UNCONFIRMED' : offlineControlled ? 'NATIVE_OFFLINE_ORACLE_IO_UNCONFIRMED' : 'NATIVE_RATE_ORACLE_IO_UNCONFIRMED');
         await rateOraclePromise;
       }
       if (phaseClosingObservation) {
@@ -1163,8 +1775,34 @@ export async function runNativeRatePhase(packet, certificate, fixture, readCount
   }
 }
 
-/**
- * Hỏi đúng package của integration target bằng ADB; không enumerate process hoặc nhận PID làm quyền kill.
+/** Phân loại receipt ADB thất bại bằng enum cố định để chẩn đoán mà không lộ stderr hoặc path.
+ * Input
+ * Param: result — kết quả spawnSync của ADB, có thể chứa lỗi/diagnostic không được xuất nguyên văn.
+ * Output: OK hoặc mã failure allowlist không chứa output của process.
+ */
+export function nativePidQueryFailureCategory(result) {
+  if (result === null || typeof result !== 'object') return 'INVALID_RESULT';
+  if (result.error) return `SPAWN_${safeNativeFailureCategory(result.error)}`;
+  if (result.signal) return 'SIGNALLED';
+  if (result.status !== 0) {
+    const stderr = typeof result.stderr === 'string' ? result.stderr.toLowerCase() : '';
+    // Nhận diện vài lỗi transport ADB đã biết; chỉ trả enum, không chuyển nội dung stderr ra khỏi bộ nhớ.
+    if (/no devices(?:\/emulators)? found/.test(stderr)) return 'DEVICE_UNAVAILABLE';
+    if (stderr.includes('device offline')) return 'DEVICE_OFFLINE';
+    if (stderr.includes('device unauthorized')) return 'DEVICE_UNAUTHORIZED';
+    if (/device(?:\s+['"][^'"\r\n]+['"])?\s+not found/.test(stderr)) return 'DEVICE_NOT_FOUND';
+    if (/more than one device(?:\/emulator)?/.test(stderr)) return 'DEVICE_AMBIGUOUS';
+    if (/cannot connect to (?:the )?daemon|cannot connect to adb server|adb server failed to start/.test(stderr))
+      return 'ADB_SERVER_UNAVAILABLE';
+    return stderr.trim() !== '' ? 'COMMAND_FAILED_STDERR_PRESENT' : 'COMMAND_FAILED';
+  }
+  if (typeof result.stdout !== 'string') return 'STDOUT_INVALID';
+  if (typeof result.stderr !== 'string') return 'STDERR_INVALID';
+  if (result.stderr.trim() !== '') return 'STDERR_PRESENT';
+  return 'OK';
+}
+
+/** Hỏi đúng package của integration target bằng ADB; không enumerate process hoặc nhận PID làm quyền kill.
  * Input
  * Param: expectedPid — own native PID trước stop; null yêu cầu package đã không còn process.
  * Param: runCommand — boundary thực thi cố định; host test thay OS process bằng kết quả giả.
@@ -1176,8 +1814,8 @@ export function assertNativePid(expectedPid, runCommand = spawnSync) {
   const result = runCommand('C:/Users/LENOVO/AppData/Local/Android/sdk/platform-tools/adb.exe',
     ['-s', deviceId, 'shell', query],
     { encoding: 'utf8', timeout: 5_000, windowsHide: true, maxBuffer: 4096 });
-  assert.ok(result && !result.error && !result.signal && result.status === 0 &&
-    typeof result.stdout === 'string' && typeof result.stderr === 'string' && result.stderr.trim() === '', 'NATIVE_PID_QUERY_FAILED');
+  const queryFailure = nativePidQueryFailureCategory(result);
+  assert.equal(queryFailure, 'OK', `NATIVE_PID_QUERY_${queryFailure}`);
   const value = result.stdout.trim();
   if (expectedPid === null) assert.equal(value, 'NATIVE_PACKAGE_ABSENT', 'OLD_NATIVE_PROCESS_STILL_PRESENT');
   else assert.equal(value, String(expectedPid), 'NATIVE_PID_OWNERSHIP_FAILED');
@@ -1329,33 +1967,59 @@ async function finishClosingNativeFixture({ child, getState, exit, observeExit =
   validateFixtureCleanup(state.stopped.cleanup);
 }
 
+// Chỉ cho phép các enum readiness và trạng thái có/không stderr đi ra khỏi tiến trình host.
+const nativeFixtureReadinessStates = new Set([
+  'SPAWN_FAILED', 'CHILD_EXITED_BEFORE_READY', 'FIXTURE_REPORTED_FAILURE',
+  'PROTOCOL_INVALID', 'READY_TIMEOUT', 'READY_RESPONSE_REJECTED',
+]);
+
+/** Ghi chẩn đoán readiness đã allowlist để phân lớp lỗi mà không phản chiếu dữ liệu tiến trình con.
+ * Input
+ * Param: state — một trạng thái cố định trong hợp đồng chẩn đoán fixture.
+ * Param: stderrPresent — chỉ cho biết stderr có byte hay không, không nhận nội dung.
+ * Side effects: Ghi đúng một marker enum và cờ STDERR_PRESENT/ABSENT ra stderr của runner.
+ */
+function reportNativeFixtureReadinessDiagnostic(state, stderrPresent) {
+  if (!nativeFixtureReadinessStates.has(state)) return;
+  console.error(`NATIVE_FIXTURE_READINESS_DIAGNOSTIC STATE=${state} STDERR_${stderrPresent ? 'PRESENT' : 'ABSENT'}`);
+}
+
 /**
  * Sở hữu shim có private stdin; mọi output đều framed metadata hữu hạn và không chứa credential.
  * Input
  * Param: password — CSPRNG synthetic chỉ truyền RAM; không argv/env/file.
- * Param: scenario — default20/password35/rate-limit40 sau ARM hoặc membership-stale20 neo trước spawn.
+ * Param: scenario — fixed offline/membership profile; expired token chỉ qua private pipe của offline-expired.
  * Param: sensitiveSecrets — toàn bộ credentials cũ/mới cần scan cả output shim dù chỉ original cấp seed.
  * Param: spawnFixtureProcess — trusted process capability; host tests thay fake child, CLI luôn dùng spawn chuẩn.
  * Param: onClosing — hook đồng bộ thông báo coordinator trước owned STOP, không cấp quyền async tùy ý.
- * Output: ready/snapshot/close, membership methods và workDeadline; close giữ original exit/readback.
+ * Output: ready/snapshot/close, membership methods và workDeadline; readiness failure chỉ ghi enum/cờ stderr.
+ * Side effects: close giữ original exit/readback và diagnostic không giữ nội dung stream.
  */
-export function startFixture(password, scenario = 'default', sensitiveSecrets = [password], spawnFixtureProcess = spawn, onClosing) {
-  assert.ok(['default', 'password', 'rate-limit', 'membership-stale', 'offline-login'].includes(scenario), 'INVALID_NATIVE_FIXTURE_SCENARIO');
+export function startFixture(password, scenario = 'default', sensitiveSecrets = [password], spawnFixtureProcess = spawn,
+  onClosing, expiredSessionToken) {
+  assert.ok(['default', 'password', 'rate-limit', 'membership-stale', 'offline-login', 'offline-expired'].includes(scenario),
+    'INVALID_NATIVE_FIXTURE_SCENARIO');
   assert.ok(onClosing === undefined || typeof onClosing === 'function', 'INVALID_NATIVE_FIXTURE_CLOSE_HOOK');
+  assert.ok(expiredSessionToken === undefined || (scenario === 'offline-expired' &&
+    typeof expiredSessionToken === 'string' && /^[0-9a-f]{64}$/.test(expiredSessionToken) &&
+    sensitiveSecrets.includes(expiredSessionToken)), 'INVALID_NATIVE_EXPIRED_SESSION_TOKEN');
+  assert.ok(scenario !== 'offline-expired' || expiredSessionToken, 'NATIVE_EXPIRED_SESSION_TOKEN_REQUIRED');
   const spawnAnchor = performance.now();
   assert.ok(Number.isFinite(spawnAnchor) && spawnAnchor >= 0, 'NATIVE_FIXTURE_CLOCK_INVALID');
-  const startupDeadline = scenario === 'offline-login' ? spawnAnchor + 35_000
+  const startupDeadline = ['offline-login', 'offline-expired'].includes(scenario) ? spawnAnchor + 35_000
     : ['rate-limit', 'membership-stale'].includes(scenario) ? spawnAnchor + 15 * 60_000 : undefined;
-  const membershipWorkDeadline = ['membership-stale', 'offline-login'].includes(scenario) ? spawnAnchor + 20 * 60_000 : undefined;
+  const membershipWorkDeadline = ['membership-stale', 'offline-login', 'offline-expired'].includes(scenario) ? spawnAnchor + 20 * 60_000 : undefined;
   const child = spawnFixtureProcess('python', ['-X', 'utf8', '-B', 'ops/auth/native_lab_fixture.py'],
     { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
   const frames = []; let buffer = ''; let errorTail = ''; let failed = false;
   let terminal = false; let spawned = false; let exitCode;
   let readyReceived = false; let armSent = false; let alreadyArmed = false; let armedWorkDeadline;
+  // Giữ cause readiness đầu tiên; stderr chỉ được rút gọn thành boolean để không lộ byte child.
+  let readinessState; let readinessDiagnosticReported = false; let readinessWaitSucceeded = false; let stderrPresent = false;
 
   let closingNotified = false; let closingHookFailed = false; let closingHookObservation;
   let membershipOffset;
-  const membership = ['membership-stale', 'offline-login'].includes(scenario) ? createNativeMembershipFixture({
+  const membership = ['membership-stale', 'offline-login', 'offline-expired'].includes(scenario) ? createNativeMembershipFixture({
     profile: scenario,
     workDeadline: membershipWorkDeadline,
     available:
@@ -1385,16 +2049,27 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
     (resolve) => {
       child.on('spawn', /** Ghi ownership sau spawn thành công. */ () => { spawned = true; });
       child.on('error', /** Chỉ lỗi trước spawn mới không có child cần cleanup. */
-        () => { failed = true; if (isConfirmedSpawnFailure(spawned, child.pid)) { terminal = true; resolve(); } });
+        () => {
+          failed = true;
+          if (isConfirmedSpawnFailure(spawned, child.pid)) {
+            readinessState ??= 'SPAWN_FAILED'; terminal = true; resolve();
+          }
+        });
       child.on('exit',
         /**
          * Giữ code thực để cleanup không nhầm shim crash với STOPPED.
          * Input
          * Param: code — exit code của shim do runner sở hữu.
          */
-        (code) => { terminal = true; exitCode = code; resolve(); });
+        (code) => {
+          if (!readyReceived) readinessState ??= 'CHILD_EXITED_BEFORE_READY';
+          terminal = true; exitCode = code; resolve();
+        });
     });
-  child.stdin.on('error', /** Pipe lỗi là failure, vẫn giữ observer exit để không bỏ cleanup. */ () => { failed = true; });
+  child.stdin.on('error', /** Pipe lỗi là failure, vẫn giữ observer exit để không bỏ cleanup. */ () => {
+    failed = true;
+    if (!readinessWaitSucceeded) readinessState ??= 'PROTOCOL_INVALID';
+  });
   child.stdout.on('data',
     /**
      * Parse tối đa8 publicframes, mỗi phần buffer≤16KiB; không forward raw input hoặc exception.
@@ -1409,7 +2084,8 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
         while ((newline = buffer.indexOf('\n')) !== -1) {
           const frame = JSON.parse(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1);
           assert.ok(frame && ['READY', 'ARMED', 'SNAPSHOT', 'STOPPED', 'FAILED', 'CONTROL_FAILED', 'STOP_UNCONFIRMED',
-            ...(membership ? ['MEMBERSHIP_TARGET', 'MEMBERSHIP_SUSPENDED', 'MEMBERSHIP_SESSION_EVIDENCE'] : [])].includes(frame.kind) && frames.length < 8);
+            ...(membership ? ['MEMBERSHIP_TARGET', 'MEMBERSHIP_SUSPENDED', 'MEMBERSHIP_SESSION_EVIDENCE'] : [])].includes(frame.kind) &&
+            frames.length < (['offline-login', 'offline-expired'].includes(scenario) ? 16 : 8));
           // READY trễ không được bypass startup cap bằng cách gọi membership method trước ready().
           if (membership && frame.kind === 'READY') assert.ok(performance.now() < startupDeadline, 'NATIVE_MEMBERSHIP_FIXTURE_FAILED');
           if (membership) membership.accept(frame);
@@ -1421,9 +2097,15 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
             alreadyArmed = true;
           }
           frames.push(frame);
-          if (['FAILED', 'CONTROL_FAILED', 'STOP_UNCONFIRMED'].includes(frame.kind)) failed = true;
+          if (['FAILED', 'CONTROL_FAILED', 'STOP_UNCONFIRMED'].includes(frame.kind)) {
+            if (!readyReceived) readinessState ??= 'FIXTURE_REPORTED_FAILURE';
+            failed = true;
+          }
         }
-      } catch { failed = true; buffer = ''; }
+      } catch {
+        if (!readinessWaitSucceeded) readinessState ??= 'PROTOCOL_INVALID';
+        failed = true; buffer = '';
+      }
     });
   child.stderr.on('data',
     /**
@@ -1432,12 +2114,18 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
      * Param: chunk — bytes stderr owned shim.
      */
     (chunk) => {
+      if (chunk.length > 0) stderrPresent = true;
       const value = errorTail + chunk.toString('utf8');
       if (containsNativeSecret(value, sensitiveSecrets)) failed = true;
       // Cả hai secret có shape3prefix+32hex=35ký tự; giữ đủ tail để match split ở mọi vị trí.
-      errorTail = value.slice(-35);
+      // Token fixture dài tối đa64 ký tự; đủ giữ chunk để scanner bắt mọi secret split.
+      errorTail = value.slice(-64);
     });
-  child.stdin.write(JSON.stringify(scenario === 'default' ? { version: 1, password } : { version: 1, password, scenario }) + '\n');
+  const packet = scenario === 'default' ? { version: 1, password } : { version: 1, password, scenario };
+  if (expiredSessionToken !== undefined) packet.expiredSessionToken = expiredSessionToken;
+  child.stdin.write(JSON.stringify(packet) + '\n');
+  if (Object.hasOwn(packet, 'expiredSessionToken')) packet.expiredSessionToken = '';
+  expiredSessionToken = undefined;
 
   /**
    * Đợi đúng frame sau offset để không dùng lại snapshot cũ; observer timeout không chấm dứt shim.
@@ -1466,6 +2154,34 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
       (value) => value.kind === kind);
     assert.ok(frame && !failed && (monotonicDeadline === undefined || performance.now() < monotonicDeadline), 'NATIVE_FIXTURE_PROTOCOL_FAILED');
     return frame;
+  }
+  /** Chờ READY và phân loại thất bại bằng enum host, không dùng nội dung frame hay exception.
+   * Side effects: Ghi tối đa một diagnostic readiness đã allowlist khi READY không được chấp nhận.
+   */
+  async function waitReady() {
+    try {
+      const frame = await waitFrame('READY', 0, 15 * 60_000, startupDeadline);
+      readinessWaitSucceeded = true;
+      return frame;
+    } catch {
+      readinessState ??= terminal ? 'CHILD_EXITED_BEFORE_READY' : failed ? 'PROTOCOL_INVALID' : 'READY_TIMEOUT';
+      if (!readinessDiagnosticReported) {
+        reportNativeFixtureReadinessDiagnostic(readinessState, stderrPresent);
+        readinessDiagnosticReported = true;
+      }
+      throw new Error('NATIVE_FIXTURE_PROTOCOL_FAILED');
+    }
+  }
+  /** Ghi trạng thái response READY bị consumer từ chối mà không xuất response body hoặc exception.
+   * Input
+   * Param: fallbackState — enum readiness cố định do runner chọn tại ranh giới validation.
+   * Side effects: Ghi tối đa một diagnostic readiness đã allowlist.
+   */
+  function reportReadinessFailure(fallbackState) {
+    if (readinessDiagnosticReported) return;
+    readinessState ??= fallbackState;
+    reportNativeFixtureReadinessDiagnostic(readinessState, stderrPresent);
+    readinessDiagnosticReported = true;
   }
   const cleanupOwner = { child, exit: done,
     getState:
@@ -1501,16 +2217,17 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
   /** Đọc READY membership qua cùng startup deadline, lỗi phải đợi owned fixture close. */
   async function membershipReady() {
     try {
-      await waitFrame('READY', 0, 15 * 60_000, startupDeadline);
-      return membership.ready();
+      await waitReady();
+      return await membership.ready();
     } catch {
+      if (readinessWaitSucceeded) reportReadinessFailure('READY_RESPONSE_REJECTED');
       try { await closeFixture(); }
       finally { throw new Error('NATIVE_MEMBERSHIP_FIXTURE_FAILED'); }
     }
   }
 
   /**
-   * Chỉ mở hai literal membership methods cho đúng profile, invalid caller vẫn giữ cleanup ownership.
+   * Chỉ mở literal membership methods cho đúng profile và chuyển UUID đã bind khi fixture hết hạn phiên.
    * Input
    * Param: operation — target/suspend/sessionEvidence literal do returned methods chọn, không nhận từ CLI.
    * Output: receipt controller hoặc fixed error sau original close.
@@ -1527,9 +2244,11 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
     /** Output: membership work cap neo trước spawn, undefined ở profile cũ. */
     get workDeadline() { return membershipWorkDeadline; },
     ready: /** Rate/membership dùng startup clock trước spawn, membership có strict READY/owned close. */
-      () => membership ? membershipReady() : waitFrame('READY', 0, 15 * 60_000, startupDeadline),
+      () => membership ? membershipReady() : waitReady(),
+    reportReadinessResponseRejected: /** Consumer báo READY thiếu/sai projection bằng enum, không truyền nội dung lỗi. */
+      () => reportReadinessFailure('READY_RESPONSE_REJECTED'),
     offlineEvidence: /** Đọc sessions/audit/A-B từ một snapshot owned, chỉ profile offline được admission. */
-      () => membershipRequest(scenario === 'offline-login' ? 'sessionEvidence' : 'offline-unavailable'),
+      () => membershipRequest(['offline-login', 'offline-expired'].includes(scenario) ? 'sessionEvidence' : 'offline-unavailable'),
     membershipTarget: /** Resolve B qua controller của same owned shim, không nhận selector. */
       () => membershipRequest('target'),
     suspendMembershipB: /** Suspend pinned B một lần, receipt chỉ sau operation commit/readback/drain. */
@@ -1581,13 +2300,14 @@ export function startFixture(password, scenario = 'default', sensitiveSecrets = 
 }
 
 /**
- * Chỉ nhận đúng8count integer0 từ readback owned, không coi schema cũ hoặc key thay thế là cleanup ACK.
+ * Chỉ nhận đúng13count integer0 từ readback owned, không coi schema cũ hoặc key thay thế là cleanup ACK.
  * Input
  * Param: counts — projection JSON do shim đọc sau launcher finally, không SQL/digest/credential.
  * Errors: assertion cố định khi thiếu/thừa key, sai kiểu hoặc dữ liệu fixture còn lại.
  */
 export function validateFixtureCleanup(counts) {
-  const keys = ['role', 'hba', 'users', 'sessions', 'workspaces', 'memberships', 'auditActor', 'limiterBuckets'];
+  const keys = ['role', 'hba', 'users', 'sessions', 'workspaces', 'memberships', 'auditActor', 'limiterBuckets',
+    'pushInstallations', 'websocketTickets', 'outboxEvents', 'outboxConsumptions', 'globalIdempotencyRecords'];
   assert.ok(counts && typeof counts === 'object' && !Array.isArray(counts) && Object.keys(counts).length === keys.length && keys.every(
     /** Mỗi scope bắt buộc có tên chính xác và count nguyên0; boolean/null không được ép kiểu thành thành công. */
     (key) => Object.hasOwn(counts, key) && Number.isInteger(counts[key]) && counts[key] === 0), 'NATIVE_FIXTURE_CLEANUP_FAILED');
@@ -1596,10 +2316,11 @@ export function validateFixtureCleanup(counts) {
 /**
  * Chạy scenario main thật trên fixture owned, giữ server/request/PID và cleanup oracle độc lập UI.
  * Input
- * Param: scenario — full/access/password giữ các case cố định, không URL/config tùy ý.
+ * Param: scenario — full/access/password/android-sibling là các case cố định, không URL/config tùy ý.
+ * Side effects: Từ chối READY sai cấu trúc bằng diagnostic enum-only trước khi chuyển sang proxy/native.
  */
 async function runActualMain(scenario) {
-  assert.ok(['full', 'access', 'password'].includes(scenario));
+  assert.ok(['full', 'access', 'password', 'android-sibling'].includes(scenario));
   const certificates = createCertificates();
   const password = `Aa1${randomBytes(16).toString('hex')}`;
   const newPassword = scenario === 'password' ? `Aa2${randomBytes(16).toString('hex')}` : undefined;
@@ -1608,8 +2329,10 @@ async function runActualMain(scenario) {
   const counts = { AUTH_LOGIN: 0, AUTH_LOGOUT: 0, PROFILE_READ: 0, WORKSPACE_LIST: 0, PASSWORD_CHANGE: 0, OTHER: 0 };
   let proxy;
   let stage = 'fixture';
+  let readyResponseUnverified = false;
   try {
     const ready = await fixture.ready();
+    readyResponseUnverified = true;
     assert.ok(typeof ready.runId === 'string' && Array.isArray(ready.emails) && ready.emails.length === 5 && ready.emails.every(
       /**
        * Không gửi credential vào identity/URL tùy ý do output giả mạo chọn.
@@ -1618,6 +2341,7 @@ async function runActualMain(scenario) {
        * Param: index — vị trí0–4 do launcher sinh.
        */
       (email, index) => email === `probe-${ready.runId}-${index}@example.invalid`));
+    readyResponseUnverified = false;
     const workDeadline = performance.now() + (scenario === 'password' ? 35 : 20) * 60_000;
     stage = 'proxy';
     proxy = await startLocalHttpsProxy(certificates.valid, {},
@@ -1679,6 +2403,7 @@ async function runActualMain(scenario) {
       oracle.finishPhase('password-relogin', { ...counts }); requireWorkBudget(workDeadline, 0);
       console.log('NATIVE_ACTUAL_MAIN_PASSWORD_ORACLES_PASS');
     } else if (scenario === 'access') {
+      const accountBaseline = await fixture.snapshot('full');
       const disabledBaseline = await fixture.snapshot('disabled');
       const emptyBaseline = await fixture.snapshot('empty');
       const accessOracle = createAccessCheckpointOracle();
@@ -1691,7 +2416,11 @@ async function runActualMain(scenario) {
          */
         async (processId) => {
           assertNativePid(processId); accessOracle.finish({ ...counts });
-          validateAccessSessionDelta(disabledBaseline, await fixture.snapshot('disabled'), emptyBaseline, await fixture.snapshot('empty'));
+          validateAccountSwitchSessionDelta(
+            accountBaseline, await fixture.snapshot('full'),
+            disabledBaseline, await fixture.snapshot('disabled'),
+            emptyBaseline, await fixture.snapshot('empty'),
+          );
         }, password,
         /**
          * Kiểm exact ordered counters trước ACK native, không DB/network await trong checkpoint budget5s.
@@ -1701,10 +2430,113 @@ async function runActualMain(scenario) {
         (checkpoint) => accessOracle.checkpoint(checkpoint, { ...counts }));
       assertNativePid(null); accessOracle.finish({ ...counts });
       console.log('NATIVE_ACTUAL_MAIN_ACCESS_ORACLES_PASS');
+    } else if (scenario === 'android-sibling') {
+      stage = 'android-sibling-baseline';
+      const baseline = await fixture.snapshot();
+      stage = 'android-sibling-web-login';
+      const webSession = await createOwnedWebSibling(ready.emails[0], password);
+      stage = 'android-sibling-web-login-snapshot';
+      const webLogin = await fixture.snapshot();
+      const webSessionId = validateSessionDelta(baseline, webLogin);
+      let androidFull;
+      let siblingSessionIds;
+      // Giữ 8 phút cho resume và thêm 1 phút test budget của native full trước deadline tổng.
+      requireWorkBudget(workDeadline, 9 * 60_000);
+      stage = 'android-sibling-full-native';
+      const firstPid = await runNativePhase({ version: 1, phase: 'full', emails: ready.emails, password }, certificate,
+        /**
+         * Chụp S2 sau Android UI PASS và xác nhận Web S1 vẫn nguyên vẹn trước khi khởi chạy logout.
+         * Input
+         * Param: processId — PID native do runner đang sở hữu, còn sống tới callback.
+         */
+        async (processId) => {
+          assertNativePid(processId);
+          stage = 'android-sibling-full-snapshot';
+          androidFull = await fixture.snapshot();
+          stage = 'android-sibling-full-session-delta';
+          siblingSessionIds = validateAndroidLogoutPreservesWebSibling(baseline, webLogin, androidFull);
+          assert.equal(siblingSessionIds.webSessionId, webSessionId, 'ANDROID_SIBLING_WEB_SESSION_ID_CHANGED');
+          stage = 'android-sibling-full-counters';
+          assert.equal(counts.AUTH_LOGIN, 1, 'ANDROID_SIBLING_LOGIN_COUNT_INVALID');
+          assert.equal(counts.AUTH_LOGOUT, 0, 'ANDROID_SIBLING_EARLY_LOGOUT');
+          assert.ok(counts.PROFILE_READ > 0, 'ANDROID_SIBLING_PROFILE_CANARY_MISSING');
+        }, sensitiveSecrets,
+        /** Chặn request ngoài allowlist trước khi Android chọn workspace bằng oracle native hiện hữu.
+         * Input
+         * Param: checkpoint — enum native dừng ngay trước workspace selection cần được kiểm cùng counters.
+         */
+        (checkpoint) => {
+          stage = 'android-sibling-picker-checkpoint';
+          validateNativePreselectionOracle(checkpoint, { ...counts });
+          console.log('NATIVE_PRESELECTION_REQUEST_ORACLE_PASS');
+        });
+      stage = 'android-sibling-full-returned';
+      assertNativePid(null);
+      // Resume dùng reserve 8 phút mặc định; không mở process mới nếu work window đã cạn.
+      requireWorkBudget(workDeadline, 8 * 60_000);
+      assert.equal(counts.AUTH_LOGIN, 1, 'ANDROID_SIBLING_LOGIN_COUNT_CHANGED');
+      assert.equal(counts.AUTH_LOGOUT, 0, 'ANDROID_SIBLING_LOGOUT_BEFORE_RESUME');
+
+      const beforeResume = { ...counts };
+      stage = 'android-sibling-resume-native';
+      const secondPid = await runNativePhase({ version: 1, phase: 'resume', emails: ready.emails, password: '' }, certificate,
+        /**
+         * Chứng minh UI Android revoke đúng S2 khi S1 còn sống, rồi dùng Web để kiểm tra và dọn S1.
+         * Input
+         * Param: processId — PID mới của resume, khác PID đã kết thúc sau full.
+         */
+        async (processId) => {
+          assert.notEqual(processId, firstPid); assertNativePid(processId);
+          stage = 'android-sibling-logout-snapshot';
+          const androidLogout = await fixture.snapshot();
+          stage = 'android-sibling-logout-session-delta';
+          const logoutSessionIds = validateAndroidLogoutPreservesWebSibling(
+            baseline, webLogin, androidFull, androidLogout);
+          assert.deepEqual(logoutSessionIds, siblingSessionIds, 'ANDROID_SIBLING_SESSION_ID_CHANGED');
+          assert.equal(counts.AUTH_LOGIN, 1, 'ANDROID_SIBLING_LOGIN_TOTAL_INVALID');
+          assert.equal(counts.AUTH_LOGOUT, 1, 'ANDROID_SIBLING_LOGOUT_TOTAL_INVALID');
+          assert.ok(counts.PROFILE_READ - beforeResume.PROFILE_READ > 0, 'ANDROID_SIBLING_RESUME_PROFILE_MISSING');
+
+          // Cookie, origin và context chỉ được dùng với route allowlist; GET /me xác nhận S1 còn dùng được.
+          stage = 'android-sibling-web-profile';
+          const webProfile = await requestOwnedAuthLab(3000, 'GET', '/me', undefined, {
+            cookie: webSession.cookiePair,
+            origin: fixtureWebOrigin,
+            'x-auth-context-id': webSession.authContextId,
+          });
+          assert.equal(webProfile.status, 200, 'ANDROID_SIBLING_WEB_SESSION_NOT_ACTIVE');
+          assert.ok(typeof webProfile.headers.authContextId === 'string' && webProfile.headers.authContextId.length > 0 &&
+            typeof webProfile.headers.csrfToken === 'string' && webProfile.headers.csrfToken.length > 0,
+          'ANDROID_SIBLING_WEB_METADATA_MISSING');
+          console.log('NATIVE_ANDROID_SIBLING_LOGOUT_PRESERVES_WEB_ORACLE_PASS');
+
+          // Cleanup dùng raw TCP sau cùng Origin/context/CSRF để không bị Fetch ẩn byte thân trái contract.
+          stage = 'android-sibling-web-cleanup';
+          const webLogout = await requestOwnedAuthLabLogoutWire({
+            cookiePair: webSession.cookiePair,
+            authContextId: webProfile.headers.authContextId,
+            csrfToken: webProfile.headers.csrfToken,
+          });
+          assert.equal(webLogout.status, 204, 'ANDROID_SIBLING_WEB_CLEANUP_FAILED');
+          assert.equal(webLogout.bodyByteLength, 0, 'ANDROID_SIBLING_WEB_CLEANUP_BODY_INVALID');
+          stage = 'android-sibling-terminal-snapshot';
+          const terminal = await fixture.snapshot();
+          stage = 'android-sibling-terminal-session-delta';
+          const terminalIds = validateAndroidLogoutPreservesWebSibling(
+            baseline, webLogin, androidFull, androidLogout, terminal);
+          assert.deepEqual(terminalIds, siblingSessionIds, 'ANDROID_SIBLING_TERMINAL_SESSION_ID_CHANGED');
+        }, sensitiveSecrets);
+      stage = 'android-sibling-resume-returned';
+      assert.notEqual(firstPid, secondPid); assertNativePid(null);
+      assert.equal(counts.AUTH_LOGIN, 1, 'ANDROID_SIBLING_LOGIN_AFTER_RESUME');
+      assert.equal(counts.AUTH_LOGOUT, 1, 'ANDROID_SIBLING_LOGOUT_AFTER_RESUME');
+      console.log('NATIVE_ANDROID_SIBLING_SESSION_ORACLES_PASS');
     } else {
       const baseline = await fixture.snapshot();
       let full;
-      stage = 'full';
+      let androidSessionId;
+      // Diagnostic stage chỉ là enum literal, không đưa lỗi, session ID hoặc packet vào stdout.
+      stage = 'full-native';
       const firstPid = await runNativePhase({ version: 1, phase: 'full', emails: ready.emails, password }, certificate,
         /**
          * Kiểm đúng native PID/server snapshot và chưa có logout trước cold restore sau UI/framework PASS.
@@ -1712,22 +2544,37 @@ async function runActualMain(scenario) {
          * Param: processId — own PID do native extension trả.
          */
         async (processId) => {
-          assertNativePid(processId); full = await fixture.snapshot(); validateSessionDelta(baseline, full);
+          stage = 'full-passed-callback';
+          assertNativePid(processId);
+          stage = 'full-session-snapshot';
+          full = await fixture.snapshot();
+          stage = 'full-session-delta';
+          androidSessionId = validateSessionDelta(baseline, full);
+          stage = 'full-request-counters';
           assert.equal(counts.AUTH_LOGIN, 1); assert.ok(counts.PROFILE_READ > 0);
           assert.equal(counts.AUTH_LOGOUT, 0, 'UNEXPECTED_LOGOUT_BEFORE_RESUME');
         }, sensitiveSecrets,
         /** Exact allowlist at the native picker boundary; any device/resource or unknown request fails closed. */
         (checkpoint) => {
+          stage = 'full-picker-checkpoint';
           validateNativePreselectionOracle(checkpoint, { ...counts });
           console.log('NATIVE_PRESELECTION_REQUEST_ORACLE_PASS');
         });
+      stage = 'full-native-returned';
       assertNativePid(null);
+      stage = 'full-work-budget';
       requireWorkBudget(workDeadline, 8 * 60_000);
       // Không để login muộn giữa callback/full SDK cleanup bị hấp thụ vào baseline của phase resume.
       assert.equal(counts.AUTH_LOGIN, 1, 'UNEXPECTED_LOGIN_BETWEEN_PHASES');
       assert.equal(counts.AUTH_LOGOUT, 0, 'UNEXPECTED_LOGOUT_BETWEEN_PHASES');
+      stage = 'cross-client-web-logout';
+      const crossClient = await verifyCrossClientWebLogout(ready.emails[0], password, fixture, baseline, full);
+      assert.equal(crossClient.androidSessionId, androidSessionId, 'CROSS_CLIENT_ANDROID_SESSION_ID_CHANGED');
+      console.log('NATIVE_CROSS_CLIENT_WEB_LOGOUT_ORACLES_PASS');
+      requireWorkBudget(workDeadline, 8 * 60_000);
       const beforeResume = { ...counts };
       stage = 'resume';
+      // Chỉ bật ticket probe ở lần resume sau khi Web S1 đã logout và đã được session oracle xác nhận.
       const secondPid = await runNativePhase({ version: 1, phase: 'resume', emails: ready.emails, password: '' }, certificate,
         /**
          * Resume không relogin; đúng một logout POST revoke App UUID, baseline giữ nguyên.
@@ -1736,19 +2583,44 @@ async function runActualMain(scenario) {
          */
         async (processId) => {
           assert.notEqual(processId, firstPid); assertNativePid(processId);
-          validateSessionDelta(baseline, full, await fixture.snapshot());
+          const terminalSnapshot = await fixture.snapshot();
+          const sessionIds = validateCrossClientSessionDelta(
+            baseline, full, crossClient.webLoginSnapshot, crossClient.webLogoutSnapshot, terminalSnapshot);
+          assert.deepEqual(sessionIds, {
+            androidSessionId: crossClient.androidSessionId,
+            webSessionId: crossClient.webSessionId,
+          }, 'CROSS_CLIENT_TERMINAL_SESSION_ID_CHANGED');
           assert.equal(counts.AUTH_LOGIN - beforeResume.AUTH_LOGIN, 0);
           assert.equal(counts.AUTH_LOGIN, 1, 'UNEXPECTED_LOGIN_TOTAL');
           assert.equal(counts.AUTH_LOGOUT, 1, 'UNEXPECTED_LOGOUT_TOTAL');
           assert.ok(counts.PROFILE_READ - beforeResume.PROFILE_READ > 0);
-        }, password);
+        }, password, undefined, { s2RealtimeTicket: true });
       assert.notEqual(firstPid, secondPid); assertNativePid(null);
       assert.equal(counts.AUTH_LOGIN, 1, 'UNEXPECTED_LOGIN_AFTER_RESUME');
       assert.equal(counts.AUTH_LOGOUT, 1, 'UNEXPECTED_LOGOUT_AFTER_RESUME');
+      console.log('NATIVE_S2_REALTIME_TICKET_AFTER_WEB_LOGOUT_PASS');
+      console.log('NATIVE_CROSS_CLIENT_ANDROID_RESUME_LOGOUT_ORACLE_PASS');
       console.log('NATIVE_ACTUAL_MAIN_FULL_RESUME_LOGOUT_ORACLES_PASS');
     }
-  } catch {
-    console.error(`NATIVE_FULL_SESSION_STAGE_${stage.toUpperCase()}_FAILED`);
+  } catch (error) {
+    if (stage === 'fixture' && readyResponseUnverified) fixture.reportReadinessResponseRejected();
+    if (stage === 'cross-client-web-logout') {
+      // Chỉ nhận step code do helper nội bộ tạo; không chuyển assertion message hoặc raw exception ra console.
+      const safeCrossClientSteps = [
+        'CROSS_CLIENT_WEB_UI_STEP_SPAWN_FAILED',
+        'CROSS_CLIENT_WEB_UI_STEP_WEB_UI_LOGIN_FAILED',
+        'CROSS_CLIENT_WEB_UI_STEP_WEB_LOGIN_SNAPSHOT_FAILED',
+        'CROSS_CLIENT_WEB_UI_STEP_WEB_UI_CONTINUE_FAILED',
+        'CROSS_CLIENT_WEB_UI_STEP_WEB_UI_LOGOUT_FAILED',
+        'CROSS_CLIENT_WEB_UI_STEP_WEB_UI_EXIT_FAILED',
+        'CROSS_CLIENT_WEB_UI_STEP_WEB_LOGOUT_SNAPSHOT_FAILED',
+        'CROSS_CLIENT_WEB_UI_STEP_WEB_SESSION_DELTA_FAILED',
+      ];
+      console.error(safeCrossClientSteps.includes(error?.message)
+        ? 'NATIVE_' + error.message : 'NATIVE_CROSS_CLIENT_FAILURE_OTHER');
+    }
+    const failurePrefix = scenario === 'android-sibling' ? 'NATIVE_ANDROID_SIBLING' : 'NATIVE_FULL_SESSION';
+    console.error(`${failurePrefix}_STAGE_${stage.toUpperCase()}_FAILED`);
     throw new Error('NATIVE_FULL_SESSION_FAILED');
   } finally {
     let proxyClosed = true; let fixtureClosed = true;
@@ -1763,11 +2635,13 @@ async function runActualMain(scenario) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    assert.ok(process.argv.length === 3 && ['--preflight', '--full-session', '--access-cases', '--password-cases'].includes(process.argv[2]), 'NATIVE_E2E_PHASE_NOT_READY');
+    assert.ok(process.argv.length === 3 && ['--preflight', '--full-session', '--android-sibling-cases', '--access-cases', '--password-cases'].includes(process.argv[2]), 'NATIVE_E2E_PHASE_NOT_READY');
     if (process.argv[2] === '--preflight') await runPreflight();
-    else await runActualMain(process.argv[2] === '--access-cases' ? 'access' : process.argv[2] === '--password-cases' ? 'password' : 'full');
-  } catch {
+    else await runActualMain(process.argv[2] === '--android-sibling-cases' ? 'android-sibling' : process.argv[2] === '--access-cases' ? 'access' : process.argv[2] === '--password-cases' ? 'password' : 'full');
+  } catch (error) {
     // Không log raw SDK/exception vì có thể chứa fixture packet hoặc debugger URI.
+    if (process.argv[2] === '--preflight')
+      console.error(`NATIVE_PREFLIGHT_ORCHESTRATION_${safeNativeFailureCategory(error)}`);
     console.error('NATIVE_E2E_PREFLIGHT_FAILED'); process.exitCode = 1;
   }
 }

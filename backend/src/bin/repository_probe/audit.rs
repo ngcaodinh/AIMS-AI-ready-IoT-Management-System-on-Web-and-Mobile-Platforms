@@ -22,7 +22,7 @@ const EVENTS: [&str; 12] = [
 ];
 
 /**
- * Kiểm tập trường và giá trị audit độc lập writer để bắt thiếu metadata hoặc lọt nội dung riêng.
+ * Kiểm allowlist, revision và semantics no-op/diff độc lập writer để bắt thiếu metadata hoặc lọt PII.
  * Input
  * Param: event — action nằm trong manifest probe.
  * Param: metadata — JSON đã parse từ row synthetic, không được log trong lỗi.
@@ -65,6 +65,8 @@ fn validate_metadata(
             "status_before",
             "status_after",
             "alias_changed",
+            "noOp",
+            "diff",
         ],
         _ => &[],
     };
@@ -78,7 +80,15 @@ fn validate_metadata(
             "phase" => value == "MUTATION",
             "result" => value == "COMMITTED" || value == "DENIED",
             "actor_type" => value == "USER" || value == "ANONYMOUS",
-            "limited" | "alias_changed" => value.is_boolean(),
+            "limited" | "alias_changed" | "noOp" => value.is_boolean(),
+            "diff" => value.as_array().is_some_and(|fields| {
+                let mut observed = BTreeSet::new();
+                fields.iter().all(|field| {
+                    field.as_str().is_some_and(|name| {
+                        matches!(name, "role" | "status" | "alias") && observed.insert(name)
+                    })
+                })
+            }),
             "secret_changed" => value == true,
             "revision_before"
             | "revision_after"
@@ -102,6 +112,30 @@ fn validate_metadata(
                 .and_then(|value| value.checked_add(1))
     {
         return Err(ApplicationError::Conflict);
+    }
+    if event == "MEMBERSHIP_CHANGED" {
+        let fields = metadata["diff"]
+            .as_array()
+            .ok_or(ApplicationError::Conflict)?;
+        let changed: BTreeSet<&str> = fields
+            .iter()
+            .map(|field| field.as_str().ok_or(ApplicationError::Conflict))
+            .collect::<Result<_, _>>()?;
+        let role_changed = metadata["role_before"] != metadata["role_after"];
+        let status_changed = metadata["status_before"] != metadata["status_after"];
+        // Chỉ thay đổi quyền role/status mới tăng authzVersion; alias/no-op chỉ tăng revision.
+        let authorization_version_delta = if role_changed || status_changed { 1 } else { 0 };
+        let expected_authorization_version = metadata["authorization_version_before"]
+            .as_i64()
+            .and_then(|version| version.checked_add(authorization_version_delta));
+        if metadata["noOp"] != changed.is_empty()
+            || changed.contains("role") != role_changed
+            || changed.contains("status") != status_changed
+            || metadata["alias_changed"].as_bool() != Some(changed.contains("alias"))
+            || metadata["authorization_version_after"].as_i64() != expected_authorization_version
+        {
+            return Err(ApplicationError::Conflict);
+        }
     }
     Ok(())
 }

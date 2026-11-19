@@ -1,4 +1,6 @@
-//! Validation thuần ở boundary auth; không phụ thuộc HTTP, DB hoặc crate mới.
+//! Validation thuần ở boundary; chính sách tên Unicode dùng phiên bản normalizer đã khóa.
+
+use unicode_normalization::UnicodeNormalization;
 
 /// Lỗi validation an toàn để ánh xạ sang HTTP mà không phản chiếu dữ liệu người dùng.
 #[derive(Debug, PartialEq, Eq)]
@@ -69,6 +71,32 @@ pub fn normalize_email(email: &str) -> Result<String, FieldError> {
         return Err(FieldError {
             path: "/email",
             code: "FORMAT",
+        });
+    }
+    Ok(normalized)
+}
+
+/**
+ * Cắt whitespace ngoài biên, chuẩn hóa NFC rồi kiểm giới hạn tên membership tại boundary.
+ * Input
+ * Param: value — tên hiển thị chưa tin cậy từ request hoặc caller nội bộ.
+ * Output: chuỗi NFC dài1–100 Unicode code point, dùng làm alias riêng của workspace.
+ * Errors
+ * Trả `/displayName` với `LENGTH` khi rỗng/quá dài hoặc `FORMAT` nếu có NUL.
+ */
+pub fn normalize_member_display_name(value: &str) -> Result<String, FieldError> {
+    let normalized: String = value.trim().nfc().collect();
+    if normalized.contains('\0') {
+        return Err(FieldError {
+            path: "/displayName",
+            code: "FORMAT",
+        });
+    }
+    let code_points = normalized.chars().count();
+    if !(1..=100).contains(&code_points) {
+        return Err(FieldError {
+            path: "/displayName",
+            code: "LENGTH",
         });
     }
     Ok(normalized)

@@ -1,0 +1,1297 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Nexa IoT workspace membership contract",
+    "version": "0.1.4",
+    "description": "Draft companion contract for FEAT-TN-003, based on OQ-MEMBER-001…007 and aligned with FEAT-TN-066 §8.2. Compatibility note: this adds a separate membership contract and does not change auth.v1.json or existing routes. Raw email validation reuses auth.v1 LoginRequest email policy. The project owner approved a feature-specific MemberErrorEnvelope code union: it preserves the auth.v1 envelope and shared FieldError shape, adds membership codes locally, and leaves the auth.v1 common code enum unchanged. This design approval does not prove provider/client decoder compatibility or CP-01/G1. The FEAT-TN-003 POST /users path intentionally has no required Idempotency-Key and never replays a one-time secret; FEAT-TN-066's dedicated invitation-create route retains its required key and metadata-only replay. This artifact is not runtime evidence.",
+    "x-contract-status": "DRAFT_G1"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Workspace members"
+    }
+  ],
+  "paths": {
+    "/api/v1/workspaces/{id}/members": {
+      "get": {
+        "tags": [
+          "Workspace members"
+        ],
+        "operationId": "listWorkspaceMembers",
+        "summary": "Liệt kê membership trong workspace đã xác thực",
+        "description": "WEB cookie phải kèm X-Auth-Context-Id khớp session; APP bearer không gửi auth-context hoặc CSRF. Chỉ Admin ACTIVE của workspace ACTIVE. Path là scope chính; X-Workspace-Id nếu có phải khớp path. Actor thiếu quyền trả FORBIDDEN. Cursor ký và ràng buộc actor, workspace, filter, sort cùng quyền hiện hành. Chỉ trả account tối thiểu của membership trong workspace này.",
+        "security": [
+          {
+            "WebSession": []
+          },
+          {
+            "AppBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspacePathId"
+          },
+          {
+            "$ref": "#/components/parameters/OptionalWorkspaceHeader"
+          },
+          {
+            "$ref": "#/components/parameters/MemberStatusFilter"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trang thành viên của đúng workspace hiện hành.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ClientError"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationError"
+          },
+          "409": {
+            "$ref": "#/components/responses/AuthContextConflict"
+          },
+          "403": {
+            "$ref": "#/components/responses/WorkspaceMismatchOrForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ResourceNotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "Workspace members"
+        ],
+        "operationId": "listWorkspaceMembersAlias",
+        "summary": "Alias tương thích của danh sách member",
+        "description": "WEB cookie phải kèm X-Auth-Context-Id khớp session; APP bearer không gửi auth-context hoặc CSRF. Cùng service, DTO, phân quyền và cursor với GET /workspaces/{id}/members. X-Workspace-Id là scope bắt buộc; không truy vấn danh sách account toàn cục.",
+        "security": [
+          {
+            "WebSession": []
+          },
+          {
+            "AppBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequiredWorkspaceHeader"
+          },
+          {
+            "$ref": "#/components/parameters/MemberStatusFilter"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cùng MembershipDTO/envelope với route scoped.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ClientError"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationError"
+          },
+          "409": {
+            "$ref": "#/components/responses/AuthContextConflict"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ResourceNotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Workspace members"
+        ],
+        "operationId": "createWorkspaceMemberOrInvitation",
+        "summary": "Tạo account tạm hoặc invitation trong workspace hiện hành",
+        "description": "WEB cookie mutation cần auth-context khớp, exact same-origin và CSRF hợp lệ; APP bearer không gửi auth-context hoặc CSRF. Admin ACTIVE của workspace ACTIVE. Body tối đa 64 KiB; server canonicalize email theo auth.v1.json, không nhận workspaceId từ body. Email mới tạo User tạm + Membership ACTIVE trong một transaction và trả 201; email đã có tạo invitation theo FEAT-TN-066, không tự join, và trả 202. Invitation hết hạn tại thời gian DB khi tạo + 24 giờ; recipient ACTIVE/full-session được kiểm tại accept, không phải tại create. Account đã có membership ACTIVE/SUSPENDED trong workspace trả 409 MEMBER_EXISTS; invitation PENDING trùng workspace/email trả 409 INVITATION_EXISTS. Web auth-context mismatch cũng trả 409 AUTH_CONTEXT_MISMATCH. Không auto-retry và không replay temporaryPassword hoặc invitationToken. Route này không nhận Idempotency-Key; endpoint invitation riêng của FEAT-TN-066 giữ key bắt buộc và replay chỉ metadata theo contract đó.",
+        "security": [
+          {
+            "WebSession": []
+          },
+          {
+            "AppBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequiredWorkspaceHeader"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMemberRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account tạm và membership đã commit. temporaryPassword chỉ xuất hiện trong response này; response no-store.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedMemberResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Invitation đã commit, chưa tạo membership. invitationToken chỉ xuất hiện một lần; response no-store.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedInvitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ClientError"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/MemberConflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "415": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/members/{userId}": {
+      "patch": {
+        "tags": [
+          "Workspace members"
+        ],
+        "operationId": "patchWorkspaceMember",
+        "summary": "Cập nhật membership bằng revision hiện hành",
+        "description": "WEB cookie mutation cần auth-context khớp, exact same-origin và CSRF hợp lệ; APP bearer không gửi auth-context hoặc CSRF. Chỉ role/status/alias của membership trong workspace path. Path/header mismatch hoặc actor không có Admin hiện hành trả 403; member không thuộc workspace trả 404. If-Match là revision membership, không phải revision User. Chuyển trạng thái hợp lệ: ACTIVE→SUSPENDED/REMOVED, SUSPENDED→ACTIVE/REMOVED; REMOVED không thể PATCH để rejoin. Bảo vệ Admin ACTIVE cuối cùng dưới shared workspace fence. Mọi patch hợp lệ, kể cả no-op, tăng revision một lần; chỉ đổi role/status thực sự mới tăng authzVersion và fence quyền. No-op audit có noOp=true, diff rỗng; alias-only không fence quyền hoặc job.",
+        "security": [
+          {
+            "WebSession": []
+          },
+          {
+            "AppBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspacePathId"
+          },
+          {
+            "$ref": "#/components/parameters/MemberPathUserId"
+          },
+          {
+            "$ref": "#/components/parameters/OptionalWorkspaceHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedMemberPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Membership cập nhật; mọi patch hợp lệ tăng revision một lần.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipDTO"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ClientError"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/WorkspaceMismatchOrForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ResourceNotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/MemberConflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/VersionConflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "415": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "patch": {
+        "tags": [
+          "Workspace members"
+        ],
+        "operationId": "patchWorkspaceMemberAlias",
+        "summary": "Alias PATCH membership tương thích",
+        "description": "WEB cookie mutation cần auth-context khớp, exact same-origin và CSRF hợp lệ; APP bearer không gửi auth-context hoặc CSRF. id là userId; X-Workspace-Id bắt buộc. Cùng application service, validator, transaction, error mapping và CAS với route scoped. Chỉ schema membershipStatus được dùng ở alias; status hoặc workspaceId trong body bị reject. Transition, last-Admin fence, no-op audit và authzVersion theo đúng semantics của route scoped.",
+        "security": [
+          {
+            "WebSession": []
+          },
+          {
+            "AppBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MemberPathId"
+          },
+          {
+            "$ref": "#/components/parameters/RequiredWorkspaceHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AliasMemberPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cùng MembershipDTO/CAS với route scoped.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipDTO"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ClientError"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationError"
+          },
+          "409": {
+            "$ref": "#/components/responses/MemberAndAuthContextConflict"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ResourceNotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/VersionConflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "415": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}/reset-password": {
+      "post": {
+        "tags": [
+          "Workspace members"
+        ],
+        "operationId": "resetTemporaryWorkspaceMemberPassword",
+        "summary": "Đặt lại credential cho account tạm trong một workspace",
+        "description": "WEB cookie mutation cần auth-context khớp, exact same-origin và CSRF hợp lệ; APP bearer không gửi auth-context hoặc CSRF. Body rỗng. Chỉ account ACTIVE, chưa từng kích hoạt và chỉ có membership lịch sử trong workspace hiện hành; legacy activation provenance không rõ được xem là protected. Không thay credential account đã kích hoạt hoặc account đa workspace. Thành công tăng membershipRevision, thay protected hash, thu hồi session của account tạm trong cùng transaction và ghi audit; response secret one-time và no-store. Rate limit tối đa 5 lần reset thành công trong 15 phút theo actor+workspace+target, lưu shared tại PostgreSQL.",
+        "security": [
+          {
+            "WebSession": []
+          },
+          {
+            "AppBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MemberPathId"
+          },
+          {
+            "$ref": "#/components/parameters/RequiredWorkspaceHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "Body phải rỗng; không có trường credential hoặc workspace do client cung cấp.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "maxProperties": 0,
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credential tạm mới được cấp sau commit; chỉ trả một lần.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporaryPasswordResetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ClientError"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationError"
+          },
+          "409": {
+            "$ref": "#/components/responses/MemberAndAuthContextConflict"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/ResourceNotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/VersionConflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "415": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "428": {
+            "$ref": "#/components/responses/PreconditionRequired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "WebSession": {
+        "$ref": "./auth.v1.json#/components/securitySchemes/WebSession"
+      },
+      "AppBearer": {
+        "$ref": "./auth.v1.json#/components/securitySchemes/AppBearer"
+      }
+    },
+    "parameters": {
+      "WorkspacePathId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "MemberPathId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "userId trong workspace được chỉ định bằng X-Workspace-Id."
+      },
+      "MemberPathUserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "RequiredWorkspaceHeader": {
+        "name": "X-Workspace-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Workspace selector không phải quyền; server xác minh membership Admin ACTIVE."
+      },
+      "OptionalWorkspaceHeader": {
+        "name": "X-Workspace-Id",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Nếu được gửi cùng path workspace, giá trị phải khớp."
+      },
+      "MemberStatusFilter": {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/MembershipStatus"
+        },
+        "description": "Mặc định ACTIVE; chỉ Admin hiện hành được truy vấn historical status."
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "Cursor opaque, ký và bound actor/workspace/filter/sort; không phải capability."
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\"[1-9][0-9]*\"$"
+        },
+        "description": "Quoted membership revision; thiếu header trả428, mismatch trả412 VERSION_CONFLICT."
+      }
+    },
+    "headers": {
+      "NoStore": {
+        "description": "Không cache response chứa auth context, dữ liệu membership nhạy cảm hoặc one-time credential/token.",
+        "schema": {
+          "type": "string",
+          "const": "no-store"
+        }
+      }
+    },
+    "schemas": {
+      "MembershipStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "REMOVED"
+        ]
+      },
+      "WorkspaceRole": {
+        "type": "string",
+        "enum": [
+          "ADMIN",
+          "USER"
+        ]
+      },
+      "MemberNameInput": {
+        "type": "string",
+        "description": "Trim outer whitespace and normalize to Unicode NFC before semantic validation. The normalized value must contain 1–100 Unicode code points; whitespace-only values are rejected. The transport body limit bounds raw input size.",
+        "x-normalizedConstraints": {
+          "minCodePoints": 1,
+          "maxCodePoints": 100,
+          "normalization": [
+            "trimOuterWhitespace",
+            "NFC"
+          ]
+        }
+      },
+      "MembershipAliasInput": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MemberNameInput"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Null clears the membership alias; a string is trimmed and normalized before the 1–100 code-point constraint is applied."
+      },
+      "MembershipDTO": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspaceId",
+          "userId",
+          "email",
+          "alias",
+          "role",
+          "status",
+          "authzVersion",
+          "revision"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254,
+            "description": "Chỉ email account của membership trong workspace caller được phép quản trị/xem."
+          },
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Tên riêng của membership; không phải profile global."
+          },
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceRole"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MembershipStatus"
+          },
+          "authzVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "MemberPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MembershipDTO"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateMemberRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "email",
+          "displayName",
+          "role"
+        ],
+        "properties": {
+          "email": {
+            "$ref": "./auth.v1.json#/components/schemas/LoginRequest/properties/email"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/MemberNameInput",
+            "description": "Membership alias for a newly created account; canonicalized before validation."
+          },
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceRole"
+          }
+        }
+      },
+      "CreatedMemberResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "membership",
+          "temporaryPassword"
+        ],
+        "properties": {
+          "membership": {
+            "$ref": "#/components/schemas/MembershipDTO"
+          },
+          "temporaryPassword": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 128,
+            "description": "Credential one-time; generated password follows auth.v1.json password policy. Never log, cache, or replay."
+          }
+        }
+      },
+      "CreatedInvitationResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitation",
+          "invitationToken"
+        ],
+        "properties": {
+          "invitation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "workspaceId",
+              "role",
+              "expiresAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "workspaceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "role": {
+                "$ref": "#/components/schemas/WorkspaceRole"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "invitationToken": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43,
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "description": "32-byte CSPRNG token dạng base64url không padding theo FEAT-TN-066; chỉ trả một lần, không lưu plaintext."
+          }
+        }
+      },
+      "ScopedMemberPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceRole"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MembershipStatus"
+          },
+          "alias": {
+            "$ref": "#/components/schemas/MembershipAliasInput"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "role"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "required": [
+              "alias"
+            ]
+          }
+        ]
+      },
+      "AliasMemberPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceRole"
+          },
+          "membershipStatus": {
+            "$ref": "#/components/schemas/MembershipStatus"
+          },
+          "alias": {
+            "$ref": "#/components/schemas/MembershipAliasInput"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "role"
+            ]
+          },
+          {
+            "required": [
+              "membershipStatus"
+            ]
+          },
+          {
+            "required": [
+              "alias"
+            ]
+          }
+        ]
+      },
+      "TemporaryPasswordResetResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "membershipRevision",
+          "temporaryPassword"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "temporaryPassword": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 128,
+            "description": "Credential one-time theo policy auth.v1.json; không được đọc lại hoặc replay."
+          }
+        }
+      },
+      "MemberErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "details",
+              "correlationId"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "AUTH_INVALID",
+                  "RATE_LIMITED",
+                  "SERVICE_UNAVAILABLE",
+                  "SESSION_EXPIRED",
+                  "SESSION_REVOKED",
+                  "PASSWORD_CHANGE_REQUIRED",
+                  "CSRF_INVALID",
+                  "AUTH_CONTEXT_MISMATCH",
+                  "CURSOR_INVALID",
+                  "WORKSPACE_LIMIT_EXCEEDED",
+                  "IDEMPOTENCY_CONFLICT",
+                  "FORBIDDEN",
+                  "RESOURCE_NOT_FOUND",
+                  "WORKSPACE_REQUIRED",
+                  "WORKSPACE_MISMATCH",
+                  "PRECONDITION_REQUIRED",
+                  "VERSION_CONFLICT",
+                  "LAST_ADMIN_REQUIRED",
+                  "GLOBAL_ACCOUNT_PROTECTED",
+                  "MEMBER_EXISTS",
+                  "INVITATION_EXISTS",
+                  "INVITATION_UNAVAILABLE",
+                  "INVALID_TRANSITION"
+                ],
+                "description": "Union mã riêng của FEAT-TN-003, giữ shape ErrorEnvelope và FieldError tương thích auth.v1; owner đã duyệt phần mở rộng mã membership cục bộ. Decoder/provider compatibility runtime vẫn chưa được xác minh.",
+                "x-commonErrorCodesRef": "./auth.v1.json#/components/schemas/ErrorEnvelope/properties/error/properties/code/enum",
+                "x-membershipErrorCodes": [
+                  "WORKSPACE_REQUIRED",
+                  "WORKSPACE_MISMATCH",
+                  "PRECONDITION_REQUIRED",
+                  "VERSION_CONFLICT",
+                  "LAST_ADMIN_REQUIRED",
+                  "GLOBAL_ACCOUNT_PROTECTED",
+                  "MEMBER_EXISTS",
+                  "INVITATION_EXISTS",
+                  "INVITATION_UNAVAILABLE",
+                  "INVALID_TRANSITION"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "description": "Thông báo tiếng Việt, không phản ánh account ngoài workspace hoặc storage internals."
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "fieldErrors": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "./auth.v1.json#/components/schemas/FieldError"
+                    }
+                  }
+                }
+              },
+              "correlationId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "ClientError": {
+        "description": "400 cho malformed/duplicate JSON hoặc khi request có đồng thời WEB cookie và APP bearer; không echo body hoặc credential.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "AuthenticationError": {
+        "description": "Session không hợp lệ hoặc hết hạn.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "WorkspaceMismatch": {
+        "description": "Workspace path/header không khớp.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "WorkspaceMismatchOrForbidden": {
+        "description": "Workspace path/header mismatch hoặc caller không có Admin membership hiện hành; code WORKSPACE_MISMATCH hoặc FORBIDDEN.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Không có Admin membership hiện hành.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "ResourceNotFound": {
+        "description": "Không có resource trong workspace scope hiện hành.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "JSON body vượt 65536 byte trả 413 BODY_TOO_LARGE; media type không hỗ trợ trả 415 CONTENT_TYPE; field thiếu/null/type/format/length/enum/unknown trả 422 VALIDATION_ERROR và details.fieldErrors[{path,code}]. Body lỗi không được echo.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "AuthContextConflict": {
+        "description": "Web auth-context mismatch; code AUTH_CONTEXT_MISMATCH.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "MemberAndAuthContextConflict": {
+        "description": "Member conflict hoặc Web auth-context mismatch; code MEMBER_EXISTS, INVITATION_EXISTS, LAST_ADMIN_REQUIRED, GLOBAL_ACCOUNT_PROTECTED, INVALID_TRANSITION, hoặc AUTH_CONTEXT_MISMATCH.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "MemberConflict": {
+        "description": "LAST_ADMIN_REQUIRED, GLOBAL_ACCOUNT_PROTECTED, MEMBER_EXISTS, INVITATION_EXISTS hoặc INVALID_TRANSITION; Web auth-context mismatch dùng cùng status 409.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "VersionConflict": {
+        "description": "If-Match không còn bằng membership revision hiện hành; code VERSION_CONFLICT.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "PreconditionRequired": {
+        "description": "Thiếu If-Match; code PRECONDITION_REQUIRED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Vượt rate limit; client không tự retry mutation.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          },
+          "Retry-After": {
+            "description": "Số giây nguyên làm tròn lên tới cuối fixed window, tối thiểu 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "Dependency chưa sẵn sàng hoặc commit outcome chưa xác định; không phát lại secret.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MemberErrorEnvelope"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        }
+      }
+    }
+  },
+  "x-jsonBodyPolicy": {
+    "appliesToOperationIds": [
+      "createWorkspaceMemberOrInvitation",
+      "patchWorkspaceMember",
+      "patchWorkspaceMemberAlias",
+      "resetTemporaryWorkspaceMemberPassword"
+    ],
+    "maxBytes": 65536,
+    "malformedJson": {
+      "status": 400,
+      "fieldErrorCode": "MALFORMED_JSON"
+    },
+    "duplicateJsonKey": {
+      "status": 400,
+      "fieldErrorCode": "DUPLICATE_FIELD"
+    },
+    "oversizedBody": {
+      "status": 413,
+      "fieldErrorCode": "BODY_TOO_LARGE"
+    },
+    "unsupportedMediaType": {
+      "status": 415,
+      "fieldErrorCode": "CONTENT_TYPE"
+    },
+    "semanticValidation": {
+      "status": 422,
+      "fieldErrorCodes": [
+        "REQUIRED",
+        "TYPE",
+        "FORMAT",
+        "LENGTH",
+        "ENUM",
+        "UNKNOWN_FIELD"
+      ]
+    }
+  }
+}

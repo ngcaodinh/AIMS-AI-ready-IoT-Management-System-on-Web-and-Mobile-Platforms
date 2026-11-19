@@ -4,7 +4,7 @@ use crate::{PgUnitOfWork, storage_error};
 use chrono::{DateTime, Utc};
 use iot_application::{
     error::ApplicationError,
-    membership::{LockedMembership, MembershipTransaction},
+    membership::{LockedMembership, MembershipListItem, MembershipTransaction},
 };
 use iot_domain::{
     identity::SessionProof,
@@ -30,6 +30,70 @@ pub(crate) fn status_value(status: MembershipStatus) -> &'static str {
 
 impl MembershipTransaction for PgUnitOfWork {
     /**
+     * Đọc trang member trong tenant đã admission, chỉ lấy projection cần cho API.
+     * Input
+     * Param: `workspace_id` — tenant đã được khóa và current Admin xác minh cùng transaction.
+     * Param: status — enum domain chuyển thành literal DB allowlist, không nhận SQL từ request.
+     * Param: `after_user_id` — khóa keyset UUID để phân trang ổn định.
+     * Param: limit — số hàng hữu hạn do application chặn tối đa101 gồm sentinel.
+     * Output: email/account alias và quyền membership thuộc đúng workspace, không đọc verifier.
+     * # Errors
+     * Lỗi kết nối hoặc dữ liệu enum storage không hợp lệ.
+     */
+    async fn list_members(
+        &mut self,
+        workspace_id: Uuid,
+        status: MembershipStatus,
+        after_user_id: Option<Uuid>,
+        limit: i64,
+    ) -> Result<Vec<MembershipListItem>, ApplicationError> {
+        // Workspace predicate bắt buộc ở SQL; mọi giá trị động bind để query không thể mở scope hoặc sửa cú pháp.
+        let rows = sqlx::query("SELECT membership.workspace_id,membership.user_id,account.email_normalized,membership.alias,membership.role,membership.status,membership.authorization_version,membership.revision FROM memberships membership JOIN users account USING(user_id) WHERE membership.workspace_id=$1 AND membership.status=$2 AND ($3::uuid IS NULL OR membership.user_id>$3) ORDER BY membership.user_id LIMIT $4")
+            .bind(workspace_id)
+            .bind(status_value(status))
+            .bind(after_user_id)
+            .bind(limit)
+            .fetch_all(&mut *self.transaction)
+            .await
+            .map_err(storage_error)?;
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            let role = match row
+                .try_get::<String, _>("role")
+                .map_err(storage_error)?
+                .as_str()
+            {
+                "ADMIN" => WorkspaceRole::Admin,
+                "USER" => WorkspaceRole::User,
+                _ => return Err(ApplicationError::Unavailable),
+            };
+            let status = match row
+                .try_get::<String, _>("status")
+                .map_err(storage_error)?
+                .as_str()
+            {
+                "ACTIVE" => MembershipStatus::Active,
+                "SUSPENDED" => MembershipStatus::Suspended,
+                "REMOVED" => MembershipStatus::Removed,
+                _ => return Err(ApplicationError::Unavailable),
+            };
+            items.push(MembershipListItem {
+                workspace_id: row.try_get("workspace_id").map_err(storage_error)?,
+                user_id: row.try_get("user_id").map_err(storage_error)?,
+                email: row.try_get("email_normalized").map_err(storage_error)?,
+                alias: row.try_get("alias").map_err(storage_error)?,
+                role,
+                status,
+                authorization_version: row
+                    .try_get("authorization_version")
+                    .map_err(storage_error)?,
+                revision: row.try_get("revision").map_err(storage_error)?,
+            });
+        }
+        Ok(items)
+    }
+
+    /**
      * Lấy cùng protocol User pair với invitation/reset trước parent Workspace.
      * Input
      * Param: proof — session hint cần current resolver kiểm lại.
@@ -49,7 +113,7 @@ impl MembershipTransaction for PgUnitOfWork {
      * Input
      * Param: `workspace_id` — parent đang được khóa và đã current Admin admission.
      * Param: `target_id` — User đã khóa trước parent để tránh write skew/cross-user deadlock.
-     * Output: snapshot/email cho domain và HMAC fence; forbidden khi thiếu membership.
+     * Output: snapshot/email cho domain và HMAC fence; member không thuộc workspace trả not-found.
      */
     async fn lock_member(
         &mut self,
@@ -58,7 +122,7 @@ impl MembershipTransaction for PgUnitOfWork {
     ) -> Result<LockedMembership, ApplicationError> {
         // Parent fence serialize mọi member/global-account mutation ảnh hưởng Admin, không khóa User khác sau Workspace.
         let row=sqlx::query("SELECT membership.*,account.email_normalized,(account.account_status='ACTIVE' AND NOT account.must_change_password) AS account_capable,(SELECT count(*) FROM memberships other_member JOIN users other_account USING(user_id) WHERE other_member.workspace_id=$1 AND other_member.user_id<>$2 AND other_member.status='ACTIVE' AND other_member.role='ADMIN' AND other_account.account_status='ACTIVE' AND NOT other_account.must_change_password) AS other_admin_count FROM memberships membership JOIN users account USING(user_id) WHERE membership.workspace_id=$1 AND membership.user_id=$2 FOR UPDATE OF membership")
-            .bind(workspace_id).bind(target_id).fetch_optional(&mut *self.transaction).await.map_err(storage_error)?.ok_or(ApplicationError::Forbidden)?;
+            .bind(workspace_id).bind(target_id).fetch_optional(&mut *self.transaction).await.map_err(storage_error)?.ok_or(ApplicationError::ResourceNotFound)?;
         let role = match row
             .try_get::<String, _>("role")
             .map_err(storage_error)?

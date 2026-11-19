@@ -1,6 +1,10 @@
 //! Tạo member phân biệt account mới với invitation; không mang secret vào receipt hoặc Debug.
 
-use crate::{identity::SecretString, input::normalize_email, workspace::WorkspaceRole};
+use crate::{
+    identity::SecretString,
+    input::{normalize_email, normalize_member_display_name},
+    workspace::WorkspaceRole,
+};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -14,23 +18,21 @@ pub struct MemberCreationRequest {
 
 impl MemberCreationRequest {
     /**
-     * Xác thực email và displayName bắt buộc trước khi mở transaction hoặc hash password.
+     * Xác thực email và canonicalize displayName trước khi mở transaction hoặc hash password.
      * Input
      * Param: email — raw email cần normalize theo policy account hiện hành.
-     * Param: `display_name` — alias tenant, giữ exact text; không blank/NUL, không tự đặt max chưa có contract.
+     * Param: `display_name` — alias tenant cần trim, NFC và giới hạn1–100 code point theo contract.
      * Param: role — ADMIN/USER dự định cấp trong tenant.
      * Output: request hợp lệ hoặc None; không tạo account hoặc cấp quyền.
      */
     #[must_use]
     pub fn new(email: &str, display_name: &str, role: WorkspaceRole) -> Option<Self> {
         let email_normalized = normalize_email(email).ok()?;
-        if display_name.trim().is_empty() || display_name.contains('\0') {
-            return None;
-        }
+        let display_name = normalize_member_display_name(display_name).ok()?;
         Some(Self {
             raw_email: email.to_owned(),
             email_normalized,
-            display_name: display_name.to_owned(),
+            display_name,
             role,
         })
     }
@@ -41,7 +43,10 @@ impl MemberCreationRequest {
         &self.email_normalized
     }
 
-    /// Trả alias nguyên bản chỉ để ghi Membership mới, không sửa account đã tồn tại.
+    /**
+     * Trả alias tenant đã trim và chuẩn hóa NFC để ghi Membership mới và tạo fingerprint ổn định.
+     * Alias này thuộc Membership, không thay đổi tên hồ sơ toàn cục của account hiện hữu.
+     */
     #[must_use]
     pub fn display_name(&self) -> &str {
         &self.display_name
@@ -53,7 +58,12 @@ impl MemberCreationRequest {
         self.role
     }
 
-    /// Encode raw body có length-prefix và namespace để cùng key không thể đổi email/alias/role.
+    /**
+     * Mã hóa intent tạo member để cùng idempotency key không thể đổi email, alias hoặc role.
+     * Namespace và length-prefix giữ ranh giới field; email giữ nguyên raw input còn alias dùng
+     * giá trị đã trim/NFC để retry chỉ khác khoảng trắng ngoài biên vẫn cùng intent.
+     * Output: byte sequence ổn định để fingerprint; không chứa secret.
+     */
     #[must_use]
     pub fn request_bytes(&self) -> Vec<u8> {
         let mut bytes = b"member-create:v1\0".to_vec();

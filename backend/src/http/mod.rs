@@ -1,6 +1,7 @@
 //! HTTP adapter cho IAM; business rule vẫn thuộc application/domain, không mở CORS ambient.
 
 mod input;
+mod members;
 mod realtime;
 mod security;
 mod sessions;
@@ -172,6 +173,12 @@ impl From<ApplicationError> for HttpError {
             ApplicationError::SessionRevoked => Self::session_revoked(),
             ApplicationError::PasswordChangeRequired => Self::code(403, "PASSWORD_CHANGE_REQUIRED"),
             ApplicationError::Conflict => Self::context_mismatch(),
+            // Tách lỗi rejoin để không làm mất mã auth-context mismatch của phiên Web.
+            ApplicationError::InvalidTransition => Self::code(409, "INVALID_TRANSITION"),
+            // Route FEAT066 cũ vẫn nhận mã conflict tổng quát; FEAT003 mới ánh xạ riêng ở handler.
+            ApplicationError::MemberExists | ApplicationError::InvitationExists => {
+                Self::context_mismatch()
+            }
             ApplicationError::Forbidden | ApplicationError::ResourceNotFound => {
                 Self::code(404, "RESOURCE_NOT_FOUND")
             }
@@ -385,6 +392,7 @@ pub(super) fn session_headers(
 pub fn auth_router(state: HttpState) -> Router {
     state.realtime.start_reconciliation(state.auth.clone());
     sessions::routes()
+        .merge(members::routes())
         .merge(realtime::routes())
         .route("/api/v1/auth/login", post(login))
         .with_state(state)

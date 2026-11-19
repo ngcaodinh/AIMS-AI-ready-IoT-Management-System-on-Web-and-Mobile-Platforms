@@ -174,7 +174,7 @@ impl InvitationTransaction for PgUnitOfWork {
      * Param: email — email chuẩn hóa để kiểm membership chưa REMOVED.
      * Param: `email_digest` — HMAC email dùng identity admission fence.
      * Param: now — clock sau parent lock để quyết định expiry.
-     * Output: current admission generation; conflict khi membership còn tồn tại hoặc lỗi storage.
+     * Output: current admission generation.
      */
     async fn prepare_invitation(
         &mut self,
@@ -187,7 +187,7 @@ impl InvitationTransaction for PgUnitOfWork {
         let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM memberships membership JOIN users account USING(user_id) WHERE membership.workspace_id=$1 AND account.email_normalized=$2 AND membership.status<>'REMOVED')")
             .bind(workspace_id).bind(email).fetch_one(&mut *self.transaction).await.map_err(storage_error)?;
         if exists {
-            return Err(ApplicationError::Conflict);
+            return Err(ApplicationError::MemberExists);
         }
         sqlx::query("INSERT INTO membership_admission_fences(workspace_id,email_digest,admission_generation) VALUES($1,$2,1) ON CONFLICT DO NOTHING")
             .bind(workspace_id).bind(email_digest.as_slice()).execute(&mut *self.transaction).await.map_err(storage_error)?;
@@ -196,6 +196,17 @@ impl InvitationTransaction for PgUnitOfWork {
         // Pending partial unique không có now(); expiry được materialize dưới cùng email fence.
         sqlx::query("UPDATE workspace_invitations SET expired_at=$3 WHERE workspace_id=$1 AND email_digest=$2 AND used_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL AND expires_at<=$3")
             .bind(workspace_id).bind(email_digest.as_slice()).bind(now).execute(&mut *self.transaction).await.map_err(storage_error)?;
+        // Email fence đã khóa và invitation hết hạn vừa được vật chất hóa, nên duplicate pending có mã lỗi ổn định.
+        let pending: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workspace_invitations WHERE workspace_id=$1 AND email_digest=$2 AND used_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL AND expires_at>$3)")
+            .bind(workspace_id)
+            .bind(email_digest.as_slice())
+            .bind(now)
+            .fetch_one(&mut *self.transaction)
+            .await
+            .map_err(storage_error)?;
+        if pending {
+            return Err(ApplicationError::InvitationExists);
+        }
         Ok(generation)
     }
 

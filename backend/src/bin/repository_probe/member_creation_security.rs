@@ -77,6 +77,10 @@ impl IdentitySecurity for HashProbeSecurity {
     fn issue_token(&self) -> (SecretString, [u8; 32]) {
         self.inner.issue_token()
     }
+    /// Ủy quyền token invitation cho crypto thật để probe giữ cùng wire format và entropy production.
+    fn issue_member_invitation_token(&self) -> Result<(SecretString, [u8; 32]), ApplicationError> {
+        self.inner.issue_member_invitation_token()
+    }
     /// Chuyển token input sang digest bằng delegate, không xác thực hoặc log secret.
     fn token_digest(&self, token: &str) -> [u8; 32] {
         self.inner.token_digest(token)

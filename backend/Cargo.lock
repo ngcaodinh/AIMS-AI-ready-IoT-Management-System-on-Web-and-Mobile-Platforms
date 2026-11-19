@@ -771,6 +771,7 @@ name = "iot-domain"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "unicode-normalization",
  "uuid",
 ]
 
@@ -780,6 +781,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum",
+ "base64",
  "chrono",
  "hmac",
  "iot-application",

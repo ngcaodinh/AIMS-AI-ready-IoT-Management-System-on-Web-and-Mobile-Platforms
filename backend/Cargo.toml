@@ -7,7 +7,9 @@ edition = "2024"
 rust-version = "1.85"
 
 [workspace.dependencies]
+base64 = "=0.22.1"
 chrono = { version = "=0.4.42", default-features = false, features = ["clock", "serde"] }
+unicode-normalization = "=0.1.26"
 uuid = { version = "=1.18.1", features = ["v4", "serde"] }
 sqlx = { version = "=0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json"] }
 
@@ -45,6 +47,7 @@ required-features = ["http-server"]
 
 [dependencies]
 axum = { version = "=0.8.6", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
+base64.workspace = true
 iot-domain = { path = "crates/domain" }
 iot-application = { path = "crates/application" }
 iot-postgres = { path = "crates/postgres" }

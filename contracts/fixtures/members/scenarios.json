@@ -1,0 +1,1896 @@
+{
+  "contract": "members.v1.json",
+  "contractVersion": "0.1.4",
+  "status": "SPECIFICATION_ONLY_NOT_EXECUTED",
+  "fixtureNote": "Synthetic contract expectations only. Contexts are symbolic and contain no credentials, cookies, CSRF values, temporary passwords, or invitation tokens. One-time secret values are intentionally omitted; this file is not HTTP/runtime evidence. Error envelope examples use synthetic messages/correlation IDs; no runtime response is claimed.",
+  "scenarios": [
+    {
+      "id": "FIXTURE-MEMBER-001",
+      "name": "List members only in the authorized workspace",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members",
+        "query": {
+          "status": "ACTIVE",
+          "limit": 20
+        }
+      },
+      "expected": {
+        "status": 200,
+        "assertions": [
+          "items contain MembershipDTO allowlist only",
+          "every item.workspaceId equals path workspaceId",
+          "nextCursor is null or opaque and workspace-bound",
+          "no account global status, password hash, token, or credential is returned"
+        ],
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "bodySchemaRef": "#/components/schemas/MemberPage"
+      },
+      "coverageIds": [
+        "CT-MEMBER-001"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-002",
+      "name": "Create a temporary account and membership for a new email",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "new.member@example.test",
+          "displayName": "New Member",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "membership is ACTIVE in workspace-a",
+          "temporaryPassword is present in this response only",
+          "temporaryPassword value is not persisted in fixture, log, audit, cache, or receipt",
+          "account and membership are atomic"
+        ],
+        "bodySchemaRef": "#/components/schemas/CreatedMemberResponse"
+      },
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-003",
+      "name": "Create an invitation for an existing email without auto-joining",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "existing.member@example.test",
+          "displayName": "Workspace Alias",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 202,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "invitation metadata contains id, workspaceId, role, expiresAt only",
+          "invitationToken is present in this response only",
+          "no membership is created before recipient acceptance",
+          "no global account status or profile is returned"
+        ],
+        "bodySchemaRef": "#/components/schemas/CreatedInvitationResponse"
+      },
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-004",
+      "name": "Reject invalid create role",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "new.member@example.test",
+          "displayName": "New Member",
+          "role": "OWNER"
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/role",
+        "assertions": [
+          "no account, membership, or invitation is created"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/role",
+                  "code": "ENUM"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "fieldErrorCode": "ENUM"
+      },
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-005",
+      "name": "Reject a path and workspace header mismatch",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000b",
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "status": "SUSPENDED"
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "WORKSPACE_MISMATCH",
+        "assertions": [
+          "no workspace-b membership metadata is returned",
+          "no mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "WORKSPACE_MISMATCH",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-005"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-006",
+      "name": "Hide a member that belongs only to another workspace",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000d",
+        "headers": {
+          "If-Match": "\"2\""
+        },
+        "body": {
+          "status": "SUSPENDED"
+        }
+      },
+      "expected": {
+        "status": 404,
+        "errorCode": "RESOURCE_NOT_FOUND",
+        "assertions": [
+          "no member or account metadata leaks",
+          "workspace-b membership remains unchanged"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "RESOURCE_NOT_FOUND",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-005"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-007",
+      "name": "Scoped and alias PATCH map to the same membership CAS service",
+      "requestVariants": [
+        {
+          "method": "PATCH",
+          "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+          "headers": {
+            "If-Match": "\"4\""
+          },
+          "body": {
+            "status": "SUSPENDED"
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/v1/users/00000000-0000-4000-8000-00000000000c",
+          "headers": {
+            "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+            "If-Match": "\"4\""
+          },
+          "body": {
+            "membershipStatus": "SUSPENDED"
+          }
+        }
+      ],
+      "expected": {
+        "status": 200,
+        "assertions": [
+          "both variants produce the same MembershipDTO and error mapping",
+          "role/status permission change increments revision and authzVersion once",
+          "alias route rejects status and unknown fields",
+          "scoped route rejects membershipStatus and unknown fields"
+        ],
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "bodySchemaRef": "#/components/schemas/MembershipDTO"
+      },
+      "coverageIds": [
+        "CT-MEMBER-006"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-008",
+      "name": "Require If-Match for membership mutation",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "body": {
+          "alias": "Updated"
+        }
+      },
+      "expected": {
+        "status": 428,
+        "errorCode": "PRECONDITION_REQUIRED",
+        "assertions": [
+          "no mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "PRECONDITION_REQUIRED",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-009",
+      "name": "Reject stale membership revision",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"3\""
+        },
+        "body": {
+          "alias": "Updated"
+        }
+      },
+      "expected": {
+        "status": 412,
+        "errorCode": "VERSION_CONFLICT",
+        "assertions": [
+          "current membership state is unchanged",
+          "client must fetch and consciously reapply"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VERSION_CONFLICT",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-010",
+      "name": "Preserve the final capable active Admin",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "status": "REMOVED"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "LAST_ADMIN_REQUIRED",
+        "assertions": [
+          "membership and authorization version are unchanged",
+          "concurrent removals cannot leave zero capable active Admins"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "LAST_ADMIN_REQUIRED",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-004"
+      ],
+      "contextRef": "CTX-WEB-LAST-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-011",
+      "name": "Protect activated or multi-workspace account from temporary reset",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users/00000000-0000-4000-8000-00000000000d/reset-password",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+          "If-Match": "\"2\""
+        },
+        "body": {}
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "GLOBAL_ACCOUNT_PROTECTED",
+        "assertions": [
+          "password hash and sessions are unchanged",
+          "workspace-b remains usable",
+          "no credential is returned"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "GLOBAL_ACCOUNT_PROTECTED",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-004"
+      ],
+      "contextRef": "CTX-WEB-RESET-PROTECTED",
+      "preconditions": {
+        "targetAccount": "activatedOrHasMultipleWorkspaceMemberships"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-012",
+      "name": "Do not duplicate an existing membership",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "existing.member@example.test",
+          "displayName": "New Alias",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "MEMBER_EXISTS",
+        "assertions": [
+          "ACTIVE or SUSPENDED membership is not replaced by invitation",
+          "no credential or invitation token is returned"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "MEMBER_EXISTS",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-013",
+      "name": "Do not issue duplicate pending invitations",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "invited.member@example.test",
+          "displayName": "Invitee",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "INVITATION_EXISTS",
+        "assertions": [
+          "existing pending invitation is not rotated implicitly",
+          "raw invitation token is not replayed"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "INVITATION_EXISTS",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-014",
+      "name": "Keep no-op patch revision monotonic without a false permission fence",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "role": "ADMIN"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "assertions": [
+          "revision increments once",
+          "authzVersion does not increment for a no-op",
+          "audit records noOp with an empty permission diff"
+        ],
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "bodySchemaRef": "#/components/schemas/MembershipDTO"
+      },
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "contextRef": "CTX-WEB-ADMIN"
+    },
+    {
+      "id": "FIXTURE-MEMBER-015",
+      "name": "Allow an authorized APP bearer request without WEB auth-context or CSRF headers",
+      "contextRef": "CTX-APP-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-001"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members"
+      },
+      "expected": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "APP bearer is authorized from current workspace membership",
+          "X-Auth-Context-Id and X-CSRF-Token are not sent for APP bearer"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberPage"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-016",
+      "name": "Reject a WEB request that omits auth context before returning membership data",
+      "contextRef": "CTX-WEB-AUTH-CONTEXT-MISSING",
+      "coverageIds": [
+        "CT-MEMBER-001"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members"
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "AUTH_CONTEXT_MISMATCH",
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "response contains no membership data",
+          "no state changes"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "AUTH_CONTEXT_MISMATCH",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-017",
+      "name": "Reject a WEB mutation whose auth context does not match its session",
+      "contextRef": "CTX-WEB-AUTH-CONTEXT-MISMATCH",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "alias": "Changed"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "AUTH_CONTEXT_MISMATCH",
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "no membership mutation occurs",
+          "no member data is returned"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "AUTH_CONTEXT_MISMATCH",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-018",
+      "name": "Reject a WEB mutation without CSRF proof",
+      "contextRef": "CTX-WEB-CSRF-MISSING",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "alias": "Changed"
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "CSRF_INVALID",
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "no membership mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "CSRF_INVALID",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-019",
+      "name": "Deny a USER membership from the Admin member list",
+      "contextRef": "CTX-WEB-USER",
+      "coverageIds": [
+        "CT-MEMBER-001"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members"
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "FORBIDDEN",
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "no member list is returned"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "FORBIDDEN",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-020",
+      "name": "Canonicalize email by trimming ASCII edges and lowercasing ASCII before validation",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "  New.Member@Example.Test \t",
+          "displayName": "New Member",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "canonical email is validated and stored",
+          "raw email is not written to logs or evidence",
+          "canonical email equals new.member@example.test"
+        ],
+        "bodySchemaRef": "#/components/schemas/CreatedMemberResponse"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-021",
+      "name": "Reject non-ASCII email before creating an account or membership",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "membre.é@example.test",
+          "displayName": "New Member",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/email",
+        "fieldErrorCode": "FORMAT",
+        "assertions": [
+          "no account, membership, or invitation is created"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/email",
+                  "code": "FORMAT"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-022",
+      "name": "Reject an email whose canonical local part exceeds 64 ASCII characters",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.test",
+          "displayName": "New Member",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/email",
+        "fieldErrorCode": "LENGTH",
+        "assertions": [
+          "length is checked after email canonicalization",
+          "no account, membership, or invitation is created"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/email",
+                  "code": "LENGTH"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-023",
+      "name": "Trim and NFC-normalize display name before applying the code-point limit",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "cafe@example.test",
+          "displayName": "  Café  ",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "normalization is trim outer whitespace then NFC",
+          "global profile is not changed",
+          "MembershipDTO.alias equals Café"
+        ],
+        "bodySchemaRef": "#/components/schemas/CreatedMemberResponse"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-024",
+      "name": "Accept a normalized name of exactly 100 Unicode code points",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "boundary100@example.test",
+          "displayName": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "normalized value has 100 Unicode code points"
+        ],
+        "bodySchemaRef": "#/components/schemas/CreatedMemberResponse"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-025",
+      "name": "Reject a normalized name of 101 Unicode code points",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "boundary101@example.test",
+          "displayName": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/displayName",
+        "fieldErrorCode": "LENGTH",
+        "assertions": [
+          "no account, membership, or invitation is created"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/displayName",
+                  "code": "LENGTH"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-026",
+      "name": "Reject a display name that is whitespace-only after trimming",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "blank@example.test",
+          "displayName": " \t ",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/displayName",
+        "fieldErrorCode": "LENGTH",
+        "assertions": [
+          "no account, membership, or invitation is created"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/displayName",
+                  "code": "LENGTH"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-027",
+      "name": "Clear an existing membership alias with explicit null",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "alias": null
+        }
+      },
+      "expected": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "null clears only the membership alias",
+          "revision increments once",
+          "MembershipDTO.alias is null after clearing the alias"
+        ],
+        "bodySchemaRef": "#/components/schemas/MembershipDTO"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-028",
+      "name": "Accept a canonical email with exactly 254 characters",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccccccccccccccccccccccccccccccccccc.test",
+          "displayName": "Boundary Email",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "email length is checked on the canonical value",
+          "canonical email length is 254"
+        ],
+        "bodySchemaRef": "#/components/schemas/CreatedMemberResponse"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-029",
+      "name": "Reject a canonical email with 255 characters",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.test",
+          "displayName": "Boundary Email",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/email",
+        "fieldErrorCode": "LENGTH",
+        "assertions": [
+          "no account, membership, or invitation is created"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/email",
+                  "code": "LENGTH"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-030",
+      "name": "Reset an eligible temporary account and return a one-time response shape",
+      "contextRef": "CTX-WEB-RESET-ELIGIBLE",
+      "coverageIds": [
+        "CT-MEMBER-004"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users/00000000-0000-4000-8000-00000000000d/reset-password",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+          "If-Match": "\"2\""
+        },
+        "body": {}
+      },
+      "expected": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "response contains userId, membershipRevision, and temporaryPassword",
+          "fixture stores no temporaryPassword value",
+          "membershipRevision increments once"
+        ],
+        "bodySchemaRef": "#/components/schemas/TemporaryPasswordResetResponse"
+      },
+      "preconditions": {
+        "targetAccount": "activeUnactivatedTemporaryWithOnlyWorkspaceA"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-031",
+      "name": "Do not replay reset secret after a response-lost retry with the old revision",
+      "contextRef": "CTX-WEB-RESET-ELIGIBLE",
+      "coverageIds": [
+        "IT-MEMBER-009"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users/00000000-0000-4000-8000-00000000000d/reset-password",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+          "If-Match": "\"2\""
+        },
+        "body": {}
+      },
+      "expected": {
+        "status": 412,
+        "errorCode": "VERSION_CONFLICT",
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "assertions": [
+          "first request committed at revision 3",
+          "retry does not mint another password",
+          "response contains no temporaryPassword"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VERSION_CONFLICT",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        }
+      },
+      "preconditions": {
+        "targetAccount": "activeUnactivatedTemporaryWithOnlyWorkspaceA"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-032",
+      "name": "Return Retry-After when reset rate limit is reached",
+      "contextRef": "CTX-WEB-RESET-ELIGIBLE",
+      "coverageIds": [
+        "CT-MEMBER-004"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users/00000000-0000-4000-8000-00000000000d/reset-password",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+          "If-Match": "\"2\""
+        },
+        "body": {}
+      },
+      "expected": {
+        "status": 429,
+        "errorCode": "RATE_LIMITED",
+        "headers": {
+          "Cache-Control": "no-store",
+          "Retry-After": 14
+        },
+        "assertions": [
+          "Retry-After is a positive integer number of seconds",
+          "no new credential is minted"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "RATE_LIMITED",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        }
+      },
+      "preconditions": {
+        "targetAccount": "activeUnactivatedTemporaryWithOnlyWorkspaceA"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-033",
+      "name": "Reject malformed PATCH JSON before mutation",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\"",
+          "Content-Type": "application/json"
+        },
+        "rawBody": "{\"alias\":"
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "",
+        "fieldErrorCode": "MALFORMED_JSON",
+        "assertions": [
+          "body is not echoed",
+          "no membership mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "",
+                  "code": "MALFORMED_JSON"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-034",
+      "name": "Reject duplicate JSON keys before mutation",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\"",
+          "Content-Type": "application/json"
+        },
+        "rawBody": "{\"alias\":\"A\",\"alias\":\"B\"}"
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/alias",
+        "fieldErrorCode": "DUPLICATE_FIELD",
+        "assertions": [
+          "duplicate keys are rejected at the JSON boundary",
+          "no membership mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/alias",
+                  "code": "DUPLICATE_FIELD"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-035",
+      "name": "Reject a PATCH body larger than 64 KiB",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\"",
+          "Content-Type": "application/json"
+        },
+        "rawBodyBytes": 65537,
+        "rawBodyValue": "omitted synthetic payload"
+      },
+      "expected": {
+        "status": 413,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "",
+        "fieldErrorCode": "BODY_TOO_LARGE",
+        "assertions": [
+          "limit is 65536 bytes",
+          "no membership mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "",
+                  "code": "BODY_TOO_LARGE"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-036",
+      "name": "Reject unsupported PATCH media type",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\"",
+          "Content-Type": "text/plain"
+        },
+        "body": "alias=Changed"
+      },
+      "expected": {
+        "status": 415,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "",
+        "fieldErrorCode": "CONTENT_TYPE",
+        "assertions": [
+          "no membership mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "",
+                  "code": "CONTENT_TYPE"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-037",
+      "name": "Reject a reset request body larger than 64 KiB",
+      "contextRef": "CTX-WEB-RESET-ELIGIBLE",
+      "coverageIds": [
+        "CT-MEMBER-004"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users/00000000-0000-4000-8000-00000000000d/reset-password",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+          "If-Match": "\"2\"",
+          "Content-Type": "application/json"
+        },
+        "rawBodyBytes": 65537,
+        "rawBodyValue": "omitted synthetic payload"
+      },
+      "expected": {
+        "status": 413,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "",
+        "fieldErrorCode": "BODY_TOO_LARGE",
+        "assertions": [
+          "no credential is minted",
+          "account state is unchanged"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "",
+                  "code": "BODY_TOO_LARGE"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "preconditions": {
+        "targetAccount": "activeUnactivatedTemporaryWithOnlyWorkspaceA"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-038",
+      "name": "Reject unsupported reset media type",
+      "contextRef": "CTX-WEB-RESET-ELIGIBLE",
+      "coverageIds": [
+        "CT-MEMBER-004"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users/00000000-0000-4000-8000-00000000000d/reset-password",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+          "If-Match": "\"2\"",
+          "Content-Type": "text/plain"
+        },
+        "rawBody": "not-json"
+      },
+      "expected": {
+        "status": 415,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "",
+        "fieldErrorCode": "CONTENT_TYPE",
+        "assertions": [
+          "no credential is minted",
+          "account state is unchanged"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "",
+                  "code": "CONTENT_TYPE"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "preconditions": {
+        "targetAccount": "activeUnactivatedTemporaryWithOnlyWorkspaceA"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-039",
+      "name": "Reject any non-empty semantic reset body",
+      "contextRef": "CTX-WEB-RESET-ELIGIBLE",
+      "coverageIds": [
+        "CT-MEMBER-004"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users/00000000-0000-4000-8000-00000000000d/reset-password",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a",
+          "If-Match": "\"2\"",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "unexpected": true
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "",
+        "fieldErrorCode": "UNKNOWN_FIELD",
+        "assertions": [
+          "no credential is minted",
+          "account state is unchanged"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "",
+                  "code": "UNKNOWN_FIELD"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "preconditions": {
+        "targetAccount": "activeUnactivatedTemporaryWithOnlyWorkspaceA"
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-040",
+      "name": "Reject mixed WEB cookie and APP bearer credentials",
+      "contextRef": "CTX-MIXED-CREDENTIALS",
+      "coverageIds": [
+        "CT-MEMBER-001"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members"
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "VALIDATION_ERROR",
+        "assertions": [
+          "fixture context contains no credential values",
+          "no membership data is returned"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-041",
+      "name": "Deny a limited WEB session before returning workspace members",
+      "contextRef": "CTX-WEB-LIMITED",
+      "coverageIds": [
+        "CT-MEMBER-001"
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members"
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "PASSWORD_CHANGE_REQUIRED",
+        "assertions": [
+          "no workspace or membership data is returned"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "PASSWORD_CHANGE_REQUIRED",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-042",
+      "name": "Reject a cross-origin WEB PATCH even when auth context and CSRF are valid",
+      "contextRef": "CTX-WEB-CROSS-ORIGIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "alias": "Changed"
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "CSRF_INVALID",
+        "assertions": [
+          "exact same-origin check fails",
+          "no membership mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "CSRF_INVALID",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {},
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-043",
+      "name": "Reject an empty string alias after normalization",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "alias": ""
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "VALIDATION_ERROR",
+        "fieldErrorPath": "/alias",
+        "fieldErrorCode": "LENGTH",
+        "assertions": [
+          "only explicit null clears an alias",
+          "no membership mutation occurs"
+        ],
+        "bodySchemaRef": "#/components/schemas/MemberErrorEnvelope",
+        "errorEnvelopeExample": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Yêu cầu bị từ chối theo quy tắc đã nêu.",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/alias",
+                  "code": "LENGTH"
+                }
+              ]
+            },
+            "correlationId": "correlation-fixture-001"
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-044",
+      "name": "Trim and NFC-normalize an alias before membership update",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-003"
+      ],
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v1/workspaces/00000000-0000-4000-8000-00000000000a/members/00000000-0000-4000-8000-00000000000c",
+        "headers": {
+          "If-Match": "\"4\""
+        },
+        "body": {
+          "alias": "  Café  "
+        }
+      },
+      "expected": {
+        "status": 200,
+        "assertions": [
+          "stored MembershipDTO.alias is NFC-composed Café",
+          "revision increments once",
+          "MembershipDTO.alias equals Café"
+        ],
+        "bodySchemaRef": "#/components/schemas/MembershipDTO",
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      }
+    },
+    {
+      "id": "FIXTURE-MEMBER-045",
+      "name": "Recover after an invitation response with a one-time token is lost",
+      "contextRef": "CTX-WEB-ADMIN",
+      "coverageIds": [
+        "CT-MEMBER-002"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/users",
+        "headers": {
+          "X-Workspace-Id": "00000000-0000-4000-8000-00000000000a"
+        },
+        "body": {
+          "email": "invited.member@example.test",
+          "displayName": "Invitee",
+          "role": "USER"
+        }
+      },
+      "expected": {
+        "status": 202,
+        "assertions": [
+          "initial response has a one-time invitation token but the token value is never persisted in fixture",
+          "no membership is created before recipient acceptance"
+        ],
+        "bodySchemaRef": "#/components/schemas/CreatedInvitationResponse",
+        "headers": {
+          "Cache-Control": "no-store"
+        }
+      },
+      "preconditions": {
+        "invitationResponseDelivery": "lost",
+        "existingInvitationTokenAvailable": false
+      },
+      "flow": [
+        {
+          "action": "revoke the old pending invitation through FEAT-TN-066 accepted flow"
+        },
+        {
+          "action": "create a new invitation through FEAT-TN-066 accepted flow"
+        },
+        {
+          "assertion": "the previous one-time token is not replayed and no account is auto-joined"
+        }
+      ]
+    }
+  ],
+  "defaultContextRef": "CTX-WEB-ADMIN",
+  "fixtureContexts": [
+    {
+      "id": "CTX-WEB-ADMIN",
+      "client": "WEB",
+      "authentication": "validSession",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "matchesSession",
+      "csrf": "presentForMutation",
+      "sessionState": "full",
+      "origin": "sameOrigin"
+    },
+    {
+      "id": "CTX-APP-ADMIN",
+      "client": "APP",
+      "authentication": "validBearer",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "notSent",
+      "csrf": "notSent"
+    },
+    {
+      "id": "CTX-WEB-AUTH-CONTEXT-MISSING",
+      "client": "WEB",
+      "authentication": "validSession",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "missing",
+      "csrf": "presentForMutation",
+      "sessionState": "full",
+      "origin": "sameOrigin"
+    },
+    {
+      "id": "CTX-WEB-AUTH-CONTEXT-MISMATCH",
+      "client": "WEB",
+      "authentication": "validSession",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "doesNotMatchSession",
+      "csrf": "presentForMutation",
+      "sessionState": "full",
+      "origin": "sameOrigin"
+    },
+    {
+      "id": "CTX-WEB-CSRF-MISSING",
+      "client": "WEB",
+      "authentication": "validSession",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "matchesSession",
+      "csrf": "missing",
+      "sessionState": "full",
+      "origin": "sameOrigin"
+    },
+    {
+      "id": "CTX-WEB-USER",
+      "client": "WEB",
+      "authentication": "validSession",
+      "workspaceRole": "USER",
+      "membershipStatus": "ACTIVE",
+      "authContext": "matchesSession",
+      "csrf": "presentForMutation",
+      "sessionState": "full",
+      "origin": "sameOrigin"
+    },
+    {
+      "id": "CTX-WEB-LAST-ADMIN",
+      "client": "WEB",
+      "authentication": "validSession",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "matchesSession",
+      "csrf": "presentForMutation",
+      "workspaceState": "targetIsLastCapableActiveAdmin",
+      "sessionState": "full",
+      "origin": "sameOrigin"
+    },
+    {
+      "id": "CTX-WEB-LIMITED",
+      "client": "WEB",
+      "authentication": "validSession",
+      "sessionState": "limitedPasswordChangeRequired",
+      "workspaceRole": "none",
+      "authContext": "matchesSession",
+      "csrf": "presentForMutation",
+      "origin": "sameOrigin"
+    },
+    {
+      "id": "CTX-WEB-CROSS-ORIGIN",
+      "client": "WEB",
+      "authentication": "validSession",
+      "sessionState": "full",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "matchesSession",
+      "csrf": "validForSession",
+      "origin": "differentOrigin"
+    },
+    {
+      "id": "CTX-MIXED-CREDENTIALS",
+      "client": "WEB",
+      "authentication": "cookieAndBearerPresent",
+      "credentialValues": "omitted",
+      "sessionState": "ambiguous"
+    },
+    {
+      "id": "CTX-WEB-RESET-ELIGIBLE",
+      "client": "WEB",
+      "authentication": "validSession",
+      "sessionState": "full",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "matchesSession",
+      "csrf": "presentForMutation",
+      "origin": "sameOrigin",
+      "targetAccount": "activeUnactivatedTemporaryWithOnlyWorkspaceA"
+    },
+    {
+      "id": "CTX-WEB-RESET-PROTECTED",
+      "client": "WEB",
+      "authentication": "validSession",
+      "sessionState": "full",
+      "workspaceRole": "ADMIN",
+      "membershipStatus": "ACTIVE",
+      "authContext": "matchesSession",
+      "csrf": "presentForMutation",
+      "origin": "sameOrigin",
+      "targetAccount": "activatedOrHasMultipleWorkspaceMemberships"
+    }
+  ]
+}

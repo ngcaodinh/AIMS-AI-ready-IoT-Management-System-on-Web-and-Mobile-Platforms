@@ -1,6 +1,7 @@
 //! Hash có giới hạn tài nguyên và capability ngẫu nhiên; không có khóa hardcode.
 
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use iot_application::auth_diagnostics::{
     AuthDiagnostics, AuthTimingOutcome, AuthTimingSpan, AuthTimingStage,
@@ -272,6 +273,18 @@ impl IdentitySecurity for CryptoService {
         let token = generate_token();
         let digest = self.token_digest(token.expose());
         (token, digest)
+    }
+    /**
+     * Sinh invitation token độc lập dạng base64url 43 ký tự mà vẫn giữ đủ entropy256 bit.
+     * Output: token đã che trong `SecretString` và SHA-256 digest cho storage; chưa được phát trước commit.
+     */
+    fn issue_member_invitation_token(&self) -> Result<(SecretString, [u8; 32]), ApplicationError> {
+        let mut bytes = [0_u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        // 32 byte thành43 ký tự base64url không padding, khớp schema invitation mà không đổi token phiên hex.
+        let token = URL_SAFE_NO_PAD.encode(bytes);
+        let digest = self.token_digest(&token);
+        Ok((SecretString::new(token), digest))
     }
     /// Băm capability entropy cao để lookup, không coi digest là chứng cứ session còn quyền.
     fn token_digest(&self, token: &str) -> [u8; 32] {

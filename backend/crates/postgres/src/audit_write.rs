@@ -22,7 +22,7 @@ fn status_value(status: MembershipStatus) -> &'static str {
 }
 
 /**
- * Dựng JSON allowlist từ kiểu hữu hạn, tránh serialize payload/credential hoặc tên riêng vào audit.
+ * Dựng JSON allowlist từ kiểu hữu hạn, diff membership chỉ ghi tên field và không chứa PII.
  * Input
  * Param: detail — metadata của mutation đã được application authorize và thực thi trong transaction.
  * Param: `has_actor` — actor có identity đã biết; false chỉ biểu thị anonymous failed login.
@@ -80,18 +80,29 @@ pub(crate) fn redacted_metadata(detail: &AuditDetail, has_actor: bool) -> String
         AuditDetail::InvitationAccepted {
             grant_generation, ..
         } => format!(r#", "grant_generation":{grant_generation}"#),
-        AuditDetail::MembershipChanged(member) => format!(
-            r#", "revision_before":{},"revision_after":{},"authorization_version_before":{},"authorization_version_after":{},"role_before":"{}","role_after":"{}","status_before":"{}","status_after":"{}","alias_changed":{}"#,
-            member.revision_before,
-            member.revision_after,
-            member.authorization_version_before,
-            member.authorization_version_after,
-            role_value(member.role_before),
-            role_value(member.role_after),
-            status_value(member.status_before),
-            status_value(member.status_after),
-            member.alias_changed
-        ),
+        AuditDetail::MembershipChanged(member) => {
+            // Diff chỉ gồm tên trường từ domain allowlist; nội dung alias/email không vào audit.
+            let diff = member
+                .diff
+                .iter()
+                .map(|field| format!("\"{field}\""))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                r#", "revision_before":{},"revision_after":{},"authorization_version_before":{},"authorization_version_after":{},"role_before":"{}","role_after":"{}","status_before":"{}","status_after":"{}","alias_changed":{},"noOp":{},"diff":[{}]"#,
+                member.revision_before,
+                member.revision_after,
+                member.authorization_version_before,
+                member.authorization_version_after,
+                role_value(member.role_before),
+                role_value(member.role_after),
+                status_value(member.status_before),
+                status_value(member.status_after),
+                member.alias_changed,
+                member.no_op,
+                diff
+            )
+        }
         _ => String::new(),
     };
     // SUCCESS của use case đồng bộ chỉ là local COMMITTED, không hứa board/provider success.

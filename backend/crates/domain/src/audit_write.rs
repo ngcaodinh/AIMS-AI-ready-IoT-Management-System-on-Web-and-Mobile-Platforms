@@ -13,7 +13,7 @@ pub enum FailureAuditKind {
     PasswordChange,
 }
 
-/// Metadata member không chứa alias/email, chỉ transition được phép công bố cho audit Admin.
+/// Metadata member không chứa alias/email; diff chỉ nêu tên trường đã đổi.
 #[derive(Debug)]
 pub struct MembershipAudit {
     pub user_id: Uuid,
@@ -26,18 +26,30 @@ pub struct MembershipAudit {
     pub status_before: MembershipStatus,
     pub status_after: MembershipStatus,
     pub alias_changed: bool,
+    pub no_op: bool,
+    pub diff: Vec<&'static str>,
 }
 
 impl MembershipAudit {
     /**
-     * Chụp transition đã authorize mà không sao chép hồ sơ riêng vào audit tenant.
+     * Chụp transition đã authorize, chỉ ghi tên trường đổi và không sao chép hồ sơ riêng.
      * Input
      * Param: before — member dưới khóa trước CAS.
      * Param: after — member cùng identity sau transition hợp lệ.
-     * Output: chỉ ID/enum/counter và cờ đổi alias; không giữ nội dung alias.
+     * Output: ID/enum/counter, cờ no-op và diff allowlist; không giữ nội dung alias/email.
      */
     #[must_use]
     pub fn between(before: &MembershipSnapshot, after: &MembershipSnapshot) -> Self {
+        let mut diff = Vec::with_capacity(3);
+        if before.role != after.role {
+            diff.push("role");
+        }
+        if before.status != after.status {
+            diff.push("status");
+        }
+        if before.alias != after.alias {
+            diff.push("alias");
+        }
         Self {
             user_id: before.user_id,
             revision_before: before.revision,
@@ -49,6 +61,8 @@ impl MembershipAudit {
             status_before: before.status,
             status_after: after.status,
             alias_changed: before.alias != after.alias,
+            no_op: diff.is_empty(),
+            diff,
         }
     }
 }
@@ -122,6 +136,9 @@ pub enum AuditDetail {
     TemporaryPasswordReset {
         user_id: Uuid,
     },
+    MembershipLastAdminDenied {
+        user_id: Uuid,
+    },
     MembershipResetAdmitted {
         user_id: Uuid,
         revision_before: i64,
@@ -155,6 +172,7 @@ impl AuditDetail {
             Self::TemplateDraftChanged { .. } => "TEMPLATE_DRAFT_CHANGED",
             Self::TemplatePublished { .. } => "TEMPLATE_PUBLISHED",
             Self::TemporaryPasswordReset { .. } => "TEMPORARY_PASSWORD_RESET",
+            Self::MembershipLastAdminDenied { .. } => "MEMBERSHIP_LAST_ADMIN_DENIED",
             Self::MembershipResetAdmitted { .. } => "MEMBERSHIP_RESET_ADMITTED",
             Self::MembershipChanged(_) => "MEMBERSHIP_CHANGED",
             Self::RealtimeTicketIssued { .. } => "REALTIME_TICKET_ISSUED",
@@ -165,7 +183,9 @@ impl AuditDetail {
     #[must_use]
     pub const fn outcome(&self) -> &'static str {
         match self {
-            Self::LoginFailed | Self::PasswordChangeFailed { .. } => "FAILURE",
+            Self::LoginFailed
+            | Self::PasswordChangeFailed { .. }
+            | Self::MembershipLastAdminDenied { .. } => "FAILURE",
             _ => "SUCCESS",
         }
     }
@@ -190,6 +210,7 @@ impl AuditDetail {
             Self::TemplateDraftChanged { .. } => "TEMPLATE_DRAFT_REPLACED",
             Self::TemplatePublished { .. } => "TEMPLATE_PUBLISHED",
             Self::TemporaryPasswordReset { .. } => "ADMIN_TEMPORARY_RESET",
+            Self::MembershipLastAdminDenied { .. } => "LAST_ADMIN_REQUIRED",
             Self::MembershipResetAdmitted { .. } => "TEMPORARY_RESET_ADMITTED",
             Self::MembershipChanged(_) => "MEMBERSHIP_PATCHED",
             Self::RealtimeTicketIssued { .. } => "REALTIME_TICKET_ISSUED",
@@ -216,7 +237,8 @@ impl AuditDetail {
             | Self::InvitationRevoked { invitation_id, .. } => Some(("INVITATION", *invitation_id)),
             Self::MembershipChanged(member) => Some(("MEMBERSHIP", member.user_id)),
             Self::MembershipResetAdmitted { user_id, .. }
-            | Self::MembershipCreated { user_id, .. } => Some(("MEMBERSHIP", *user_id)),
+            | Self::MembershipCreated { user_id, .. }
+            | Self::MembershipLastAdminDenied { user_id } => Some(("MEMBERSHIP", *user_id)),
             Self::RealtimeTicketIssued { ticket_id } => Some(("WEBSOCKET_TICKET", *ticket_id)),
             Self::TemplateCreated { template_id }
             | Self::TemplateDraftChanged { template_id, .. } => Some(("TEMPLATE", *template_id)),
@@ -239,6 +261,7 @@ impl AuditDetail {
                 | Self::InvitationRevoked { .. }
                 | Self::MembershipCreated { .. }
                 | Self::MembershipChanged(_)
+                | Self::MembershipLastAdminDenied { .. }
                 | Self::MembershipResetAdmitted { .. }
                 | Self::RealtimeTicketIssued { .. }
                 | Self::TemplateCreated { .. }

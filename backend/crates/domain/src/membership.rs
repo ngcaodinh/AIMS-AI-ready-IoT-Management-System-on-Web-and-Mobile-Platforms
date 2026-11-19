@@ -189,4 +189,32 @@ mod tests {
             Err(MembershipFailure::RejoinRequired)
         ));
     }
+
+    /// Cùng account có thể mang role khác nhau theo tenant; patch chỉ tạo snapshot mới cho tenant đích.
+    #[test]
+    fn role_patch_changes_only_the_target_workspace_membership() {
+        let mut workspace_a = admin();
+        workspace_a.role = WorkspaceRole::User;
+        workspace_a.other_capable_admin_count = 1;
+        let mut workspace_b = workspace_a.clone();
+        workspace_b.workspace_id = Uuid::new_v4();
+        workspace_b.role = WorkspaceRole::Admin;
+
+        let updated_a = workspace_a
+            .apply(
+                &MembershipPatch {
+                    role: Some(WorkspaceRole::Admin),
+                    ..MembershipPatch::default()
+                },
+                workspace_a.revision,
+            )
+            .unwrap();
+
+        assert_eq!(updated_a.user_id, workspace_b.user_id);
+        assert_ne!(updated_a.workspace_id, workspace_b.workspace_id);
+        assert_eq!(updated_a.role, WorkspaceRole::Admin);
+        assert_eq!(workspace_b.role, WorkspaceRole::Admin);
+        assert_eq!(workspace_b.revision, 4);
+        assert_eq!(workspace_b.authorization_version, 7);
+    }
 }

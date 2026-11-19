@@ -42,6 +42,15 @@ pub trait IdentitySecurity: Clone + Send + Sync {
     /// Sinh capability256 bit và digest của nó; raw token chỉ đi tới client sau commit.
     fn issue_token(&self) -> (SecretString, [u8; 32]);
     /**
+     * Cấp token invitation theo wire format base64url không padding, tách biệt token phiên dạng hex.
+     * Output: chuỗi entropy256 bit cùng digest để lưu; caller chỉ phát raw token sau commit.
+     * # Errors
+     * `Unavailable` nếu adapter không hỗ trợ định dạng invitation an toàn.
+     */
+    fn issue_member_invitation_token(&self) -> Result<(SecretString, [u8; 32]), ApplicationError> {
+        Err(ApplicationError::Unavailable)
+    }
+    /**
      * Sinh mật khẩu tạm từ một capability CSPRNG mới, dùng riêng với token phiên.
      * Prefix chỉ bảo đảm thành phần hoa/thường/số, không được tính là entropy hoặc credential độc lập.
      * # Output

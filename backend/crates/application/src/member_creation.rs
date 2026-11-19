@@ -209,7 +209,7 @@ where
                 context.now,
             )
             .await?;
-        let (token, token_digest) = self.security.issue_token();
+        let (token, token_digest) = self.security.issue_member_invitation_token()?;
         let invitation = InvitationSnapshot {
             workspace_id: context.admission.workspace_id,
             invitation_id: Uuid::new_v4(),

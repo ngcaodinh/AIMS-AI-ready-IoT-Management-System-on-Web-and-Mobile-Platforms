@@ -155,11 +155,22 @@ pub trait WorkspaceTransaction: IdentityTransaction {
 
 /// Mutation credential/session bổ sung trên cùng unit of work, không tách revoke/audit/outbox thành commit riêng.
 pub trait SessionMutationTransaction: IdentityTransaction {
-    /// Lookup email để chọn bucket→User lock order; chưa cấp authority và phải resolve lại session sau khóa.
-    fn session_email(
+    /// Resolve User ID để chọn limiter đổi mật khẩu trước User lock; chưa cấp authority và phải khóa lại session.
+    fn session_user_id(
         &mut self,
         proof: &SessionProof,
-    ) -> impl Future<Output = Result<String, ApplicationError>> + Send;
+    ) -> impl Future<Output = Result<Uuid, ApplicationError>> + Send;
+    /// Khóa bucket riêng theo User ID để các lần sai dùng chung ngân sách giữa session và instance.
+    fn lock_password_change_bucket(
+        &mut self,
+        user_id: Uuid,
+    ) -> impl Future<Output = Result<LoginWindow, ApplicationError>> + Send;
+    /// Ghi cửa sổ lỗi mật khẩu riêng trong transaction đang giữ bucket; thành công không xóa failure còn hạn.
+    fn save_password_change_window(
+        &mut self,
+        user_id: Uuid,
+        window: LoginWindow,
+    ) -> impl Future<Output = Result<(), ApplicationError>> + Send;
     /// Cập nhật PHC và bỏ limited flag theo principal chính chủ; không nhận raw password vào storage.
     fn replace_password(
         &mut self,

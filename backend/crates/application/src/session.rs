@@ -92,16 +92,15 @@ where
             return Err(ApplicationError::InvalidInput);
         }
         let mut transaction = self.store.begin().await?;
-        let email = transaction.session_email(proof).await?;
-        let digest = self.security.bucket_digest(&email)?;
-        let (window, _) = transaction.lock_login_bucket(digest).await?;
+        let user_id = transaction.session_user_id(proof).await?;
+        let window = transaction.lock_password_change_bucket(user_id).await?;
         let locked = transaction.lock_session(proof).await?;
         let principal =
             locked
                 .session
                 .authorize(&locked.account, proof, locked.observed_at, true)?;
-        // Kiểm email lại sau User fence để lookup cũ không chọn nhầm bucket nếu account email đổi.
-        if transaction.session_email(proof).await? != email {
+        // Xác nhận lookup dùng để chọn bucket vẫn khớp principal sau User→Session fence.
+        if principal.user_id() != user_id {
             return Err(ApplicationError::Conflict);
         }
         let next_failure = match window.admit(locked.observed_at) {
@@ -122,7 +121,9 @@ where
             )
             .await?;
         if !matches {
-            transaction.save_login_window(digest, next_failure).await?;
+            transaction
+                .save_password_change_window(principal.user_id(), next_failure)
+                .await?;
             transaction.commit().await?;
             // Cùng quy tắc failed login: audit hỏng không được phục hồi failure budget đã commit.
             let failure_audit = self

@@ -2,16 +2,94 @@
 
 use crate::{PgUnitOfWork, storage_error};
 use chrono::{DateTime, Utc};
-use iot_application::{error::ApplicationError, ports::SessionMutationTransaction};
-use iot_domain::identity::{SecretString, SessionProof, SessionRevocation};
+use iot_application::{
+    auth_diagnostics::{AuthTimingSpan, AuthTimingStage},
+    error::ApplicationError,
+    ports::SessionMutationTransaction,
+};
+use iot_domain::identity::{LoginWindow, SecretString, SessionProof, SessionRevocation};
 use sqlx::Row;
 use uuid::Uuid;
 
 impl SessionMutationTransaction for PgUnitOfWork {
-    /// Lookup email bind digest để application chọn bucket trước User lock; chưa cấp authority.
-    async fn session_email(&mut self, proof: &SessionProof) -> Result<String, ApplicationError> {
-        sqlx::query_scalar("SELECT account.email_normalized FROM sessions session_row JOIN users account USING(user_id) WHERE session_row.token_digest=$1")
-            .bind(proof.token_digest.as_slice()).fetch_optional(&mut *self.transaction).await.map_err(storage_error)?.ok_or(ApplicationError::SessionInvalid)
+    /// Resolve User ID bất biến để chọn limiter trước User lock; quyền được xác minh lại sau khi khóa.
+    async fn session_user_id(&mut self, proof: &SessionProof) -> Result<Uuid, ApplicationError> {
+        // Token digest được bind; lookup chỉ chọn bucket, còn lock_session xác thực lại User→Session.
+        sqlx::query_scalar("SELECT user_id FROM sessions WHERE token_digest=$1")
+            .bind(proof.token_digest.as_slice())
+            .fetch_optional(&mut *self.transaction)
+            .await
+            .map_err(storage_error)?
+            .ok_or(ApplicationError::SessionInvalid)
+    }
+
+    /**
+     * Khóa bucket đổi mật khẩu riêng theo User ID trước User→Session fence để chia sẻ giới hạn giữa mọi session.
+     * Input
+     * Param: user_id — identity nội bộ lấy từ session digest, sau đó được đối chiếu lại dưới khóa.
+     * Output: snapshot fixed-window đang giữ khóa đến commit hoặc rollback transaction.
+     * Errors: lỗi storage/mapping được lọc thành lỗi persistence chung.
+     */
+    async fn lock_password_change_bucket(
+        &mut self,
+        user_id: Uuid,
+    ) -> Result<LoginWindow, ApplicationError> {
+        let bucket_span =
+            AuthTimingSpan::start(self.diagnostics.as_ref(), AuthTimingStage::BucketAcquire);
+        // Upsert và FOR UPDATE trên khóa user_id tuần tự hóa cùng account mà không dùng bucket đăng nhập.
+        let acquired = async {
+            sqlx::query(
+                "INSERT INTO password_change_attempt_buckets(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+            )
+            .bind(user_id)
+            .execute(&mut *self.transaction)
+            .await
+            .map_err(storage_error)?;
+            sqlx::query(
+                "SELECT failure_count,window_started_at FROM password_change_attempt_buckets WHERE user_id=$1 FOR UPDATE",
+            )
+            .bind(user_id)
+            .fetch_one(&mut *self.transaction)
+            .await
+            .map_err(storage_error)
+        }
+        .await;
+        if acquired.is_ok() {
+            // Giữ cùng định nghĩa thời gian fenced-work như limiter đăng nhập sau khi đã khóa row.
+            self.fenced_work = Some(AuthTimingSpan::start(
+                self.diagnostics.as_ref(),
+                AuthTimingStage::FencedWork,
+            ));
+        }
+        let row = crate::complete_auth_stage(bucket_span, acquired)?;
+        Ok(LoginWindow {
+            failures: row.try_get("failure_count").map_err(storage_error)?,
+            started_at: row.try_get("window_started_at").map_err(storage_error)?,
+        })
+    }
+
+    /**
+     * Lưu fixed-window do application tính trong cùng transaction đang khóa bucket đổi mật khẩu.
+     * Input
+     * Param: user_id — khóa User ổn định của bucket đã acquire.
+     * Param: window — số failure và mốc đầu do LoginWindow.admit quyết định.
+     * Output: hoàn tất khi state limiter đã được ghi; schema kiểm tra miền và tính nhất quán.
+     * Errors: lỗi storage được lọc thành lỗi persistence chung.
+     */
+    async fn save_password_change_window(
+        &mut self,
+        user_id: Uuid,
+        window: LoginWindow,
+    ) -> Result<(), ApplicationError> {
+        // UPDATE bind User ID và ghi count/start cùng lúc để coherence CHECK không thấy state trung gian.
+        sqlx::query("UPDATE password_change_attempt_buckets SET failure_count=$2,window_started_at=$3 WHERE user_id=$1")
+            .bind(user_id)
+            .bind(window.failures)
+            .bind(window.started_at)
+            .execute(&mut *self.transaction)
+            .await
+            .map_err(storage_error)?;
+        Ok(())
     }
 
     /// Thay PHC dưới User fence; first-password-change ghi provenance và activation, không nhận raw password.

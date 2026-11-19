@@ -4125,3 +4125,71 @@ DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
 \endif
 \endif
 COMMIT;
+
+\set migration_version platform-0021-password-change-attempt-buckets
+\set migration_checksum c254a30066c2b7420465d181df523f4621d8afc1aed33260420a5fa5b3fcf4e8
+
+/* Template psql của runner; hai marker chỉ được thay bằng file SQL nguồn trong repo.
+ * migration_version/checksum là literal qua :'name', không chèn input vào SQL.
+ * DDL và ledger commit cùng nhau; advisory lock dùng chung cho mọi version/runner.
+ */
+BEGIN;
+SET LOCAL lock_timeout='5s';
+SET LOCAL statement_timeout='30s';
+SELECT pg_advisory_xact_lock(17001,1);
+/* Lịch sử runner lab: lưu checksum và thời điểm áp thật, không chứa credential.
+ * Phải chạy trong transaction đã lấy advisory lock; không thay SQLx production history.
+ */
+CREATE SCHEMA IF NOT EXISTS migration_control;
+CREATE TABLE IF NOT EXISTS migration_control.applied_migrations (
+    version text PRIMARY KEY,
+    checksum text NOT NULL CHECK(checksum ~ '^[0-9a-f]{64}$'),
+    applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+SELECT NOT EXISTS(
+    SELECT 1 FROM migration_control.applied_migrations WHERE version=:'migration_version'
+) AS should_apply \gset
+\if :should_apply
+/* Tách limiter đổi mật khẩu khỏi login để giới hạn theo User ổn định xuyên session/instance.
+ * Bảng mới không backfill; chỉ tạo row khi có lần xác minh sai đầu tiên.
+ * PK/FK và CHECK là DDL metadata ngắn, không quét hoặc khóa dữ liệu auth hiện có.
+ */
+CREATE TABLE public.password_change_attempt_buckets (
+    user_id uuid PRIMARY KEY REFERENCES public.users(user_id) ON DELETE CASCADE,
+    failure_count integer NOT NULL DEFAULT 0 CHECK (failure_count BETWEEN 0 AND 5),
+    window_started_at timestamptz,
+    CONSTRAINT password_change_attempt_buckets_coherence CHECK (
+        (failure_count = 0 AND window_started_at IS NULL)
+        OR (failure_count > 0 AND window_started_at IS NOT NULL)
+    )
+);
+
+/* User ID là identity của bucket và không thể được chuyển sang account khác qua UPDATE. */
+CREATE TRIGGER tr_password_change_attempt_bucket_identity
+BEFORE UPDATE ON public.password_change_attempt_buckets
+FOR EACH ROW EXECUTE FUNCTION public.enforce_identity_columns('user_id');
+
+COMMENT ON TABLE public.password_change_attempt_buckets IS
+    'Bộ đếm sai currentPassword riêng theo User ID; PostgreSQL khóa nguyên tử để chia sẻ giới hạn đổi mật khẩu giữa session và instance.';
+COMMENT ON COLUMN public.password_change_attempt_buckets.user_id IS
+    'User sở hữu limiter đổi mật khẩu; khóa ngoại giữ bucket gắn đúng account và không dùng email, session hoặc IP làm định danh.';
+COMMENT ON COLUMN public.password_change_attempt_buckets.failure_count IS
+    'Số lần currentPassword sai trong fixed window hiện hành, miền 0..5; count 0 đi cùng window_started_at NULL.';
+COMMENT ON COLUMN public.password_change_attempt_buckets.window_started_at IS
+    'Thời điểm failure đầu tiên mở fixed window 15 phút; không trượt khi retry hoặc nhận 429, NULL khi bucket rỗng.';
+
+INSERT INTO migration_control.applied_migrations(version,checksum)
+    VALUES(:'migration_version',:'migration_checksum');
+\echo APPLIED
+\else
+SELECT checksum=:'migration_checksum' AS checksum_matches
+    FROM migration_control.applied_migrations WHERE version=:'migration_version' \gset
+\if :checksum_matches
+\echo ALREADY_APPLIED
+\else
+/* Drift phải rollback, không UPDATE checksum để hợp thức hóa lịch sử bị thay đổi. */
+DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
+\endif
+\endif
+COMMIT;

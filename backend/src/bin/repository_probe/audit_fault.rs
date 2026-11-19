@@ -220,7 +220,7 @@ async fn assert_append_only(pool: &PgPool, correlation: Uuid) -> Result<(), Appl
  * Param: proof — full session chính chủ cho nhánh đổi password.
  * Param: config — email/UUID fixture nội bộ, không ghi vào metric.
  * Param: digest — HMAC bucket tổng hợp chỉ bind, không in.
- * Output: thành công khi auth không bypass và hai counter cùng tăng độc lập transaction.
+ * Output: thành công khi login và password change giữ counter riêng, cả hai vẫn tăng sau audit failure.
  */
 async fn failed_auth(
     service: &AuthService,
@@ -230,14 +230,26 @@ async fn failed_auth(
     config: &ProbeConfig,
     digest: [u8; 32],
 ) -> Result<(), ApplicationError> {
+    // Đọc hai limiter độc lập trước thao tác để chứng minh login không tiêu hao ngân sách đổi mật khẩu.
+    // Chỉ đọc count login theo digest fixture đã bind; không hiển thị digest hoặc email.
     let failures:i32=sqlx::query_scalar("SELECT coalesce((SELECT failure_count FROM login_attempt_buckets WHERE email_digest=$1),0)")
         .bind(digest.as_slice()).fetch_one(pool).await.map_err(|_|ApplicationError::Unavailable)?;
+    // Bucket password change dùng User ID tổng hợp, không chia sẻ khóa với login.
+    let password_failures: i32 = sqlx::query_scalar(
+        "SELECT coalesce((SELECT failure_count FROM password_change_attempt_buckets WHERE user_id=$1),0)",
+    )
+    .bind(config.user_ids[1])
+    .fetch_one(pool)
+    .await
+    .map_err(|_| ApplicationError::Unavailable)?;
+    // Snapshot số session để xác nhận failed credential không thu hồi session đang hợp lệ.
     let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions WHERE user_id=$1")
         .bind(config.user_ids[1])
         .fetch_one(pool)
         .await
         .map_err(|_| ApplicationError::Unavailable)?;
     if failures >= 5
+        || password_failures >= 5
         || !matches!(
             service
                 .login(
@@ -252,30 +264,46 @@ async fn failed_auth(
     {
         return Err(ApplicationError::Conflict);
     }
+    // Xác nhận login chỉ cập nhật login limiter trước khi thử đổi password sai.
     let stored: i32 =
         sqlx::query_scalar("SELECT failure_count FROM login_attempt_buckets WHERE email_digest=$1")
             .bind(digest.as_slice())
             .fetch_one(pool)
             .await
             .map_err(|_| ApplicationError::Unavailable)?;
+    // Đọc lại password limiter để bắt việc vô tình dùng chung bucket với failed login.
+    let password_after_login: i32 = sqlx::query_scalar(
+        "SELECT coalesce((SELECT failure_count FROM password_change_attempt_buckets WHERE user_id=$1),0)",
+    )
+    .bind(config.user_ids[1])
+    .fetch_one(pool)
+    .await
+    .map_err(|_| ApplicationError::Unavailable)?;
+    // Đối chiếu số session sau login sai; failed login không được chạm session đã cấp.
     let after_sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions WHERE user_id=$1")
         .bind(config.user_ids[1])
         .fetch_one(pool)
         .await
         .map_err(|_| ApplicationError::Unavailable)?;
-    if stored != failures + 1 || sessions != after_sessions {
+    if stored != failures + 1
+        || password_after_login != password_failures
+        || sessions != after_sessions
+    {
         return Err(ApplicationError::Conflict);
     }
     let observed = store.failed_audit_counts();
     if observed.login != 1 || observed.password_change != 0 {
         return Err(ApplicationError::Conflict);
     }
+    // Tạo newPassword tổng hợp đủ composition để phép thử chạm nhánh currentPassword sai thay vì dừng ở validation.
+    let invalid_current_password = generate_token();
+    let policy_valid_new_password = format!("Aa1{}", generate_token().expose());
     if !matches!(
         service
             .change_password(
                 proof,
-                generate_token().expose().to_owned(),
-                generate_token().expose().to_owned(),
+                invalid_current_password.expose().to_owned(),
+                policy_valid_new_password,
                 config.run_id
             )
             .await,
@@ -284,13 +312,26 @@ async fn failed_auth(
         return Err(ApplicationError::Conflict);
     }
     let observed = store.failed_audit_counts();
-    let admitted: i32 =
+    // Đọc riêng từng row sau password failure để chứng minh không tăng login counter.
+    let login_admitted: i32 =
         sqlx::query_scalar("SELECT failure_count FROM login_attempt_buckets WHERE email_digest=$1")
             .bind(digest.as_slice())
             .fetch_one(pool)
             .await
             .map_err(|_| ApplicationError::Unavailable)?;
-    if observed.login != 1 || observed.password_change != 1 || admitted != failures + 2 {
+    // User ID bind vào dedicated bucket để xác nhận chỉ limiter đổi mật khẩu tăng.
+    let password_admitted: i32 = sqlx::query_scalar(
+        "SELECT failure_count FROM password_change_attempt_buckets WHERE user_id=$1",
+    )
+    .bind(config.user_ids[1])
+    .fetch_one(pool)
+    .await
+    .map_err(|_| ApplicationError::Unavailable)?;
+    if observed.login != 1
+        || observed.password_change != 1
+        || login_admitted != failures + 1
+        || password_admitted != password_failures + 1
+    {
         return Err(ApplicationError::Conflict);
     }
     Ok(())

@@ -347,3 +347,119 @@ test(
     expect(apiRequests).toEqual([]);
   },
 );
+
+test(
+  'WB-03 editor avoids horizontal page overflow and stacks stream fields at narrow viewports',
+  /** Kiểm tra editor giữ trong viewport ở các mốc responsive và xếp dọc field khi màn hình hẹp.
+   * Input
+   * Param: page — trang Playwright cô lập dùng để mở editor preview tổng hợp.
+   * Side effects
+   * Chặn API, mở draft mới, thêm một stream mẫu và lần lượt đổi kích thước viewport.
+   */
+  async ({ page }) => {
+    const apiRequests = await installPreviewApiGuard(page);
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto('/dev/templates-preview');
+    await page.getByRole('button', { name: 'Tạo template', exact: true }).click();
+    await page.getByRole('button', { name: 'Thêm datastream', exact: true }).click();
+
+    const viewportWidths = [320, 767, 768, 1024, 1440];
+    for (const width of viewportWidths) {
+      await page.setViewportSize({ width, height: 900 });
+      const layout = await page.evaluate(
+        /** Đo chiều rộng cuộn trang và vị trí các cột editor/stream để xác nhận hành vi responsive thực tế.
+         * Output: kích thước tài liệu và cờ cho biết editor cùng nhóm field đang xếp dọc hay nằm cạnh nhau.
+         */
+        () => {
+          const grid = document.querySelector('.tpl-editor-grid');
+          const form = grid?.querySelector(':scope > form');
+          const preview = grid?.querySelector(':scope > aside');
+          const streamGrid = document.querySelector('.tpl-stream-card .tpl-form-grid');
+          const firstStreamField = streamGrid?.querySelector('.tpl-field:nth-child(1)');
+          const secondStreamField = streamGrid?.querySelector('.tpl-field:nth-child(2)');
+          const formBox = form?.getBoundingClientRect();
+          const previewBox = preview?.getBoundingClientRect();
+          const firstFieldBox = firstStreamField?.getBoundingClientRect();
+          const secondFieldBox = secondStreamField?.getBoundingClientRect();
+
+          return {
+            viewportWidth: window.innerWidth,
+            documentWidth: document.documentElement.scrollWidth,
+            bodyWidth: document.body.scrollWidth,
+            editorIsStacked: Boolean(formBox && previewBox && previewBox.top > formBox.top + 1),
+            editorIsSideBySide: Boolean(formBox && previewBox && previewBox.left > formBox.left + 1),
+            streamFieldsAreStacked: Boolean(
+              firstFieldBox && secondFieldBox && secondFieldBox.top > firstFieldBox.top + 1,
+            ),
+          };
+        },
+      );
+
+      expect(layout.documentWidth, `document scroll width at ${width}px`).toBeLessThanOrEqual(width);
+      expect(layout.bodyWidth, `body scroll width at ${width}px`).toBeLessThanOrEqual(width);
+      expect(layout.viewportWidth).toBe(width);
+      if (width < 768) {
+        expect(layout.editorIsStacked, `editor layout at ${width}px`).toBe(true);
+        expect(layout.streamFieldsAreStacked, `stream field layout at ${width}px`).toBe(true);
+      }
+      if (width === 1440) {
+        expect(layout.editorIsSideBySide, 'wide editor layout at 1440px').toBe(true);
+      }
+    }
+
+    expect(apiRequests).toEqual([]);
+  },
+);
+
+test(
+  'keyboard navigation reaches and operates preview and editor controls',
+  /** Kiểm tra bàn phím tới workspace selector, đổi scenario preview và thao tác nút cùng field trong editor.
+   * Input
+   * Param: page — trang Playwright cô lập dùng để kiểm tra luồng bàn phím của preview WB-03.
+   * Side effects
+   * Chặn API, điều hướng bằng bàn phím, đổi scenario mock và nhập tên draft cục bộ.
+   */
+  async ({ page }) => {
+    const apiRequests = await installPreviewApiGuard(page);
+    await page.goto('/dev/templates-preview');
+
+    const skipLink = page.getByRole('link', { name: 'Chuyển đến nội dung chính' });
+    await expect(skipLink).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(skipLink).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#templates-main')).toBeFocused();
+
+    const workspaceSelect = page.getByLabel('Ngữ cảnh workspace tổng hợp');
+    await page.keyboard.press('Tab');
+    await expect(workspaceSelect).toBeFocused();
+
+    const scenarioSelect = page.getByLabel('Kịch bản mô phỏng phản hồi (chỉ preview)');
+    await page.keyboard.press('Tab');
+    await expect(scenarioSelect).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(scenarioSelect).toHaveValue('offline');
+    await scenarioSelect.selectOption('normal');
+    await expect(scenarioSelect).toHaveValue('normal');
+
+    const reloadButton = page.getByRole('button', { name: 'Tải lại danh sách', exact: true });
+    await page.keyboard.press('Tab');
+    await expect(reloadButton).toBeFocused();
+    const createButton = page.getByRole('button', { name: 'Tạo template', exact: true });
+    await page.keyboard.press('Tab');
+    await expect(createButton).toBeFocused();
+    await page.keyboard.press('Enter');
+
+    const editorHeading = page.getByRole('heading', { name: 'Tạo bản nháp template mới', exact: true });
+    await expect(editorHeading).toBeFocused();
+    const backButton = page.getByRole('button', { name: 'Quay lại danh sách', exact: true });
+    await page.keyboard.press('Tab');
+    await expect(backButton).toBeFocused();
+    const templateName = page.getByRole('textbox', { name: 'Tên template' });
+    await page.keyboard.press('Tab');
+    await expect(templateName).toBeFocused();
+    await page.keyboard.type('Draft nhập bằng bàn phím');
+    await expect(templateName).toHaveValue('Draft nhập bằng bàn phím');
+    expect(apiRequests).toEqual([]);
+  },
+);

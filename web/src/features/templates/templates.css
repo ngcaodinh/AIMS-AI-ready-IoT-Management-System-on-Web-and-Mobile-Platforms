@@ -1,0 +1,957 @@
+/* Phong cách riêng cho màn hình xem trước WB-03 Templates; chỉ dùng token Nexa từ styles.css. */
+.tpl-page {
+  --tpl-ease: cubic-bezier(.2, .8, .2, 1);
+  --tpl-ring: 0 0 0 4px color-mix(in srgb, var(--teal) 22%, transparent);
+  --tpl-error-surface: color-mix(in srgb, var(--coral) 10%, var(--surface));
+  --tpl-error-accent: color-mix(in srgb, var(--coral) 76%, var(--ink));
+  --tpl-teal-accent: color-mix(in srgb, var(--teal) 32%, var(--ink));
+  --tpl-readonly-bg: var(--bg-2);
+  position: relative;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  /* Chặn tràn ngang toàn trang nhưng giữ position: sticky hoạt động cho panel preview. */
+  overflow-x: clip;
+  background:
+    radial-gradient(960px 540px at 90% -8%, color-mix(in srgb, var(--teal) 12%, transparent), transparent 62%),
+    radial-gradient(780px 520px at -8% 20%, color-mix(in srgb, var(--sky) 8%, transparent), transparent 62%),
+    var(--bg);
+  color: var(--ink);
+}
+
+.tpl-page :focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 3px;
+}
+
+/* Chừa khoảng an toàn bằng chiều cao header sticky để phần tử nhận focus không bị che khuất. */
+.tpl-page :is(input, select, button, a, [tabindex="-1"]) {
+  scroll-margin-top: 96px;
+}
+
+.tpl-page button,
+.tpl-page a,
+.tpl-page select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tpl-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tpl-skip-link {
+  position: fixed;
+  top: 12px;
+  left: 16px;
+  /* Đặt z-index cao hơn header sticky (20) để phím Tab luôn đưa liên kết bỏ qua lên trên cùng. */
+  z-index: 60;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  transform: translateY(-220%);
+  transition: transform .2s var(--tpl-ease);
+}
+
+.tpl-skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* Header workbench giữ đồng nhất nhận diện Nexa nhưng bỏ bố cục hero tiếp thị. */
+.tpl-header {
+  position: sticky;
+  top: 0;
+  /* Giữ header nằm trên nội dung cuộn và preview sticky nhưng dưới dialog xác nhận (z-index 50). */
+  z-index: 20;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+
+.tpl-header-inner {
+  width: min(1280px, calc(100% - 48px));
+  min-height: 72px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-block: 8px;
+}
+
+.tpl-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tpl-dev-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--amber) 55%, var(--line));
+  background: var(--amber-soft);
+  color: var(--ink);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+.tpl-theme-btn {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1.5px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .2s, background-color .2s;
+}
+
+.tpl-theme-btn:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.tpl-shell {
+  width: min(1280px, calc(100% - 48px));
+  margin: 24px auto 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1;
+}
+
+/* Chỉ ẩn outline khi focus không qua bàn phím để giữ viền :focus-visible khi skip link nhảy tới main. */
+.tpl-shell:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Dải cảnh báo preview phát triển cố định, luôn hiện để phân biệt với môi trường kết nối API thật. */
+.tpl-preview-banner {
+  border: 1.5px solid color-mix(in srgb, var(--amber) 58%, var(--line));
+  border-radius: var(--r-md);
+  background: var(--amber-soft);
+  color: var(--ink);
+  padding: 16px 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.tpl-preview-banner-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tpl-preview-banner-head strong {
+  display: block;
+  font-size: .95rem;
+  margin-bottom: 2px;
+}
+
+.tpl-preview-banner-head p {
+  margin: 0;
+  font-size: .875rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.tpl-preview-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  padding-top: 12px;
+  border-top: 1px dashed color-mix(in srgb, var(--amber) 48%, var(--line));
+}
+
+.tpl-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tpl-control-group label {
+  font-size: .8125rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.tpl-hint {
+  margin: 0;
+  font-size: .8125rem;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* Breadcrumb điều hướng trong workspace hiện hành. */
+.tpl-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: .875rem;
+  color: var(--muted);
+}
+
+.tpl-breadcrumb-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tpl-breadcrumb-btn:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.tpl-breadcrumb [aria-current="page"] {
+  color: var(--tpl-teal-accent);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* Các khối thẻ bề mặt chuẩn Nexa. */
+.tpl-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+
+.tpl-subcard {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 18px;
+  min-width: 0;
+}
+
+.tpl-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.tpl-page-head-flush {
+  margin-bottom: 0;
+}
+
+.tpl-page-head h1,
+.tpl-editor-head h1 {
+  margin: 0 0 6px;
+  font-family: var(--ff-display);
+  font-size: clamp(1.5rem, 2.8vw, 2rem);
+  line-height: 1.2;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* Chỉ ẩn outline khi focus không qua bàn phím để giữ viền :focus-visible khi chuyển màn hình đặt focus vào tiêu đề. */
+.tpl-page-head h1:focus:not(:focus-visible),
+.tpl-editor-head h1:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.tpl-lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: .9375rem;
+  max-width: 65ch;
+}
+
+/* Nhãn trạng thái kèm chữ và icon rõ ràng, không dùng màu sắc làm tín hiệu duy nhất. */
+.tpl-badge-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tpl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.tpl-badge-draft {
+  background: var(--teal-soft);
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
+  color: var(--tpl-teal-accent);
+}
+
+.tpl-badge-published {
+  background: var(--amber-soft);
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+  color: var(--ink);
+}
+
+.tpl-badge-control {
+  background: var(--teal-soft);
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  color: var(--tpl-teal-accent);
+}
+
+.tpl-badge-readonly {
+  background: var(--bg-2);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+/* Nút bấm thao tác đảm bảo vùng chạm tối thiểu 44px và khoảng cách >= 8px. */
+.tpl-actions-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tpl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  font: inherit;
+  font-size: .92rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--ink);
+  transition: border-color .2s, background-color .2s, transform .2s var(--tpl-ease);
+}
+
+.tpl-btn:hover:enabled {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.tpl-btn:active:enabled {
+  transform: scale(.99);
+}
+
+.tpl-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.tpl-btn-primary {
+  background: var(--grad);
+  border-color: transparent;
+  /* Dùng --navy trên nền gradient teal để giữ độ tương phản AA ở cả hai theme sáng và tối. */
+  color: var(--navy);
+  font-weight: 700;
+}
+
+.tpl-btn-primary:hover:enabled {
+  background: var(--grad);
+  box-shadow: var(--shadow);
+  filter: brightness(1.04);
+}
+
+.tpl-btn-danger {
+  background: var(--tpl-error-surface);
+  border-color: color-mix(in srgb, var(--coral) 50%, var(--line));
+  color: var(--tpl-error-accent);
+}
+
+.tpl-btn-danger:hover:enabled {
+  background: var(--coral-soft);
+  border-color: var(--coral);
+}
+
+/* Danh sách template theo workspace. */
+.tpl-list-grid {
+  display: grid;
+  gap: 14px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.tpl-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.tpl-list-item-main {
+  min-width: 0;
+  flex: 1 1 320px;
+  display: grid;
+  gap: 8px;
+}
+
+.tpl-list-item-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tpl-list-item-title h2 {
+  margin: 0;
+  font-size: 1.08rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.tpl-meta-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: .85rem;
+  color: var(--muted);
+}
+
+.tpl-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: .86em;
+  overflow-wrap: anywhere;
+}
+
+/* Trạng thái tải, rỗng, từ chối và cảnh báo. */
+.tpl-state-box {
+  padding: 24px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.tpl-state-box h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.tpl-state-box p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 62ch;
+}
+
+.tpl-skeleton-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tpl-skeleton-row {
+  height: 82px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    color-mix(in srgb, var(--teal-soft) 75%, var(--surface-2)) 50%,
+    var(--surface-2) 100%
+  );
+  background-size: 220% 100%;
+  animation: tpl-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes tpl-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+.tpl-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: .9rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.tpl-notice-body {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 10px;
+}
+
+.tpl-notice-body p {
+  margin: 0;
+}
+
+.tpl-notice-error {
+  background: var(--tpl-error-surface);
+  border-color: color-mix(in srgb, var(--coral) 50%, var(--line));
+}
+
+.tpl-notice-error > .tpl-icon {
+  color: var(--tpl-error-accent);
+}
+
+.tpl-notice-warning {
+  background: var(--amber-soft);
+  border-color: color-mix(in srgb, var(--amber) 58%, var(--line));
+}
+
+.tpl-notice-success {
+  background: var(--teal-soft);
+  border-color: color-mix(in srgb, var(--teal) 48%, var(--line));
+}
+
+.tpl-notice-success > .tpl-icon {
+  color: var(--tpl-teal-accent);
+}
+
+.tpl-error-summary {
+  padding: 16px 18px;
+  border-radius: var(--r-md);
+  border: 2px solid var(--tpl-error-accent);
+  background: var(--tpl-error-surface);
+  color: var(--ink);
+  display: grid;
+  gap: 10px;
+}
+
+.tpl-error-summary:focus {
+  outline: 3px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.tpl-error-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+
+.tpl-error-summary ul {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}
+
+.tpl-error-summary a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 600;
+}
+
+/* Bố cục hai cột trên màn hình rộng (form bên trái, preview schema bên phải) và xếp dọc dưới 1024px. */
+.tpl-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, .95fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.tpl-editor-main {
+  min-width: 0;
+  display: grid;
+  gap: 20px;
+}
+
+.tpl-preview-col {
+  min-width: 0;
+  position: sticky;
+  top: 96px;
+}
+
+.tpl-preview-stack {
+  margin-top: 14px;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.tpl-preview-subheading {
+  margin: 0 0 8px;
+  font-size: .95rem;
+  font-family: var(--ff-display);
+}
+
+.tpl-g1-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.tpl-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.tpl-section-head-flush {
+  margin-bottom: 0;
+}
+
+.tpl-section-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-family: var(--ff-display);
+}
+
+.tpl-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.tpl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tpl-field-full {
+  grid-column: 1 / -1;
+}
+
+.tpl-field label,
+.tpl-field-label {
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.tpl-required-mark {
+  color: var(--tpl-error-accent);
+  margin-left: 4px;
+}
+
+.tpl-input,
+.tpl-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--muted);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: .95rem;
+  line-height: 1.4;
+}
+
+.tpl-input:hover:enabled:not([readonly]):not([aria-invalid="true"]),
+.tpl-select:hover:enabled:not([aria-invalid="true"]) {
+  border-color: var(--teal-deep);
+}
+
+.tpl-input:focus,
+.tpl-select:focus {
+  outline: none;
+  border-color: var(--teal-deep);
+  box-shadow: var(--tpl-ring);
+}
+
+/* Phân biệt rõ trạng thái chỉ đọc (giữ opacity 1 với viền nét đứt) với trạng thái disabled (giảm opacity). */
+.tpl-input[readonly],
+.tpl-select[aria-disabled="true"] {
+  opacity: 1;
+  background: var(--tpl-readonly-bg);
+  border-style: dashed;
+  border-color: var(--line);
+  color: var(--ink);
+  cursor: default;
+}
+
+.tpl-input:disabled,
+.tpl-select:disabled:not([aria-disabled="true"]) {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.tpl-input[aria-invalid="true"],
+.tpl-select[aria-invalid="true"] {
+  border-color: var(--tpl-error-accent);
+}
+
+.tpl-field-error {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--tpl-error-accent);
+  color: var(--ink);
+  font-size: .8125rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.tpl-stream-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tpl-stream-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tpl-stream-card-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-family: var(--ff-display);
+  overflow-wrap: anywhere;
+}
+
+.tpl-enum-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tpl-enum-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.tpl-cap-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.tpl-preview-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+
+.tpl-preview-row {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.tpl-preview-code {
+  margin: 0;
+  padding: 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: .8rem;
+  line-height: 1.55;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tpl-conflict-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tpl-conflict-box {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+  font-size: .85rem;
+}
+
+.tpl-candidate-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.tpl-candidate-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+/* Modal xác nhận rời bản nháp có thay đổi chưa lưu. */
+.tpl-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  /* Đặt z-index 50 cao hơn header (20) để khóa tương tác nền khi modal mở. */
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, var(--navy) 65%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.tpl-dialog {
+  width: min(100%, 480px);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 14px;
+}
+
+.tpl-dialog h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.tpl-dialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .92rem;
+  line-height: 1.55;
+}
+
+.tpl-footer {
+  width: min(1280px, calc(100% - 48px));
+  margin: 0 auto 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: .8125rem;
+  color: var(--muted);
+}
+
+@media (max-width: 1024px) {
+  .tpl-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tpl-preview-col {
+    position: static;
+  }
+
+  .tpl-preview-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Dưới 768px: mọi nhóm trường metadata, stream, capability và đối chiếu conflict xếp dọc 1 cột không cuộn ngang. */
+@media (max-width: 768px) {
+  .tpl-header-inner,
+  .tpl-shell,
+  .tpl-footer {
+    width: calc(100% - 32px);
+  }
+
+  .tpl-card {
+    padding: 18px 16px;
+    border-radius: var(--r-md);
+  }
+
+  .tpl-form-grid,
+  .tpl-conflict-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tpl-enum-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tpl-page *,
+  .tpl-page *::before,
+  .tpl-page *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

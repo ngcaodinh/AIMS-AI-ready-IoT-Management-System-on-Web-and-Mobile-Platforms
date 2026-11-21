@@ -463,3 +463,121 @@ test(
     expect(apiRequests).toEqual([]);
   },
 );
+
+test(
+  'valid preview draft keeps typed read-only and controllable streams distinct after save',
+  /** Kiểm tra draft tổng hợp hợp lệ giữ đúng kiểu stream, capability và safeValue trong preview sau khi lưu mock.
+   * Input
+   * Param: page — trang Playwright cô lập dùng để tạo draft preview trong bộ nhớ.
+   * Side effects
+   * Chặn API, thêm/sửa/xóa stream, gắn SET_VALUE có giá trị BOOLEAN và lưu draft bằng adapter mock.
+   */
+  async ({ page }) => {
+    const apiRequests = await installPreviewApiGuard(page);
+    await page.goto('/dev/templates-preview');
+    await page.getByRole('button', { name: 'Tạo template', exact: true }).click();
+
+    const templateName = page.getByRole('textbox', { name: 'Tên template' });
+    const modelField = page.getByRole('combobox', { name: /Mã model chuẩn/ });
+    await expect(templateName).toBeVisible();
+    await expect(modelField).toBeVisible();
+    await templateName.fill('Room telemetry and relay controls');
+    await modelField.fill('ESP32_PREVIEW_TYPED_V1');
+
+    const addStreamButton = page.getByRole('button', { name: 'Thêm datastream', exact: true });
+    await addStreamButton.click();
+    await addStreamButton.click();
+    await addStreamButton.click();
+
+    const streamCards = page.locator('.tpl-stream-card');
+    await expect(streamCards).toHaveCount(3);
+    const readStream = streamCards.nth(0);
+    const writableStream = streamCards.nth(1);
+    const removableStream = streamCards.nth(2);
+
+    await readStream.getByLabel(/Khóa kênh \(key\)/).fill('room_temperature');
+    await readStream.getByLabel(/Loại kênh \(channelKind\)/).selectOption('TELEMETRY');
+    await readStream.getByLabel(/Hướng truy cập \(direction\)/).selectOption('READ');
+    await readStream.getByLabel(/Đơn vị hiển thị \(unit, tùy chọn\)/).fill('°C');
+    await readStream.getByLabel(/Giá trị tối thiểu \(min\)/).fill('-10');
+    await readStream.getByLabel(/Giá trị tối đa \(max\)/).fill('80');
+
+    await writableStream.getByLabel(/Khóa kênh \(key\)/).fill('relay_state');
+    await writableStream.getByLabel(/Kiểu dữ liệu \(type\)/).selectOption('BOOLEAN');
+    await writableStream.getByLabel(/Loại kênh \(channelKind\)/).selectOption('STATE');
+    await writableStream.getByLabel(/Hướng truy cập \(direction\)/).selectOption('WRITE');
+
+    await removableStream.getByLabel(/Khóa kênh \(key\)/).fill('temporary_probe');
+    await removableStream.getByRole('button', { name: 'Xóa kênh 3: temporary_probe', exact: true }).click();
+    await expect(streamCards).toHaveCount(2);
+
+    await expect(readStream.getByLabel(/Khóa kênh \(key\)/)).toHaveValue('room_temperature');
+    await expect(readStream.getByLabel(/Hướng truy cập \(direction\)/)).toHaveValue('READ');
+    await expect(writableStream.getByLabel(/Kiểu dữ liệu \(type\)/)).toHaveValue('BOOLEAN');
+    await expect(writableStream.getByLabel(/Hướng truy cập \(direction\)/)).toHaveValue('WRITE');
+
+    await page.getByRole('button', { name: 'Thêm capability SET_VALUE', exact: true }).click();
+    const capabilityTarget = page.getByLabel('Kênh đích (stream)');
+    await expect(capabilityTarget).toBeVisible();
+    await capabilityTarget.selectOption('relay_state');
+    const safeValue = page.getByLabel('Giá trị an toàn (safeValue)');
+    await expect(safeValue).toBeVisible();
+    await safeValue.selectOption('true');
+    await expect(safeValue).toHaveValue('true');
+
+    await page.getByRole('button', { name: 'Tạo bản nháp (chỉ preview)', exact: true }).click();
+    const saveNotice = page.getByRole('status').filter({
+      hasText: 'Đã cập nhật bản xem trước trong bộ nhớ tab',
+    });
+    await expect(saveNotice).toContainText('chưa lưu trên máy chủ');
+
+    const schemaPreview = page.getByRole('complementary', { name: 'Xem trước schema (Chỉ đọc)' });
+    const previewRows = schemaPreview.getByRole('listitem');
+    await expect(previewRows).toHaveCount(2);
+
+    const readOnlyRow = previewRows.filter({ hasText: 'room_temperature' });
+    await expect(readOnlyRow).toContainText('Chỉ hiển thị (Read-only)');
+    await expect(readOnlyRow).toContainText('Loại: NUMBER');
+    await expect(readOnlyRow).toContainText('channelKind: TELEMETRY');
+    await expect(readOnlyRow).toContainText('direction: READ');
+    await expect(readOnlyRow).toContainText('Khoảng: -10..80 (°C)');
+
+    const controllableRow = previewRows.filter({ hasText: 'relay_state' });
+    await expect(controllableRow).toContainText('Điều khiển (SET_VALUE)');
+    await expect(controllableRow).toContainText('Loại: BOOLEAN');
+    await expect(controllableRow).toContainText('channelKind: STATE');
+    await expect(controllableRow).toContainText('direction: WRITE');
+    await expect(controllableRow).toContainText('safeValue: true');
+    expect(apiRequests).toEqual([]);
+  },
+);
+
+test(
+  'WB-03 list exposes accessible loading state and disables create until mock data arrives',
+  /** Kiểm tra loading ban đầu dùng latency mock có sẵn để lộ skeleton/status và khóa thao tác tạo đến khi tải xong.
+   * Input
+   * Param: page — trang Playwright cô lập dùng để mở danh sách Templates preview.
+   * Side effects
+   * Chặn API, mở route preview rồi quan sát loading và kết quả danh sách mà không thêm độ trễ giả trong test.
+   */
+  async ({ page }) => {
+    const apiRequests = await installPreviewApiGuard(page);
+    await page.goto('/dev/templates-preview');
+
+    const loadingSkeleton = page.locator('[aria-busy="true"][aria-label="Đang tải danh sách template"]');
+    const loadingStatus = page.getByRole('status').filter({
+      hasText: 'Đang tải danh sách template trong workspace',
+    });
+    const createButton = page.getByRole('button', { name: 'Tạo template', exact: true });
+
+    await expect(loadingSkeleton).toBeVisible();
+    await expect(loadingStatus).toBeVisible();
+    await expect(createButton).toBeDisabled();
+
+    await expect(loadingSkeleton).toHaveCount(0);
+    await expect(loadingStatus).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Mở bản nháp', exact: true }).first()).toBeVisible();
+    await expect(createButton).toBeEnabled();
+    expect(apiRequests).toEqual([]);
+  },
+);

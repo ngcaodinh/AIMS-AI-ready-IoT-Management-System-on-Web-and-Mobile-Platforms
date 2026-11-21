@@ -120,7 +120,7 @@ test(
 
 test(
   'mock validation maps a 422 model error to its field and preserves the draft input',
-  /** Kiểm tra lỗi validation mock được gắn đúng path `/model` và không xóa nội dung người dùng.
+  /** Kiểm tra lỗi validation mock gắn đúng `/model`, đưa focus tới summary, liên kết field và giữ nội dung người dùng.
    * Input
    * Param: page — trang Playwright cô lập dùng để gửi form preview không hợp lệ.
    * Side effects
@@ -139,7 +139,11 @@ test(
 
     const fieldErrorSummary = page.getByRole('alert');
     await expect(fieldErrorSummary).toContainText('/model');
+    await expect(fieldErrorSummary).toBeFocused();
     await expect(modelField).toHaveAttribute('aria-invalid', 'true');
+    await expect(modelField).toHaveAttribute('aria-describedby', 'tpl-field-model-hint tpl-field-model-error');
+    const modelErrorLink = fieldErrorSummary.getByRole('link', { name: /\/model/ });
+    await expect(modelErrorLink).toHaveAttribute('href', '#tpl-field-model');
     await expect(templateName).toHaveValue('Draft model không hợp lệ');
     await expect(modelField).toHaveValue('invalid model!');
     expect(apiRequests).toEqual([]);

@@ -75,18 +75,22 @@ pub struct PublishedTemplate {
     pub template_id: Uuid,
     pub template_version_id: Uuid,
     pub version_number: i32,
-    pub template_revision: i64,
+    pub source_revision: i64,
+    pub published_root_revision: i64,
     pub published_at: DateTime<Utc>,
     pub content_digest: [u8; 32],
+    pub content: ValidatedTemplate,
 }
 
-/// Immutable content đọc từ version rows; root description/revision hiện hành không thuộc snapshot này.
+/// Nội dung immutable đọc từ version rows; provenance revision cũ giữ unknown, không suy từ root mutable.
 #[derive(Clone, Debug)]
 pub struct TemplateVersionSnapshot {
     pub workspace_id: Uuid,
     pub template_id: Uuid,
     pub template_version_id: Uuid,
     pub version_number: i32,
+    pub source_revision: Option<i64>,
+    pub published_root_revision: Option<i64>,
     pub published_at: DateTime<Utc>,
     pub published_by_user_id: Uuid,
     pub content_digest: [u8; 32],

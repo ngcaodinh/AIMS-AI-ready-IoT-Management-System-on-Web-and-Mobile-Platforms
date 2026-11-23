@@ -57,6 +57,7 @@ pub enum TemplateField {
     Name,
     Model,
     Description,
+    Streams,
     Key,
     DisplayName,
     Unit,
@@ -311,5 +312,86 @@ impl ValidatedTemplate {
     #[must_use]
     pub const fn draft(&self) -> &TemplateDraft {
         &self.0
+    }
+
+    /**
+     * Kiểm các ràng buộc wire snapshot v1 trước commit publication, không đổi nội dung đã lưu.
+     * Output: schema có thể biểu diễn đúng theo contract v1; Errors: field/reason typed, không chứa raw value.
+     */
+    pub fn validate_publication_v1(&self) -> Result<(), TemplateValidation> {
+        let draft = self.draft();
+        let root_issue = |field, reason| TemplateValidation {
+            stream_index: None,
+            field,
+            reason,
+        };
+        let stream_issue = |stream_index, field, reason| TemplateValidation {
+            stream_index: Some(stream_index),
+            field,
+            reason,
+        };
+        if !(1..=100).contains(&draft.name.chars().count()) {
+            return Err(root_issue(
+                TemplateField::Name,
+                TemplateIssueReason::InvalidValue,
+            ));
+        }
+        if !(1..=64).contains(&draft.model.chars().count()) {
+            return Err(root_issue(
+                TemplateField::Model,
+                TemplateIssueReason::InvalidValue,
+            ));
+        }
+        if draft.streams.is_empty() || draft.streams.len() > 64 {
+            return Err(root_issue(
+                TemplateField::Streams,
+                if draft.streams.is_empty() {
+                    TemplateIssueReason::Required
+                } else {
+                    TemplateIssueReason::InvalidValue
+                },
+            ));
+        }
+        for (index, stream) in draft.streams.iter().enumerate() {
+            if let Some(unit) = stream.unit.as_deref() {
+                if stream.data_type != StreamType::Number
+                    || !(1..=32).contains(&unit.chars().count())
+                {
+                    return Err(stream_issue(
+                        index,
+                        TemplateField::Unit,
+                        TemplateIssueReason::Incompatible,
+                    ));
+                }
+            }
+            if stream.data_type == StreamType::Number && stream.direction != StreamDirection::Read {
+                if stream.minimum.is_none() {
+                    return Err(stream_issue(
+                        index,
+                        TemplateField::Minimum,
+                        TemplateIssueReason::Required,
+                    ));
+                }
+                if stream.maximum.is_none() {
+                    return Err(stream_issue(
+                        index,
+                        TemplateField::Maximum,
+                        TemplateIssueReason::Required,
+                    ));
+                }
+            }
+            if stream.data_type == StreamType::Enum
+                && stream.enum_values.iter().any(|value| {
+                    !matches!(value, StreamValue::Text(text) if (1..=64).contains(&text.chars().count()))
+                })
+            {
+                return Err(stream_issue(
+                    index,
+                    TemplateField::EnumValues,
+                    TemplateIssueReason::InvalidValue,
+                ));
+            }
+        }
+        Ok(())
     }
 }

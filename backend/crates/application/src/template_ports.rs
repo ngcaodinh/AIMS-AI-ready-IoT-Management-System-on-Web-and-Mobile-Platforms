@@ -21,7 +21,10 @@ pub trait TemplateDigest: Clone + Send + Sync {
 pub struct NewTemplateVersion {
     pub template_version_id: Uuid,
     pub version_number: i32,
-    pub template_revision: i64,
+    /// Revision draft đã validate trước khi root chuyển sang PUBLISHED; lấy dưới root lock.
+    pub source_revision: i64,
+    /// Revision được ghi lên root sau khi publication commit.
+    pub published_root_revision: i64,
     pub content_digest: [u8; 32],
     pub published_by_user_id: Uuid,
     pub published_at: DateTime<Utc>,

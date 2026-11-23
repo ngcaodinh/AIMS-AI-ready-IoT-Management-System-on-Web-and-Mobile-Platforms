@@ -31,6 +31,7 @@ SOURCE_NAMES = (
     "0019_device_registration.sql",
     "0020_auth_ios_client.sql",
     "0021_password_change_attempt_buckets.sql",
+    "0022_template_version_revisions.sql",
 )
 # Các view/check dùng cùng search_path để regclass/regprocedure không drift do pg_dump reset.
 FINGERPRINT = "SET search_path=public,pg_catalog;\n" + (

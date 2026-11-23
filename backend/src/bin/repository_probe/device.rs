@@ -485,7 +485,7 @@ impl DeviceProbe<'_> {
                 self.admin,
                 self.workspace,
                 version.template_id,
-                version.template_revision,
+                version.published_root_revision,
                 template(format!("SENSOR_DRAFT:{}", self.config.run_id), true),
                 self.config.run_id,
             )
@@ -631,6 +631,8 @@ impl DeviceProbe<'_> {
             .await?;
         if owner.template_version_id != version.template_version_id
             || owner.content_digest != version.content_digest
+            || owner.source_revision != Some(version.source_revision)
+            || owner.published_root_revision != Some(version.published_root_revision)
             || admin.content_digest != owner.content_digest
         {
             return Err(ApplicationError::Conflict);
@@ -671,12 +673,13 @@ impl DeviceProbe<'_> {
                 self.admin,
                 self.workspace,
                 version.template_id,
-                version.template_revision,
+                version.published_root_revision,
                 template(format!("DEVICE_EDIT:{}", self.config.run_id), false),
                 self.config.run_id,
             )
             .await?;
-        self.templates
+        let second = self
+            .templates
             .publish(
                 self.admin,
                 self.workspace,
@@ -685,12 +688,22 @@ impl DeviceProbe<'_> {
                 self.config.run_id,
             )
             .await?;
+        if second.source_revision != changed.revision
+            || second.published_root_revision != changed.revision + 1
+            || second.template_version_id == version.template_version_id
+        {
+            return Err(ApplicationError::Conflict);
+        }
+        // D1 là device fixture đã đăng ký qua DeviceService; đọc lại qua cùng application/provider path sau publish v2.
         let after = self
             .first
             .schema(self.member, self.workspace, winner.pin.device_id)
             .await?;
-        if after.content_digest != owner.content_digest
+        if after.content.canonical_bytes() != owner.content.canonical_bytes()
+            || after.content_digest != owner.content_digest
             || after.template_version_id != owner.template_version_id
+            || after.source_revision != owner.source_revision
+            || after.published_root_revision != owner.published_root_revision
         {
             return Err(ApplicationError::Conflict);
         }

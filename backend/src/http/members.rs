@@ -143,7 +143,7 @@ async fn patch_member_request(
     }
     sessions::check_mutation(&state, &headers, transport, &session)?;
     // Application re-locks actor/session/workspace/target để quyền còn hiện hành tại lúc CAS.
-    let expected_revision = member_if_match(&headers)?;
+    let expected_revision = parse_if_match_revision(&headers)?;
     let fields = super::read_json(request).await?;
     let patch = parse_member_patch(&fields, alias_route)?;
     let correlation_id = Uuid::new_v4();
@@ -172,7 +172,7 @@ async fn patch_member_request(
  * Errors
  * Thiếu trả428; header lặp, sai pattern hoặc tràn miền trả400 FORMAT.
  */
-fn member_if_match(headers: &HeaderMap) -> Result<i64, HttpError> {
+pub(super) fn parse_if_match_revision(headers: &HeaderMap) -> Result<i64, HttpError> {
     let value = security::single_header(headers, "if-match")?
         .ok_or_else(|| HttpError::code(428, "PRECONDITION_REQUIRED"))?;
     let revision = value

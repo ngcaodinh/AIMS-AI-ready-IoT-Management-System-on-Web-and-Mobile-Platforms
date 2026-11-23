@@ -19,8 +19,8 @@ impl PgUnitOfWork {
         workspace_id: Uuid,
         version_id: Uuid,
     ) -> Result<TemplateVersionSnapshot, ApplicationError> {
-        // Không join templates: root name/model/description có thể đổi sau khi version này đã được pin.
-        let row=sqlx::query("SELECT workspace_id,template_id,template_version_id,version_number,name,model,published_at,published_by_user_id,content_digest FROM template_versions WHERE workspace_id=$1 AND template_version_id=$2")
+        // Không join templates: root metadata/revision có thể đổi sau khi version này đã được pin.
+        let row=sqlx::query("SELECT workspace_id,template_id,template_version_id,version_number,name,model,published_at,published_by_user_id,content_digest,source_revision,published_root_revision FROM template_versions WHERE workspace_id=$1 AND template_version_id=$2")
             .bind(workspace_id).bind(version_id).fetch_optional(&mut *self.transaction).await.map_err(storage_error)?.ok_or(ApplicationError::ResourceNotFound)?;
         let metadata = TemplateDraft {
             name: row.try_get("name").map_err(storage_error)?,
@@ -42,6 +42,10 @@ impl PgUnitOfWork {
             template_id: row.try_get("template_id").map_err(storage_error)?,
             template_version_id: version_id,
             version_number: row.try_get("version_number").map_err(storage_error)?,
+            source_revision: row.try_get("source_revision").map_err(storage_error)?,
+            published_root_revision: row
+                .try_get("published_root_revision")
+                .map_err(storage_error)?,
             published_at: row.try_get("published_at").map_err(storage_error)?,
             published_by_user_id: row.try_get("published_by_user_id").map_err(storage_error)?,
             content_digest: digest

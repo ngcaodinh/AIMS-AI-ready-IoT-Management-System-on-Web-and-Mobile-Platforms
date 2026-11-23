@@ -1,0 +1,369 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Nexa IoT template draft and version contract",
+    "version": "1.0.0",
+    "description": "Versioned, contract-first API for FEAT-TN-005 draft templates and FEAT-TN-006 immutable published versions. This artifact is spec-only; see contracts/fixtures/templates/README.md for field mapping and provider gaps."
+  },
+  "servers": [{"url": "/"}],
+  "tags": [{"name": "Templates"}],
+  "x-contract-status": "SPEC_ONLY",
+  "x-contract-features": ["FEAT-TN-005", "FEAT-TN-006"],
+  "x-golden-fixtures": "../fixtures/templates/scenarios.json",
+  "x-compatibility-note": "../fixtures/templates/README.md",
+  "paths": {
+    "/api/v1/templates": {
+      "get": {
+        "tags": ["Templates"],
+        "operationId": "listTemplates",
+        "summary": "List template roots in the selected workspace",
+        "description": "Current ADMIN of the ACTIVE workspace only. The server resolves membership and workspace scope from the authenticated principal and X-Workspace-Id; the header is a selector, not authority. Cursor state is opaque and bound to actor, workspace, and filters. List results are recovery candidates, not proof that a specific create request committed.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/WorkspaceId"},
+          {"$ref": "#/components/parameters/StatusFilter"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/PageSize"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped root summaries.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateListResponse"}}}
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      },
+      "post": {
+        "tags": ["Templates"],
+        "operationId": "createTemplateDraft",
+        "summary": "Create a template draft",
+        "description": "Requires a current ADMIN membership in the selected ACTIVE workspace. An authenticated non-ADMIN is forbidden. The server resolves membership and workspace scope from the authenticated principal and X-Workspace-Id; the header is a selector, not authority. Create a DRAFT root after validating the complete typed candidate. The server generates id, workspaceId, status, schemaVersion, revision, and timestamps. The request has no workspaceId or authority fields. Do not automatically repeat a create after a lost response; use the scoped list and let the user identify a candidate before an explicit retry.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/WorkspaceId"},
+          {"$ref": "#/components/parameters/CsrfToken"}
+        ],
+        "requestBody": {
+          "required": true,
+          "x-max-request-bytes": 65536,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateDraftInput"}}}
+        },
+        "responses": {
+          "201": {
+            "description": "Created draft root, revision 1.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateRoot"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "415": {"$ref": "#/components/responses/UnsupportedMediaType"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      }
+    },
+    "/api/v1/templates/{templateId}": {
+      "parameters": [
+        {"$ref": "#/components/parameters/WorkspaceId"},
+        {"$ref": "#/components/parameters/TemplateId"}
+      ],
+      "get": {
+        "tags": ["Templates"],
+        "operationId": "getTemplateRoot",
+        "summary": "Read the current template root",
+        "description": "Current ADMIN of the ACTIVE workspace only. A foreign or missing root returns the same RESOURCE_NOT_FOUND response. The root is mutable metadata and is not a substitute for a published version snapshot; consumers of a pinned version use the version read route.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "responses": {
+          "200": {
+            "description": "Current root, including its current lifecycle status and latest published version pointer.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateRoot"}}}
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      },
+      "patch": {
+        "tags": ["Templates"],
+        "operationId": "patchTemplateDraft",
+        "summary": "Patch a current draft with revision compare-and-set",
+        "description": "Current ADMIN of the ACTIVE workspace only. Require If-Match with the quoted root revision. Build and validate the merged candidate as a whole under the root lock; a supplied streams or commands array replaces that entire array. Authorization/scope is checked before resource access; after the root lock, a stale revision returns 412 before lifecycle status is checked. A matching revision on an immutable published root returns 409 IMMUTABLE_SCHEMA. A 412 response never applies any part of the patch.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/CsrfToken"},
+          {"$ref": "#/components/parameters/IfMatchRevision"}
+        ],
+        "requestBody": {
+          "required": true,
+          "x-max-request-bytes": 65536,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplatePatchInput"}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Updated current DRAFT root; revision increments once after commit.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateRoot"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/ImmutableSchema"},
+          "412": {"$ref": "#/components/responses/VersionConflict"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "415": {"$ref": "#/components/responses/UnsupportedMediaType"},
+          "422": {"$ref": "#/components/responses/StreamInvalid"},
+          "428": {"$ref": "#/components/responses/PreconditionRequired"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      }
+    },
+    "/api/v1/templates/{templateId}/publish": {
+      "post": {
+        "tags": ["Templates"],
+        "operationId": "publishTemplateDraft",
+        "summary": "Publish the exact current draft revision",
+        "description": "Current ADMIN of the ACTIVE workspace only. No request body is accepted; absent or zero-byte bodies are allowed, while any non-empty JSON value (including {}) is 422 VALIDATION_ERROR. Under the root lock, validate the complete persisted candidate and compare If-Match. A stale revision returns 412 VERSION_CONFLICT before checking lifecycle status; only a fresh revision on a non-DRAFT root returns 409 IMMUTABLE_SCHEMA. The immutable version is copied from exactly the draft revision in If-Match. In the 200 response, version.sourceRevision is that pre-publish draft revision and outer revision is the post-commit root revision. Reconcile a lost response by listing versions filtered by sourceRevision; do not retry automatically with a newer revision.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/WorkspaceId"},
+          {"$ref": "#/components/parameters/TemplateId"},
+          {"$ref": "#/components/parameters/CsrfToken"},
+          {"$ref": "#/components/parameters/IfMatchRevision"}
+        ],
+        "x-max-request-bytes": 65536,
+        "responses": {
+          "200": {
+            "description": "Published immutable snapshot plus the root revision after commit.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Publish responses are not cacheable.",
+                "schema": {"type": "string", "const": "no-store"}
+              }
+            },
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PublishResponse"}}}
+          },
+          "400": {"$ref": "#/components/responses/PublishBadRequest"},
+          "401": {"$ref": "#/components/responses/PublishUnauthorized"},
+          "403": {"$ref": "#/components/responses/PublishForbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/PublishConflict"},
+          "412": {"$ref": "#/components/responses/VersionConflict"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "415": {"$ref": "#/components/responses/UnsupportedMediaType"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "428": {"$ref": "#/components/responses/PreconditionRequired"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      }
+    },
+    "/api/v1/templates/{templateId}/versions": {
+      "get": {
+        "tags": ["Templates"],
+        "operationId": "listTemplateVersions",
+        "summary": "List published versions for a template",
+        "description": "Current ADMIN of the ACTIVE workspace only. The optional sourceRevision filter supports lost-ack recovery and selects the draft revision captured by a version, never the post-publish root revision. Cursor is opaque and bound to actor, workspace, and filters. Version IDs are exact UUID snapshot identities; version numbers and schemaVersion are not interchangeable.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/WorkspaceId"},
+          {"$ref": "#/components/parameters/TemplateId"},
+          {"$ref": "#/components/parameters/SourceRevision"},
+          {"$ref": "#/components/parameters/Cursor"},
+          {"$ref": "#/components/parameters/PageSize"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Published version summaries; retrieve a selected immutable snapshot by UUID for its full schema.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateVersionListResponse"}}}
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      }
+    },
+    "/api/v1/templates/{templateId}/versions/{versionId}": {
+      "get": {
+        "tags": ["Templates"],
+        "operationId": "getTemplateVersion",
+        "summary": "Read an immutable published snapshot by UUID",
+        "description": "Current ADMIN of the ACTIVE workspace only. The path parent, version UUID, and workspace must match. This library route does not grant USER access to browse templates; a USER reads only a snapshot embedded in an independently authorized device projection. The returned snapshot is independent of mutable root metadata and remains unchanged after later publishes.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/WorkspaceId"},
+          {"$ref": "#/components/parameters/TemplateId"},
+          {"$ref": "#/components/parameters/VersionId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable published snapshot; no mutable root revision is present.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateVersionSnapshot"}}}
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      }
+    },
+    "/api/v1/templates/{templateId}/draft": {
+      "post": {
+        "tags": ["Templates"],
+        "operationId": "cloneTemplateVersionToDraft",
+        "summary": "Clone a selected published version into the current draft",
+        "description": "Current ADMIN of the ACTIVE workspace only. Require If-Match on the root and a sourceVersionId from the same template family and workspace. Atomically create one current DRAFT under the same root, increment root revision once, preserve latestPublishedVersionId and all immutable snapshots, and copy the selected version content without mutating it. An older version may be selected deliberately. If a current draft already exists, return 409 DRAFT_EXISTS after revision comparison; a stale If-Match returns 412 VERSION_CONFLICT. Model cannot change within a family after its first publish.",
+        "security": [{"WebSession": []}, {"AppBearer": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/WorkspaceId"},
+          {"$ref": "#/components/parameters/TemplateId"},
+          {"$ref": "#/components/parameters/CsrfToken"},
+          {"$ref": "#/components/parameters/IfMatchRevision"}
+        ],
+        "requestBody": {
+          "required": true,
+          "x-max-request-bytes": 65536,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CloneDraftRequest"}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Current root after clone; status DRAFT and latestPublishedVersionId is preserved.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateRoot"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/DraftExists"},
+          "412": {"$ref": "#/components/responses/VersionConflict"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "415": {"$ref": "#/components/responses/UnsupportedMediaType"},
+          "422": {"$ref": "#/components/responses/ValidationError"},
+          "428": {"$ref": "#/components/responses/PreconditionRequired"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "WebSession": {"type": "apiKey", "in": "cookie", "name": "iot_session"},
+      "AppBearer": {"type": "http", "scheme": "bearer"}
+    },
+    "parameters": {
+      "WorkspaceId": {
+        "name": "X-Workspace-Id",
+        "in": "header",
+        "required": true,
+        "description": "Selected workspace UUID. The server rechecks current membership and scope; this header does not grant access.",
+        "schema": {"type": "string", "format": "uuid"}
+      },
+      "CsrfToken": {
+        "name": "X-CSRF-Token",
+        "in": "header",
+        "required": false,
+        "description": "Required for Web cookie mutations; not sent by App bearer clients.",
+        "schema": {"type": "string", "minLength": 1}
+      },
+      "TemplateId": {
+        "name": "templateId",
+        "in": "path",
+        "required": true,
+        "schema": {"type": "string", "format": "uuid"}
+      },
+      "VersionId": {
+        "name": "versionId",
+        "in": "path",
+        "required": true,
+        "schema": {"type": "string", "format": "uuid"}
+      },
+      "IfMatchRevision": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "description": "Quoted positive root revision, for example \"7\". A missing header maps to 428 PRECONDITION_REQUIRED; a mismatch maps to 412 VERSION_CONFLICT.",
+        "schema": {"type": "string", "pattern": "^\"[1-9][0-9]*\"$"}
+      },
+      "StatusFilter": {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "schema": {"type": "string", "enum": ["DRAFT", "PUBLISHED", "ARCHIVED"]}
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque continuation token bound to actor, workspace, and active filters.",
+        "schema": {"type": "string", "minLength": 1}
+      },
+      "PageSize": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}
+      },
+      "SourceRevision": {
+        "name": "sourceRevision",
+        "in": "query",
+        "required": false,
+        "description": "Filter by the draft revision captured by a published snapshot.",
+        "schema": {"type": "integer", "minimum": 1}
+      }
+    },
+    "schemas": {
+      "TemplateDraftInput": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateDraftInput"},
+      "TemplatePatchInput": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplatePatchInput"},
+      "TemplateRoot": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateRoot"},
+      "TemplateListResponse": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateListResponse"},
+      "TemplateVersionSnapshot": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateVersionSnapshot"},
+      "TemplateVersionListResponse": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateVersionListResponse"},
+      "PublishResponse": {"$ref": "../schemas/templates.v1.schema.json#/$defs/PublishResponse"},
+      "CloneDraftRequest": {"$ref": "../schemas/templates.v1.schema.json#/$defs/CloneDraftRequest"},
+      "ErrorEnvelope": {"$ref": "../schemas/templates.v1.schema.json#/$defs/ErrorEnvelope"}
+    },
+    "responses": {
+      "ErrorBase": {
+        "description": "Stable error envelope. No query, secret, or out-of-scope resource data is returned.",
+        "headers": {
+          "Cache-Control": {"description": "Sensitive scoped resource response is not cacheable.", "schema": {"type": "string", "const": "no-store"}}
+        },
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}
+      },
+      "PublishBadRequest": {
+        "$ref": "auth.v1.json#/components/responses/ValidationError",
+        "description": "VALIDATION_ERROR for malformed or duplicate headers, mixed cookie and bearer credentials, an invalid X-Workspace-Id, or a syntactically valid X-Auth-Context-Id sent with an App bearer. Missing or malformed credential schemes/tokens instead return 401 SESSION_EXPIRED. After credential extraction, a malformed X-Auth-Context-Id UUID returns 409 AUTH_CONTEXT_MISMATCH. This bodyless operation returns 422 for any non-empty body, including malformed JSON; it does not parse JSON."
+      },
+      "PublishUnauthorized": {
+        "$ref": "auth.v1.json#/components/responses/SessionInvalid",
+        "description": "Shared auth.v1 SessionInvalid behavior: SESSION_EXPIRED for missing, malformed, unknown, transport-mismatched, or expired credentials; SESSION_REVOKED for a recognized revoked session. The credential resolver maps a wrong Authorization scheme or bearer token not exactly 64 ASCII hex characters to SESSION_EXPIRED. Repeated or mixed credential headers return 400 VALIDATION_ERROR."
+      },
+      "PublishForbidden": {
+        "$ref": "auth.v1.json#/components/responses/AccessDenied",
+        "description": "PASSWORD_CHANGE_REQUIRED for a recognized limited session; CSRF_INVALID for a WEB origin/CSRF failure; FORBIDDEN when TemplateService rejects current workspace Admin/ACTIVE authorization. Credential extraction and Web context resolution precede these checks. The shared read-origin check can return CSRF_INVALID before the limited-session check; otherwise a limited session is rejected before the mutation CSRF token check. Mutation CSRF precedes If-Match/body validation, and TemplateService workspace authorization follows those request checks. App bearer requests do not use Web CSRF."
+      },
+      "PublishConflict": {
+        "$ref": "#/components/responses/ErrorBase",
+        "description": "AUTH_CONTEXT_MISMATCH follows shared auth.v1 behavior for a malformed context UUID after credential extraction, or a missing/mismatched WEB context. For the latter, account/session validity, revocation, and expiry are checked before context comparison, so those failures return 401 first. Context mismatch precedes limited-session, CSRF, If-Match/body, and template business checks. A syntactically valid context UUID on an App bearer returns 400 FORMAT; a malformed UUID is rejected by context parsing as 409. IMMUTABLE_SCHEMA is returned only for a fresh If-Match against a published root; a stale revision remains 412 VERSION_CONFLICT."
+      },
+      "BadRequest": {"$ref": "#/components/responses/ErrorBase", "description": "Malformed JSON or request framing; code VALIDATION_ERROR."},
+      "Unauthorized": {"$ref": "#/components/responses/ErrorBase", "description": "No valid full session; code SESSION_INVALID."},
+      "Forbidden": {"$ref": "#/components/responses/ErrorBase", "description": "Caller is not a current workspace ADMIN; code FORBIDDEN."},
+      "NotFound": {"$ref": "#/components/responses/ErrorBase", "description": "Root/version missing or outside workspace scope; code RESOURCE_NOT_FOUND."},
+      "ImmutableSchema": {"$ref": "#/components/responses/ErrorBase", "description": "Fresh revision targets a published immutable root; code IMMUTABLE_SCHEMA."},
+      "DraftExists": {"$ref": "#/components/responses/ErrorBase", "description": "The family already has a current draft; code DRAFT_EXISTS."},
+      "VersionConflict": {"$ref": "#/components/responses/ErrorBase", "description": "If-Match is stale; code VERSION_CONFLICT."},
+      "TooLarge": {"$ref": "#/components/responses/ErrorBase", "description": "Request exceeds the 64 KiB JSON body limit; code VALIDATION_ERROR."},
+      "UnsupportedMediaType": {"$ref": "#/components/responses/ErrorBase", "description": "Unsupported mutation content type; code VALIDATION_ERROR."},
+      "ValidationError": {"$ref": "#/components/responses/ErrorBase", "description": "Invalid request shape or query; code VALIDATION_ERROR. details.fieldErrors contains JSON Pointer paths when applicable."},
+      "StreamInvalid": {"$ref": "#/components/responses/ErrorBase", "description": "Typed stream/capability validation failed atomically; code STREAM_INVALID with details.fieldErrors."},
+      "PreconditionRequired": {"$ref": "#/components/responses/ErrorBase", "description": "If-Match is absent; code PRECONDITION_REQUIRED."},
+      "Unavailable": {"$ref": "#/components/responses/ErrorBase", "description": "Storage or commit outcome is unavailable; code SERVICE_UNAVAILABLE."}
+    }
+  }
+}

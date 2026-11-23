@@ -80,6 +80,49 @@ fn schema_validates_key_uniqueness_pattern_and_finite_bounds() {
     );
 }
 
+/// Publish v1 sí loại nội dung ngoài wire shape mà không suy ra default hay model được duyệt.
+#[test]
+fn publication_v1_rejects_content_outside_wire_shape() {
+    let ready = draft(vec![temperature()]).validate().unwrap();
+    assert!(ready.validate_publication_v1().is_ok());
+
+    let empty = draft(vec![]).validate().unwrap();
+    assert_eq!(
+        empty.validate_publication_v1().unwrap_err().field,
+        TemplateField::Streams
+    );
+
+    let mut writable_number = temperature();
+    writable_number.direction = StreamDirection::Write;
+    writable_number.safe_value = Some(number("1"));
+    writable_number.minimum = None;
+    writable_number.maximum = None;
+    let missing_bounds = draft(vec![writable_number]).validate().unwrap();
+    assert_eq!(
+        missing_bounds.validate_publication_v1().unwrap_err().field,
+        TemplateField::Minimum
+    );
+
+    let numeric_enum = StreamDraft {
+        key: "state".into(),
+        display_name: "State".into(),
+        channel_kind: ChannelKind::State,
+        data_type: StreamType::Enum,
+        direction: StreamDirection::Read,
+        unit: None,
+        minimum: None,
+        maximum: None,
+        string_max_length: None,
+        enum_values: vec![number("1")],
+        safe_value: None,
+    };
+    let numeric_enum = draft(vec![numeric_enum]).validate().unwrap();
+    assert_eq!(
+        numeric_enum.validate_publication_v1().unwrap_err().field,
+        TemplateField::EnumValues
+    );
+}
+
 /// Channel kind không cấp capability; writable cần safeValue đúng type/range, READ không có `SET_VALUE`.
 #[test]
 fn direction_and_safe_value_are_independent_from_channel_kind() {

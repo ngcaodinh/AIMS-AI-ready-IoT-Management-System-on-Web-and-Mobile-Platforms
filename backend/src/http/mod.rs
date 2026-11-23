@@ -5,6 +5,9 @@ mod members;
 mod realtime;
 mod security;
 mod sessions;
+mod templates;
+
+pub use templates::{TemplateHttpState, template_router};
 
 use crate::adapters::security::{CryptoService, PasswordService};
 use axum::{
@@ -107,6 +110,16 @@ pub(super) struct HttpError {
 impl HttpError {
     /** Tạo validation theo path/code cố định; không đưa field value chưa tin cậy vào response. */
     fn validation(status: u16, path: &'static str, code: &'static str) -> Self {
+        Self {
+            status,
+            code: "VALIDATION_ERROR",
+            details: json!({"fieldErrors":[{"path":path,"code":code}]}),
+            retry_after: None,
+            correlation_id: Uuid::new_v4(),
+        }
+    }
+    /** Tạo validation JSON Pointer động từ typed domain field; không đưa raw value vào response. */
+    pub(super) fn field_validation(status: u16, path: String, code: &'static str) -> Self {
         Self {
             status,
             code: "VALIDATION_ERROR",

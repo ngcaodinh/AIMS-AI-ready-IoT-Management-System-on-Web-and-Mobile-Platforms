@@ -1,0 +1,371 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aims:contracts:templates:v1",
+  "title": "AIMS template draft and published snapshot schemas",
+  "description": "Shared wire schemas for FEAT-TN-005 template drafts and FEAT-TN-006 immutable published versions. Cross-field validation rules and known provider mapping gaps are recorded in contracts/fixtures/templates/README.md.",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "UtcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "description": "RFC 3339 UTC timestamp serialized with a trailing Z."
+    },
+    "TemplateName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Unicode NFC and trimmed by the provider; length is measured in Unicode code points."
+    },
+    "ModelId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Canonical model registry identifier. This schema does not approve a hardware model or replace the required board PoC."
+    },
+    "StreamKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "description": "Stable per-version stream key."
+    },
+    "ChannelKind": {
+      "type": "string",
+      "enum": ["TELEMETRY", "STATE"],
+      "description": "Meaning of the channel; independent from read/write direction."
+    },
+    "Direction": {
+      "type": "string",
+      "enum": ["READ", "WRITE", "READ_WRITE"],
+      "description": "Stream access direction. FEAT-TN-005 plan text also calls this value set mode; the wire field name follows BA, handoff, and current domain fields."
+    },
+    "NumberStream": {
+      "type": "object",
+      "properties": {
+        "key": {"$ref": "#/$defs/StreamKey"},
+        "type": {"const": "NUMBER"},
+        "channelKind": {"$ref": "#/$defs/ChannelKind"},
+        "direction": {"$ref": "#/$defs/Direction"},
+        "unit": {
+          "oneOf": [
+            {"type": "string", "minLength": 1, "maxLength": 32},
+            {"type": "null"}
+          ],
+          "description": "Display metadata only; changing it does not convert historical values."
+        },
+        "min": {"type": "number"},
+        "max": {"type": "number"},
+        "default": {
+          "type": "number",
+          "description": "Optional schema default; it is not reported device state and is never sent to a board by itself."
+        }
+      },
+      "required": ["key", "type", "channelKind", "direction"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "direction": {"enum": ["WRITE", "READ_WRITE"]}
+            },
+            "required": ["direction"]
+          },
+          "then": {"required": ["min", "max"]}
+        }
+      ],
+      "description": "min must not exceed max when both are present. Writable NUMBER streams require both bounds. A default, if present, must be finite and within the declared bounds."
+    },
+    "BooleanStream": {
+      "type": "object",
+      "properties": {
+        "key": {"$ref": "#/$defs/StreamKey"},
+        "type": {"const": "BOOLEAN"},
+        "channelKind": {"$ref": "#/$defs/ChannelKind"},
+        "direction": {"$ref": "#/$defs/Direction"},
+        "unit": {"type": "null"},
+        "default": {"type": "boolean"}
+      },
+      "required": ["key", "type", "channelKind", "direction"],
+      "additionalProperties": false,
+      "description": "Boolean streams do not accept numeric bounds or enumValues. A supplied unit must be null."
+    },
+    "EnumStream": {
+      "type": "object",
+      "properties": {
+        "key": {"$ref": "#/$defs/StreamKey"},
+        "type": {"const": "ENUM"},
+        "channelKind": {"$ref": "#/$defs/ChannelKind"},
+        "direction": {"$ref": "#/$defs/Direction"},
+        "unit": {"type": "null"},
+        "enumValues": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64},
+          "description": "Values are compared exactly and case-sensitively; they are not trimmed or normalized."
+        },
+        "default": {"type": "string", "minLength": 1, "maxLength": 64}
+      },
+      "required": ["key", "type", "channelKind", "direction", "enumValues"],
+      "additionalProperties": false,
+      "description": "A supplied default must exactly match one enumValues entry. min and max are not accepted."
+    },
+    "StringStream": {
+      "type": "object",
+      "properties": {
+        "key": {"$ref": "#/$defs/StreamKey"},
+        "type": {"const": "STRING"},
+        "channelKind": {"$ref": "#/$defs/ChannelKind"},
+        "direction": {"const": "READ"},
+        "unit": {"type": "null"},
+        "default": {"type": "string", "maxLength": 256}
+      },
+      "required": ["key", "type", "channelKind", "direction"],
+      "additionalProperties": false,
+      "description": "STRING is read-only. A supplied unit must be null; min, max, and enumValues are not accepted."
+    },
+    "TemplateStream": {
+      "oneOf": [
+        {"$ref": "#/$defs/NumberStream"},
+        {"$ref": "#/$defs/BooleanStream"},
+        {"$ref": "#/$defs/EnumStream"},
+        {"$ref": "#/$defs/StringStream"}
+      ],
+      "description": "A stream has distinct channelKind and direction fields. safeValue is never stored on a stream in the wire contract."
+    },
+    "SetValueCommand": {
+      "type": "object",
+      "properties": {
+        "type": {"const": "SET_VALUE"},
+        "stream": {"$ref": "#/$defs/StreamKey"},
+        "safeValue": {
+          "oneOf": [
+            {"type": "number"},
+            {"type": "boolean"},
+            {"type": "string", "minLength": 1, "maxLength": 64}
+          ],
+          "description": "Typed synthetic schema value; production use requires model/driver PoC confirmation. Null is not accepted."
+        }
+      },
+      "required": ["type", "stream", "safeValue"],
+      "additionalProperties": false,
+      "description": "The stream key must resolve within the same template candidate to a writable NUMBER, BOOLEAN, or ENUM stream. Exactly one SET_VALUE command is required per writable stream, and safeValue must satisfy that stream's type and bounds."
+    },
+    "TemplateDraftInput": {
+      "type": "object",
+      "properties": {
+        "name": {"$ref": "#/$defs/TemplateName"},
+        "model": {"$ref": "#/$defs/ModelId"},
+        "streams": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/TemplateStream"},
+          "description": "Empty drafts are allowed; a published snapshot requires at least one stream."
+        },
+        "commands": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/SetValueCommand"},
+          "description": "Must not exceed the number of writable streams; command stream keys must be unique."
+        }
+      },
+      "required": ["name", "model", "streams", "commands"],
+      "additionalProperties": false
+    },
+    "TemplatePatchInput": {
+      "type": "object",
+      "properties": {
+        "name": {"$ref": "#/$defs/TemplateName"},
+        "model": {"$ref": "#/$defs/ModelId"},
+        "streams": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/TemplateStream"},
+          "description": "When supplied, replaces the entire streams array."
+        },
+        "commands": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/SetValueCommand"},
+          "description": "When supplied, replaces the entire commands array."
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false,
+      "description": "Partial top-level patch. The merged candidate is validated as a whole under If-Match CAS; arrays replace in full and are never merged by index or key."
+    },
+    "TemplateRoot": {
+      "type": "object",
+      "properties": {
+        "id": {"$ref": "#/$defs/Uuid"},
+        "workspaceId": {"$ref": "#/$defs/Uuid"},
+        "status": {"type": "string", "enum": ["DRAFT", "PUBLISHED", "ARCHIVED"]},
+        "schemaVersion": {"const": 1},
+        "revision": {"type": "integer", "minimum": 1},
+        "latestPublishedVersionId": {
+          "oneOf": [
+            {"$ref": "#/$defs/Uuid"},
+            {"type": "null"}
+          ]
+        },
+        "name": {"$ref": "#/$defs/TemplateName"},
+        "model": {"$ref": "#/$defs/ModelId"},
+        "streams": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/TemplateStream"}},
+        "commands": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/SetValueCommand"}},
+        "createdAt": {"$ref": "#/$defs/UtcTimestamp"},
+        "updatedAt": {"$ref": "#/$defs/UtcTimestamp"}
+      },
+      "required": ["id", "workspaceId", "status", "schemaVersion", "revision", "latestPublishedVersionId", "name", "model", "streams", "commands", "createdAt", "updatedAt"],
+      "additionalProperties": false,
+      "description": "Mutable root representation. After publication it is not the immutable content for a pinned device; use the version read operation."
+    },
+    "TemplateListItem": {
+      "type": "object",
+      "properties": {
+        "id": {"$ref": "#/$defs/Uuid"},
+        "workspaceId": {"$ref": "#/$defs/Uuid"},
+        "status": {"type": "string", "enum": ["DRAFT", "PUBLISHED", "ARCHIVED"]},
+        "schemaVersion": {"const": 1},
+        "revision": {"type": "integer", "minimum": 1},
+        "latestPublishedVersionId": {
+          "oneOf": [
+            {"$ref": "#/$defs/Uuid"},
+            {"type": "null"}
+          ]
+        },
+        "name": {"$ref": "#/$defs/TemplateName"},
+        "model": {"$ref": "#/$defs/ModelId"},
+        "updatedAt": {"$ref": "#/$defs/UtcTimestamp"}
+      },
+      "required": ["id", "workspaceId", "status", "schemaVersion", "revision", "latestPublishedVersionId", "name", "model", "updatedAt"],
+      "additionalProperties": false
+    },
+    "TemplateListResponse": {
+      "type": "object",
+      "properties": {
+        "items": {"type": "array", "items": {"$ref": "#/$defs/TemplateListItem"}},
+        "nextCursor": {"oneOf": [{"type": "string"}, {"type": "null"}]}
+      },
+      "required": ["items", "nextCursor"],
+      "additionalProperties": false
+    },
+    "TemplateVersionSnapshot": {
+      "type": "object",
+      "properties": {
+        "id": {"$ref": "#/$defs/Uuid"},
+        "workspaceId": {"$ref": "#/$defs/Uuid"},
+        "templateId": {"$ref": "#/$defs/Uuid"},
+        "version": {"type": "integer", "minimum": 1},
+        "schemaVersion": {"const": 1},
+        "status": {"const": "PUBLISHED"},
+        "name": {"$ref": "#/$defs/TemplateName"},
+        "model": {"$ref": "#/$defs/ModelId"},
+        "streams": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/TemplateStream"}
+        },
+        "commands": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/SetValueCommand"}},
+        "sourceRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The root draft revision whose exact content was published; not the post-commit root revision."
+        },
+        "publishedAt": {"$ref": "#/$defs/UtcTimestamp"}
+      },
+      "required": ["id", "workspaceId", "templateId", "version", "schemaVersion", "status", "name", "model", "streams", "commands", "sourceRevision", "publishedAt"],
+      "additionalProperties": false,
+      "description": "Immutable snapshot identity. It intentionally has no mutable root revision field."
+    },
+    "TemplateVersionListItem": {
+      "type": "object",
+      "properties": {
+        "id": {"$ref": "#/$defs/Uuid"},
+        "workspaceId": {"$ref": "#/$defs/Uuid"},
+        "templateId": {"$ref": "#/$defs/Uuid"},
+        "version": {"type": "integer", "minimum": 1},
+        "schemaVersion": {"const": 1},
+        "status": {"const": "PUBLISHED"},
+        "name": {"$ref": "#/$defs/TemplateName"},
+        "model": {"$ref": "#/$defs/ModelId"},
+        "sourceRevision": {"type": "integer", "minimum": 1},
+        "publishedAt": {"$ref": "#/$defs/UtcTimestamp"}
+      },
+      "required": ["id", "workspaceId", "templateId", "version", "schemaVersion", "status", "name", "model", "sourceRevision", "publishedAt"],
+      "additionalProperties": false
+    },
+    "TemplateVersionListResponse": {
+      "type": "object",
+      "properties": {
+        "items": {"type": "array", "items": {"$ref": "#/$defs/TemplateVersionListItem"}},
+        "nextCursor": {"oneOf": [{"type": "string"}, {"type": "null"}]}
+      },
+      "required": ["items", "nextCursor"],
+      "additionalProperties": false
+    },
+    "PublishResponse": {
+      "type": "object",
+      "properties": {
+        "templateId": {"$ref": "#/$defs/Uuid"},
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Root revision after the publish transaction commits."
+        },
+        "version": {"$ref": "#/$defs/TemplateVersionSnapshot"}
+      },
+      "required": ["templateId", "revision", "version"],
+      "additionalProperties": false,
+      "description": "The nested version.sourceRevision is the pre-publish draft revision; outer revision is the post-commit root revision."
+    },
+    "CloneDraftRequest": {
+      "type": "object",
+      "properties": {
+        "sourceVersionId": {"$ref": "#/$defs/Uuid"}
+      },
+      "required": ["sourceVersionId"],
+      "additionalProperties": false
+    },
+    "FieldError": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string", "description": "JSON Pointer to the invalid field; empty string denotes the request root."},
+        "code": {"type": "string", "minLength": 1}
+      },
+      "required": ["path", "code"],
+      "additionalProperties": false
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {"type": "string", "minLength": 1},
+            "message": {"type": "string", "minLength": 1},
+            "details": {
+              "type": "object",
+              "properties": {
+                "fieldErrors": {"type": "array", "items": {"$ref": "#/$defs/FieldError"}}
+              },
+              "additionalProperties": true
+            },
+            "correlationId": {"type": "string", "minLength": 1}
+          },
+          "required": ["code", "message", "details", "correlationId"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  }
+}

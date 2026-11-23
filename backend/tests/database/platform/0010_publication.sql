@@ -3,8 +3,8 @@
  */
 SET CONSTRAINTS ALL DEFERRED;
 SAVEPOINT publish_savepoint;
-INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest)
-SELECT workspace_id,pg_temp.fixture_id(219),template_id,2,name,model,created_by_user_id,decode(repeat('29',32),'hex')
+INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision)
+SELECT workspace_id,pg_temp.fixture_id(219),template_id,2,name,model,created_by_user_id,decode(repeat('29',32),'hex'),2,3
 FROM templates WHERE workspace_id=pg_temp.fixture_id(101);
 INSERT INTO datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,channel_kind)
 VALUES(pg_temp.fixture_id(101),pg_temp.fixture_id(219),'savepoint','Savepoint','BOOLEAN','READ','STATE');
@@ -12,12 +12,12 @@ RELEASE SAVEPOINT publish_savepoint;
 SELECT 'PASS:template_publish_inside_savepoint';
 
 SAVEPOINT rollback_publication;
-INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest)
-SELECT workspace_id,pg_temp.fixture_id(220),template_id,3,name,model,created_by_user_id,decode(repeat('30',32),'hex')
+INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision)
+SELECT workspace_id,pg_temp.fixture_id(220),template_id,3,name,model,created_by_user_id,decode(repeat('30',32),'hex'),3,4
 FROM templates WHERE workspace_id=pg_temp.fixture_id(101);
 ROLLBACK TO SAVEPOINT rollback_publication;
-INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest)
-SELECT workspace_id,pg_temp.fixture_id(220),template_id,3,name,model,created_by_user_id,decode(repeat('30',32),'hex')
+INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision)
+SELECT workspace_id,pg_temp.fixture_id(220),template_id,3,name,model,created_by_user_id,decode(repeat('30',32),'hex'),3,4
 FROM templates WHERE workspace_id=pg_temp.fixture_id(101);
 INSERT INTO datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,channel_kind)
 VALUES(pg_temp.fixture_id(101),pg_temp.fixture_id(220),'retry','Retry','BOOLEAN','READ','STATE');
@@ -26,8 +26,8 @@ SELECT 'PASS:publication_rollback_savepoint_then_retry';
 
 /* Marker có sẵn ngay BEFORE INSERT parent, nên cùng statement CTE cũng publish được. */
 WITH published AS (
- INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest)
- SELECT workspace_id,pg_temp.fixture_id(221),template_id,4,name,model,created_by_user_id,decode(repeat('31',32),'hex')
+ INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision)
+ SELECT workspace_id,pg_temp.fixture_id(221),template_id,4,name,model,created_by_user_id,decode(repeat('31',32),'hex'),4,5
  FROM templates WHERE workspace_id=pg_temp.fixture_id(101)
  RETURNING workspace_id,template_version_id
 )
@@ -36,8 +36,8 @@ SELECT workspace_id,template_version_id,'cte','CTE','BOOLEAN','READ','STATE' FRO
 SELECT 'PASS:publication_parent_child_same_statement_cte';
 
 /* Marker input giả bị bỏ qua lúc INSERT; không tin provenance từ caller. */
-INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,publication_transaction_id,publication_cluster_id)
-SELECT workspace_id,pg_temp.fixture_id(222),template_id,5,name,model,created_by_user_id,decode(repeat('32',32),'hex'),'0'::xid8,0
+INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,publication_transaction_id,publication_cluster_id,source_revision,published_root_revision)
+SELECT workspace_id,pg_temp.fixture_id(222),template_id,5,name,model,created_by_user_id,decode(repeat('32',32),'hex'),'0'::xid8,0,5,6
 FROM templates WHERE workspace_id=pg_temp.fixture_id(101);
 DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM template_versions WHERE template_version_id=pg_temp.fixture_id(222)

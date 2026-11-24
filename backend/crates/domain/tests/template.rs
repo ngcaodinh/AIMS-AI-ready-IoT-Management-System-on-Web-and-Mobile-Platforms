@@ -189,6 +189,98 @@ fn numeric_safe_value_bounds_reject_sub_ulp_overflow_without_float_rounding() {
     assert!(exact_match.validate_publication_v1().is_ok());
 }
 
+/// Ranh giới publish dùng đúng token `ryu` cho cả `min` và `max`, chặn midpoint vượt biên phát ra trên wire nhưng vẫn cho phép đọc dữ liệu cũ.
+#[test]
+fn ryu_midpoint_bounds_reject_tie_overflow_and_preserve_legacy_load() {
+    // IEEE-754 binary64 chính xác của ±1_234_567_890_123_456.25; `ryu` phát dạng rút gọn ±12345678901234562e-1.
+    const RYU_MIDPOINT_UPPER_F64: f64 = f64::from_bits(0x4311_8b54_f22a_eb01);
+    const RYU_MIDPOINT_LOWER_F64: f64 = f64::from_bits(0xc311_8b54_f22a_eb01);
+
+    assert_eq!(
+        DecimalLiteral::from_finite_f64(RYU_MIDPOINT_UPPER_F64)
+            .unwrap()
+            .json_number(),
+        "12345678901234562e-1"
+    );
+    assert_eq!(
+        DecimalLiteral::from_finite_f64(RYU_MIDPOINT_LOWER_F64)
+            .unwrap()
+            .json_number(),
+        "-12345678901234562e-1"
+    );
+    assert_eq!(
+        DecimalLiteral::from_finite_f64(-0.0).unwrap().json_number(),
+        "0"
+    );
+    assert!(DecimalLiteral::from_finite_f64(f64::NAN).is_none());
+
+    let mut upper = temperature();
+    upper.direction = StreamDirection::Write;
+    upper.minimum = Some(0.0);
+    upper.maximum = Some(RYU_MIDPOINT_UPPER_F64);
+    upper.safe_value = Some(number("1234567890123456.25"));
+    let legacy_upper = draft(vec![upper.clone()]).validate().unwrap();
+    let upper_err = legacy_upper.validate_publication_v1().unwrap_err();
+    assert_eq!(upper_err.field, TemplateField::SafeValue);
+    assert_eq!(upper_err.reason, TemplateIssueReason::InvalidValue);
+
+    upper.safe_value = Some(number("1234567890123456.2"));
+    assert!(
+        draft(vec![upper])
+            .validate()
+            .unwrap()
+            .validate_publication_v1()
+            .is_ok()
+    );
+
+    let mut lower = temperature();
+    lower.direction = StreamDirection::Write;
+    lower.minimum = Some(RYU_MIDPOINT_LOWER_F64);
+    lower.maximum = Some(0.0);
+    lower.safe_value = Some(number("-1234567890123456.25"));
+    let legacy_lower = draft(vec![lower.clone()]).validate().unwrap();
+    let lower_err = legacy_lower.validate_publication_v1().unwrap_err();
+    assert_eq!(lower_err.field, TemplateField::SafeValue);
+    assert_eq!(lower_err.reason, TemplateIssueReason::InvalidValue);
+
+    lower.safe_value = Some(number("-1234567890123456.2"));
+    assert!(
+        draft(vec![lower])
+            .validate()
+            .unwrap()
+            .validate_publication_v1()
+            .is_ok()
+    );
+}
+
+/// Snapshot NUMBER ghi được trước `0022` thiếu cả hai biên hoặc thiếu một biên vẫn đọc và dựng lại digest được, nhưng publish v1 mới phải bị chặn.
+#[test]
+fn legacy_writable_number_without_or_with_single_bound_loads_and_fails_v1_publish() {
+    let mut unbounded = temperature();
+    unbounded.direction = StreamDirection::Write;
+    unbounded.minimum = None;
+    unbounded.maximum = None;
+    unbounded.safe_value = Some(number("42"));
+    let loaded_unbounded = draft(vec![unbounded]).validate().unwrap();
+    assert_ne!(loaded_unbounded.canonical_bytes(), [] as [u8; 0]);
+    let missing_min = loaded_unbounded.validate_publication_v1().unwrap_err();
+    assert_eq!(missing_min.stream_index, Some(0));
+    assert_eq!(missing_min.field, TemplateField::Minimum);
+    assert_eq!(missing_min.reason, TemplateIssueReason::Required);
+
+    let mut single_bound = temperature();
+    single_bound.direction = StreamDirection::ReadWrite;
+    single_bound.minimum = Some(0.0);
+    single_bound.maximum = None;
+    single_bound.safe_value = Some(number("10"));
+    let loaded_single = draft(vec![single_bound]).validate().unwrap();
+    assert_ne!(loaded_single.canonical_bytes(), [] as [u8; 0]);
+    let missing_max = loaded_single.validate_publication_v1().unwrap_err();
+    assert_eq!(missing_max.stream_index, Some(0));
+    assert_eq!(missing_max.field, TemplateField::Maximum);
+    assert_eq!(missing_max.reason, TemplateIssueReason::Required);
+}
+
 /// Ghi mới chuẩn hóa NFC và trim tên `1..=100` code points; dữ liệu cũ vẫn đọc/sửa được nhưng không thể publish nguyên trạng.
 #[test]
 fn name_canonicalization_normalizes_writes_rejects_noncanonical_publish_and_keeps_legacy_reads() {

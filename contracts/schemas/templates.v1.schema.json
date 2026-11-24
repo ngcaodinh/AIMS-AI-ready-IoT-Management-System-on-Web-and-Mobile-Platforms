@@ -41,7 +41,7 @@
       "enum": ["READ", "WRITE", "READ_WRITE"],
       "description": "Stream access direction. FEAT-TN-005 plan text also calls this value set mode; the wire field name follows BA, handoff, and current domain fields."
     },
-    "NumberStream": {
+    "NumberStreamBase": {
       "type": "object",
       "properties": {
         "key": {"$ref": "#/$defs/StreamKey"},
@@ -64,7 +64,11 @@
       },
       "required": ["key", "type", "channelKind", "direction"],
       "additionalProperties": false,
+      "description": "Shared base NUMBER stream definition. min must not exceed max when both are present, and any supplied default must be finite within declared bounds; omitted min/max remain valid only when reading historical pre-0022 snapshots."
+    },
+    "NumberStream": {
       "allOf": [
+        {"$ref": "#/$defs/NumberStreamBase"},
         {
           "if": {
             "properties": {
@@ -75,7 +79,7 @@
           "then": {"required": ["min", "max"]}
         }
       ],
-      "description": "min must not exceed max when both are present. Writable NUMBER streams require both bounds. A default, if present, must be finite and within the declared bounds."
+      "description": "Strict NUMBER stream for drafts and provenance-tracked publications: writable NUMBER streams require both min and max."
     },
     "BooleanStream": {
       "type": "object",
@@ -169,12 +173,12 @@
     },
     "LegacyTemplateStream": {
       "oneOf": [
-        {"$ref": "#/$defs/NumberStream"},
+        {"$ref": "#/$defs/NumberStreamBase"},
         {"$ref": "#/$defs/BooleanStream"},
         {"$ref": "#/$defs/LegacyEnumStream"},
         {"$ref": "#/$defs/StringStream"}
       ],
-      "description": "Historical read-by-ID stream union for pre-0022 snapshots whose sourceRevision is null; preserves legacy enum number-vs-string types without digest drift."
+      "description": "Historical read-by-ID stream union for pre-0022 snapshots whose sourceRevision is null; uses NumberStreamBase (allowing omitted or single bounds on writable NUMBER) and preserves legacy enum number-vs-string types without digest drift."
     },
     "SetValueCommand": {
       "type": "object",

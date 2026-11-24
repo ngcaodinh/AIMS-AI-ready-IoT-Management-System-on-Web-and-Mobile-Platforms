@@ -9,6 +9,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 base64 = "=0.22.1"
 chrono = { version = "=0.4.42", default-features = false, features = ["clock", "serde"] }
+ryu = "=1.0.23"
 unicode-normalization = "=0.1.26"
 uuid = { version = "=1.18.1", features = ["v4", "serde"] }
 sqlx = { version = "=0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json"] }

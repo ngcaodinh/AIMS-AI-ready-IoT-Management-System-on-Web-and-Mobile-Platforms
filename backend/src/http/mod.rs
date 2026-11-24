@@ -20,6 +20,7 @@ use axum::{
 };
 use iot_application::{
     auth_diagnostics::AuthDiagnostics, error::ApplicationError, identity::IdentityService,
+    template::TemplateService,
 };
 use iot_domain::{
     identity::ClientType,
@@ -37,6 +38,7 @@ pub(super) type AuthService = IdentityService<PgIdentityStore, CryptoService>;
 #[derive(Clone)]
 pub struct HttpState {
     pub(super) auth: AuthService,
+    pub(super) templates: Arc<TemplateService<PgIdentityStore, CryptoService>>,
     realtime: realtime::RealtimeHub,
     pub(super) signing_key: Arc<[u8; 32]>,
     pub(super) origin: Arc<str>,
@@ -89,8 +91,10 @@ impl HttpState {
             store = store.with_diagnostics(sink);
         }
         let crypto = CryptoService::new(passwords, signing_key).await?;
+        let templates = Arc::new(TemplateService::new(store.clone(), crypto.clone()));
         Ok(Self {
             auth: IdentityService::new(store, crypto),
+            templates,
             realtime: realtime::RealtimeHub::with_handshake_db_capacity(handshake_db_capacity),
             signing_key: Arc::new(signing_key),
             origin: Arc::from(origin),
@@ -439,15 +443,25 @@ pub(super) fn session_headers(
 }
 
 /**
- * Tạo auth router và chạy DB reconciler cho socket của instance này.
- * Input: state dùng chung auth/pool/key và registry local do composition root khởi tạo.
- * Side effects: một reconciler bounded được spawn; task kết thúc khi state/router được drop.
+ * Tạo router HTTP chuẩn gồm các tuyến auth/workspace/realtime và `POST /api/v1/templates/{templateId}/publish`, đồng thời chạy DB reconciler.
+ *
+ * # Input
+ * Param: `state` — state dùng chung auth/pool/`TemplateService`/khóa ký và registry local do composition root khởi tạo.
+ *
+ * # Output
+ * Router Axum đã gắn các route IAM, workspace, realtime và route publish template dùng chung lớp bảo vệ `no-store` và xác thực hiện hành.
+ *
+ * # Side effects
+ * Một reconciler bounded được spawn; task kết thúc khi state/router được drop.
  */
 pub fn auth_router(state: HttpState) -> Router {
     state.realtime.start_reconciliation(state.auth.clone());
+    // Gắn route publish template lên router chuẩn để dùng chung auth, PgPool, PgIdentityStore và CryptoService.
+    let templates = template_router(TemplateHttpState::from_http_state(state.clone()));
     sessions::routes()
         .merge(members::routes())
         .merge(realtime::routes())
         .route("/api/v1/auth/login", post(login))
         .with_state(state)
+        .merge(templates)
 }

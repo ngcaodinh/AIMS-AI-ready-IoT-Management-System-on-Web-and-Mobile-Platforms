@@ -1,8 +1,9 @@
-//! HTTP adapter riêng cho publish template; router mountable này không được gắn mặc định vào Auth Lab.
+//! HTTP adapter cho publish template, dùng chung `HttpState`, `PgIdentityStore` và `CryptoService` với router chính.
 
 use super::{
     HttpError, HttpState, no_store, require_empty_body_without_json_parse, security, sessions,
 };
+use crate::adapters::security::CryptoService;
 use axum::{
     Json, Router,
     extract::{Path, Request, State},
@@ -23,13 +24,15 @@ use iot_domain::{
         TemplateIssueReason, TemplateValidation,
     },
     template_snapshot::PublishedTemplate,
+    template_value::DecimalLiteral,
 };
+use iot_postgres::PgIdentityStore;
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Dependency cho publish router đã xác thực, được composition chọn mount riêng.
+/// Dependency cho publish router đã xác thực, dùng chung auth/store/digest của server composition.
 #[derive(Clone)]
 pub struct TemplateHttpState<S, C> {
     auth: HttpState,
@@ -47,7 +50,23 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateHttpState<S, C> {
     }
 }
 
-/** Tạo publish router độc lập để composition root tự chọn nơi mount; Auth Lab không nhận route này tự động. */
+impl TemplateHttpState<PgIdentityStore, CryptoService> {
+    /**
+     * Dựng state cho route template từ `HttpState` dùng chung pool, `PgIdentityStore` và `CryptoService`.
+     *
+     * # Input
+     * Param: `auth` — state HTTP chính đã khởi tạo sẵn `TemplateService`.
+     *
+     * # Output
+     * `TemplateHttpState` dùng chung kết nối DB, khóa ký và digest SHA-256 với router chính.
+     */
+    pub(super) fn from_http_state(auth: HttpState) -> Self {
+        let templates = Arc::clone(&auth.templates);
+        Self { auth, templates }
+    }
+}
+
+/** Tạo publish router `POST /api/v1/templates/{templateId}/publish` cùng middleware `no-store` để gắn vào router server hoặc test riêng. */
 pub fn template_router<S, C>(state: TemplateHttpState<S, C>) -> Router
 where
     S: TemplateStore + 'static,
@@ -202,9 +221,9 @@ struct PublishedStreamPayload<'a> {
     direction: &'static str,
     unit: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    min: Option<f64>,
+    min: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max: Option<f64>,
+    max: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     enum_values: Option<Vec<Box<RawValue>>>,
 }
@@ -281,10 +300,22 @@ fn project_stream(stream: &StreamDraft) -> Result<PublishedStreamPayload<'_>, Ht
         channel_kind: channel_kind_name(stream.channel_kind),
         direction: direction_name(stream.direction),
         unit: stream.unit.as_deref(),
-        min: stream.minimum,
-        max: stream.maximum,
+        min: bound_value_json(stream.minimum)?,
+        max: bound_value_json(stream.maximum)?,
         enum_values,
     })
+}
+
+/** Chuyển biên số hữu hạn qua `DecimalLiteral::from_finite_f64` thành JSON token thô đồng nhất với bộ kiểm publish. */
+fn bound_value_json(bound: Option<f64>) -> Result<Option<Box<RawValue>>, HttpError> {
+    bound
+        .map(|value| {
+            let literal =
+                DecimalLiteral::from_finite_f64(value).ok_or_else(HttpError::unavailable)?;
+            RawValue::from_string(literal.json_number().to_owned())
+                .map_err(|_| HttpError::unavailable())
+        })
+        .transpose()
 }
 
 /** Serialize scalar domain thành JSON token thô và giữ nguyên literal decimal chính xác không cần `arbitrary_precision`. */
@@ -1010,5 +1041,83 @@ mod tests {
             published.content_digest
         );
         assert_eq!(state.lock().expect("memory store lock").audits, 2);
+    }
+
+    /// Điểm giữa `ryu` tại cả hai đầu `min`/`max` phải bị chặn trước khi ghi DB và khi bằng biên thì JSON wire phát đúng cùng token.
+    #[tokio::test]
+    async fn ryu_midpoint_bounds_align_precommit_rejection_and_wire_emission() {
+        // IEEE-754 binary64 chính xác của ±1_234_567_890_123_456.25; `ryu` phát dạng rút gọn ±12345678901234562e-1.
+        const RYU_MIDPOINT_LOWER_F64: f64 = f64::from_bits(0xc311_8b54_f22a_eb01);
+        const RYU_MIDPOINT_UPPER_F64: f64 = f64::from_bits(0x4311_8b54_f22a_eb01);
+
+        let (service, state, proof, workspace_id) = setup_memory_service();
+        let mut upper_draft = legacy_mixed_draft("Midpoint Probe");
+        upper_draft.streams.truncate(1);
+        upper_draft.streams[0].minimum = Some(RYU_MIDPOINT_LOWER_F64);
+        upper_draft.streams[0].maximum = Some(RYU_MIDPOINT_UPPER_F64);
+        upper_draft.streams[0].safe_value = Some(StreamValue::Number(
+            DecimalLiteral::new("1234567890123456.25").unwrap(),
+        ));
+        let legacy_upper = upper_draft.clone().validate().expect("legacy load allowed");
+        let (_, draft_id, _) = seed_legacy_pin_and_draft(&state, workspace_id, legacy_upper);
+
+        let err = service
+            .publish(&proof, workspace_id, draft_id, 1, Uuid::new_v4())
+            .await
+            .expect_err("upper midpoint above ryu wire max rejects precommit");
+        assert_eq!(map_publish_error(err).status, 422);
+        {
+            let guard = state.lock().expect("memory store lock");
+            assert_eq!(guard.templates[&draft_id].revision, 1);
+            assert_eq!(guard.versions.len(), 1);
+            assert_eq!(guard.audits, 0);
+        }
+
+        let mut lower_draft = upper_draft.clone();
+        lower_draft.streams[0].safe_value = Some(StreamValue::Number(
+            DecimalLiteral::new("-1234567890123456.25").unwrap(),
+        ));
+        service
+            .replace(
+                &proof,
+                workspace_id,
+                draft_id,
+                1,
+                lower_draft,
+                Uuid::new_v4(),
+            )
+            .await
+            .expect("replace stores draft at lower midpoint");
+        let lower_err = service
+            .publish(&proof, workspace_id, draft_id, 2, Uuid::new_v4())
+            .await
+            .expect_err("lower midpoint below ryu wire min rejects precommit");
+        assert_eq!(map_publish_error(lower_err).status, 422);
+
+        upper_draft.streams[0].safe_value = Some(StreamValue::Number(
+            DecimalLiteral::new("1234567890123456.2").unwrap(),
+        ));
+        service
+            .replace(
+                &proof,
+                workspace_id,
+                draft_id,
+                2,
+                upper_draft,
+                Uuid::new_v4(),
+            )
+            .await
+            .expect("replace aligns safeValue with wire max");
+        let published = service
+            .publish(&proof, workspace_id, draft_id, 3, Uuid::new_v4())
+            .await
+            .expect("exact ryu boundary equality publishes");
+        let Ok(payload) = publish_response(&published) else {
+            panic!("validated scalar mapping succeeds");
+        };
+        let raw_json = serde_json::to_string(&payload).expect("serialize publish payload");
+        assert!(raw_json.contains("\"min\":-12345678901234562e-1"));
+        assert!(raw_json.contains("\"max\":12345678901234562e-1"));
+        assert!(raw_json.contains("\"safeValue\":12345678901234562e-1"));
     }
 }

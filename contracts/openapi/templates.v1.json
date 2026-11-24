@@ -132,6 +132,7 @@
         "parameters": [
           {"$ref": "#/components/parameters/WorkspaceId"},
           {"$ref": "#/components/parameters/TemplateId"},
+          {"$ref": "./auth.v1.json#/components/parameters/AuthContext"},
           {"$ref": "#/components/parameters/CsrfToken"},
           {"$ref": "#/components/parameters/IfMatchRevision"}
         ],

@@ -62,6 +62,25 @@ impl DecimalLiteral {
     }
 
     /**
+     * Chuyển `f64` hữu hạn qua bộ định dạng `ryu` thành `DecimalLiteral` dùng chung cho kiểm publish và phát JSON wire.
+     *
+     * # Input
+     * Param: `value` — giá trị `f64` cần chuyển đổi; từ chối `NaN` và vô cực.
+     *
+     * # Output
+     * Trả `Some(Self)` mang biểu diễn thập phân ngắn nhất đồng nhất với JSON wire, hoặc `None` nếu không hữu hạn.
+     */
+    #[must_use]
+    pub fn from_finite_f64(value: f64) -> Option<Self> {
+        if !value.is_finite() {
+            return None;
+        }
+        // Dùng trực tiếp `ryu` đã khóa để bước kiểm biên publish và bước serialize `min`/`max` dùng cùng một token thập phân.
+        let mut buffer = ryu::Buffer::new();
+        Self::new(buffer.format_finite(value))
+    }
+
+    /**
      * Chiếu sang float8 cho bounds của kênh NUMBER; identity ENUM vẫn dùng decimal exact.
      * Output: float hữu hạn khác0 với literal khác0, hoặc None khi overflow/underflow.
      * Projection không thay đổi literal lưu trữ; không dùng giá trị này để dedupe ENUM.

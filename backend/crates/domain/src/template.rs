@@ -245,16 +245,14 @@ impl StreamDraft {
         if number.finite_float().is_none() {
             return false;
         }
-        // So sánh qua chuỗi thập phân chuẩn hóa của biên wire để chặn giá trị vượt nhẹ bị làm tròn về biên trong `f64`.
+        // Dùng đúng token `ryu` từ `DecimalLiteral::from_finite_f64` để kiểm publish khớp tuyệt đối với `min`/`max` phát ra trên wire.
         let within_min = self.minimum.is_none_or(|minimum| {
-            minimum.is_finite()
-                && DecimalLiteral::new(&minimum.to_string())
-                    .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Less)
+            DecimalLiteral::from_finite_f64(minimum)
+                .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Less)
         });
         let within_max = self.maximum.is_none_or(|maximum| {
-            maximum.is_finite()
-                && DecimalLiteral::new(&maximum.to_string())
-                    .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Greater)
+            DecimalLiteral::from_finite_f64(maximum)
+                .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Greater)
         });
         within_min && within_max
     }

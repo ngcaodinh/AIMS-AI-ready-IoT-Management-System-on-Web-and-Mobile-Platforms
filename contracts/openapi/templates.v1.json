@@ -193,7 +193,7 @@
         "tags": ["Templates"],
         "operationId": "getTemplateVersion",
         "summary": "Read an immutable published snapshot by UUID",
-        "description": "Current ADMIN of the ACTIVE workspace only. The path parent, version UUID, and workspace must match. Historical versions published before source_revision tracking report sourceRevision null. This library route does not grant USER access to browse templates; a USER reads only a snapshot embedded in an independently authorized device projection. The returned snapshot is independent of mutable root metadata and remains unchanged after later publishes.",
+        "description": "Current ADMIN of the ACTIVE workspace only. The path parent, version UUID, and workspace must match. Historical versions published before source_revision tracking report sourceRevision null and preserve persisted JSON number vs string enumValues members verbatim without coercion or digest drift, whereas post-0022 reads and new publications require strict string enumValues (1..=64). This library route does not grant USER access to browse templates; a USER reads only a snapshot embedded in an independently authorized device projection. The returned snapshot is independent of mutable root metadata and remains unchanged after later publishes.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
         "parameters": [
           {"$ref": "#/components/parameters/WorkspaceId"},

@@ -3,7 +3,7 @@
 use iot_domain::{
     template::{
         ChannelKind, StreamDirection, StreamDraft, StreamType, StreamValue, TemplateDraft,
-        TemplateField,
+        TemplateField, TemplateIssueReason, canonical_template_name,
     },
     template_value::DecimalLiteral,
 };
@@ -154,7 +154,7 @@ fn publication_v1_enforces_enum_value_count_limit() {
     assert_eq!(error.field, TemplateField::EnumValues);
 }
 
-/// Giá trị số `safeValue` vượt nhẹ ngoài biên trên wire dù tròn bằng biên trong `f64` vẫn phải bị từ chối.
+/// Legacy pin có `safeValue` vượt nhẹ ngoài biên theo `f64` cũ vẫn đọc được để giữ pin/sửa draft, nhưng publish mới bị chặn tại `validate_publication_v1`.
 #[test]
 fn numeric_safe_value_bounds_reject_sub_ulp_overflow_without_float_rounding() {
     let mut stream = temperature();
@@ -162,24 +162,94 @@ fn numeric_safe_value_bounds_reject_sub_ulp_overflow_without_float_rounding() {
     stream.minimum = Some(-1.0);
     stream.maximum = Some(1.0);
     stream.safe_value = Some(number("1.0000000000000001"));
-    let over_max = draft(vec![stream.clone()]).validate().unwrap_err();
+    let legacy_over_max = draft(vec![stream.clone()]).validate().unwrap();
+    assert_ne!(legacy_over_max.canonical_bytes(), [] as [u8; 0]);
+    let over_max = legacy_over_max.validate_publication_v1().unwrap_err();
     assert_eq!(over_max.stream_index, Some(0));
     assert_eq!(over_max.field, TemplateField::SafeValue);
+    assert_eq!(over_max.reason, TemplateIssueReason::InvalidValue);
 
     stream.safe_value = Some(number("-1.0000000000000001"));
-    let under_min = draft(vec![stream.clone()]).validate().unwrap_err();
+    let legacy_under_min = draft(vec![stream.clone()]).validate().unwrap();
+    let under_min = legacy_under_min.validate_publication_v1().unwrap_err();
     assert_eq!(under_min.stream_index, Some(0));
     assert_eq!(under_min.field, TemplateField::SafeValue);
+    assert_eq!(under_min.reason, TemplateIssueReason::InvalidValue);
 
     stream.minimum = Some(0.1);
     stream.maximum = Some(0.1);
     stream.safe_value = Some(number("0.100000000000000005"));
-    let over_decimal_max = draft(vec![stream.clone()]).validate().unwrap_err();
+    let legacy_decimal_over = draft(vec![stream.clone()]).validate().unwrap();
+    let over_decimal_max = legacy_decimal_over.validate_publication_v1().unwrap_err();
     assert_eq!(over_decimal_max.field, TemplateField::SafeValue);
+    assert_eq!(over_decimal_max.reason, TemplateIssueReason::InvalidValue);
 
     stream.safe_value = Some(number("0.1"));
     let exact_match = draft(vec![stream]).validate().unwrap();
     assert!(exact_match.validate_publication_v1().is_ok());
+}
+
+/// Ghi mới chuẩn hóa NFC và trim tên `1..=100` code points; dữ liệu cũ vẫn đọc/sửa được nhưng không thể publish nguyên trạng.
+#[test]
+fn name_canonicalization_normalizes_writes_rejects_noncanonical_publish_and_keeps_legacy_reads() {
+    let nfd_padded = "  Pho\u{0300}ng  ";
+    let expected_nfc = "Ph\u{00f2}ng";
+    assert_eq!(canonical_template_name(nfd_padded).unwrap(), expected_nfc);
+
+    let mut legacy_padded = draft(vec![temperature()]);
+    legacy_padded.name = "  Room  ".into();
+    let legacy_valid = legacy_padded.clone().validate().unwrap();
+    assert_eq!(legacy_valid.draft().name, "  Room  ");
+    let publish_padded = legacy_valid.validate_publication_v1().unwrap_err();
+    assert_eq!(publish_padded.field, TemplateField::Name);
+    assert_eq!(publish_padded.reason, TemplateIssueReason::InvalidValue);
+
+    let mut legacy_nfd = draft(vec![temperature()]);
+    legacy_nfd.name = "Pho\u{0300}ng".into();
+    let nfd_valid = legacy_nfd.validate().unwrap();
+    assert_ne!(nfd_valid.draft().name, expected_nfc);
+    let publish_nfd = nfd_valid.validate_publication_v1().unwrap_err();
+    assert_eq!(publish_nfd.field, TemplateField::Name);
+
+    let mut canonical_write = draft(vec![temperature()]);
+    canonical_write.name = nfd_padded.into();
+    let normalized = canonical_write.validate_canonical_write().unwrap();
+    assert_eq!(normalized.draft().name, expected_nfc);
+    assert!(normalized.validate_publication_v1().is_ok());
+
+    let mut hundred_decomposed = draft(vec![temperature()]);
+    hundred_decomposed.name = "a\u{0301}".repeat(100);
+    let hundred_valid = hundred_decomposed.validate_canonical_write().unwrap();
+    assert_eq!(hundred_valid.draft().name.chars().count(), 100);
+    assert!(hundred_valid.validate_publication_v1().is_ok());
+
+    let mut over_limit = draft(vec![temperature()]);
+    over_limit.name = "a".repeat(101);
+    assert_eq!(
+        over_limit.validate_canonical_write().unwrap_err().field,
+        TemplateField::Name
+    );
+}
+
+/// Snapshot ENUM trước `0022` giữ nguyên phân biệt số và chuỗi trong digest, còn publish v1 mới chỉ nhận chuỗi.
+#[test]
+fn legacy_numeric_and_string_enum_members_preserve_distinct_digest_and_fail_v1_publish() {
+    let mut mixed_enum = temperature();
+    mixed_enum.data_type = StreamType::Enum;
+    mixed_enum.unit = None;
+    mixed_enum.minimum = None;
+    mixed_enum.maximum = None;
+    mixed_enum.enum_values = vec![number("1"), StreamValue::Text("1".into())];
+    let mixed = draft(vec![mixed_enum.clone()]).validate().unwrap();
+
+    mixed_enum.enum_values = vec![StreamValue::Text("1".into())];
+    let string_only = draft(vec![mixed_enum]).validate().unwrap();
+    assert_ne!(mixed.canonical_bytes(), string_only.canonical_bytes());
+
+    let publish_err = mixed.validate_publication_v1().unwrap_err();
+    assert_eq!(publish_err.stream_index, Some(0));
+    assert_eq!(publish_err.field, TemplateField::EnumValues);
+    assert_eq!(publish_err.reason, TemplateIssueReason::InvalidValue);
 }
 
 /// Channel kind không cấp capability; writable cần safeValue đúng type/range, READ không có `SET_VALUE`.

@@ -177,7 +177,7 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
         correlation_id: Uuid,
     ) -> Result<TemplateSnapshot, ApplicationError> {
         let draft = draft
-            .validate()
+            .validate_canonical_write()
             .map_err(ApplicationError::TemplateInvalid)?;
         let (mut transaction, locked) = self.open(proof, workspace_id).await?;
         let (principal, now) = Self::current(&mut transaction, &locked, proof).await?;
@@ -246,7 +246,7 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
             return Err(ApplicationError::InvalidInput);
         }
         let draft = draft
-            .validate()
+            .validate_canonical_write()
             .map_err(ApplicationError::TemplateInvalid)?;
         let (mut transaction, locked) = self.open(proof, workspace_id).await?;
         let before = transaction.lock_template(workspace_id, template_id).await?;

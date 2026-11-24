@@ -622,6 +622,53 @@
       }
     },
     {
+      "id": "CT-PUBLISH-READ-LEGACY-NUMERIC-ENUM",
+      "fixtureStatus": "SPEC_ONLY",
+      "name": "Read a pre-0022 historical snapshot preserving numeric and string enumValues without coercion",
+      "contextRef": "CTX-APP-ADMIN",
+      "preconditions": {"historicalPre0022RowWithNumericEnum": true},
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/templates/00000000-0000-4000-8000-0000000000b1/versions/00000000-0000-4000-8000-000000000001",
+        "headers": {"X-Workspace-Id": "00000000-0000-4000-8000-0000000000a1"}
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "workspaceId": "00000000-0000-4000-8000-0000000000a1",
+          "templateId": "00000000-0000-4000-8000-0000000000b1",
+          "version": 1,
+          "schemaVersion": 1,
+          "status": "PUBLISHED",
+          "name": "Fixture room template",
+          "model": "fixture-model-not-approved",
+          "streams": [
+            {
+              "key": "legacy_mode",
+              "type": "ENUM",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "enumValues": [1, "1"]
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "legacy_mode",
+              "safeValue": 1
+            }
+          ],
+          "sourceRevision": null,
+          "publishedAt": "2026-01-01T00:10:00Z"
+        },
+        "assertions": [
+          "numeric enum member 1 and string enum member \"1\" preserve distinct JSON types on read-by-ID with no coercion or digest drift",
+          "new publications still enforce strict string-only enumValues (1..=64)"
+        ]
+      }
+    },
+    {
       "id": "CT-PUBLISH-LIST-LEGACY-NULL-PROVENANCE",
       "fixtureStatus": "SPEC_ONLY",
       "name": "List versions including a pre-0022 historical item with sourceRevision null",

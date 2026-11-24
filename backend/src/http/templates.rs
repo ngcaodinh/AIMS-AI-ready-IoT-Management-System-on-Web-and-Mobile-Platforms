@@ -349,17 +349,35 @@ mod tests {
         extract::Request,
         http::{HeaderMap, HeaderValue, StatusCode},
     };
-    use chrono::Utc;
-    use iot_application::template::TemplateService;
+    use chrono::{DateTime, TimeDelta, Utc};
+    use iot_application::{
+        ports::LockedSession,
+        template::TemplateService,
+        template_ports::{NewTemplateVersion, TemplateDigest, TemplateStore, TemplateTransaction},
+    };
     use iot_domain::{
+        identity::{
+            AccountSnapshot, AccountStatus, AuditRecord, ClientType, SecretString, SessionProof,
+            SessionSnapshot,
+        },
         template::{
             ChannelKind, StreamDirection, StreamDraft, StreamType, StreamValue, TemplateDraft,
+            ValidatedTemplate,
         },
-        template_snapshot::PublishedTemplate,
+        template_snapshot::{
+            PublishedTemplate, TemplateSnapshot, TemplateStatus, TemplateVersionSnapshot,
+        },
         template_value::DecimalLiteral,
+        workspace::{WorkspaceRole, WorkspaceSnapshot},
     };
     use iot_postgres::PgIdentityStore;
+    use sha2::{Digest, Sha256};
     use sqlx::postgres::PgPoolOptions;
+    use std::{
+        collections::HashMap,
+        future::ready,
+        sync::{Arc, Mutex},
+    };
     use tower::ServiceExt;
     use uuid::Uuid;
 
@@ -513,5 +531,484 @@ mod tests {
             .unwrap();
         assert_eq!(bad_template.status(), StatusCode::NOT_FOUND);
         assert_eq!(bad_template.headers()["cache-control"], "no-store");
+    }
+
+    #[derive(Clone, Default)]
+    struct ShaDigest;
+
+    impl TemplateDigest for ShaDigest {
+        fn content_digest(&self, canonical: &[u8]) -> [u8; 32] {
+            Sha256::digest(canonical).into()
+        }
+    }
+
+    struct MemoryState {
+        workspace_id: Uuid,
+        user_id: Uuid,
+        session_id: Uuid,
+        auth_context_id: Uuid,
+        now: DateTime<Utc>,
+        templates: HashMap<Uuid, TemplateSnapshot>,
+        versions: HashMap<Uuid, TemplateVersionSnapshot>,
+        audits: usize,
+    }
+
+    #[derive(Clone)]
+    struct MemoryStore {
+        state: Arc<Mutex<MemoryState>>,
+    }
+
+    struct MemoryTx {
+        state: Arc<Mutex<MemoryState>>,
+    }
+
+    // Store trong bộ nhớ dùng `std::future::ready` thay cho `async fn` không có `.await` để giữ contract trait async mà không thêm suppression hay await giả.
+    impl TemplateStore for MemoryStore {
+        type Transaction = MemoryTx;
+
+        fn begin_template(
+            &self,
+        ) -> impl Future<Output = Result<Self::Transaction, ApplicationError>> + Send {
+            ready(Ok(MemoryTx {
+                state: Arc::clone(&self.state),
+            }))
+        }
+    }
+
+    impl TemplateTransaction for MemoryTx {
+        fn load_published_version(
+            &mut self,
+            workspace_id: Uuid,
+            version_id: Uuid,
+        ) -> impl Future<Output = Result<TemplateVersionSnapshot, ApplicationError>> + Send
+        {
+            let result = {
+                let guard = self.state.lock().expect("memory store lock");
+                guard
+                    .versions
+                    .get(&version_id)
+                    .filter(|version| version.workspace_id == workspace_id)
+                    .cloned()
+            };
+            ready(result.ok_or(ApplicationError::ResourceNotFound))
+        }
+
+        fn lock_actor(
+            &mut self,
+            _proof: &SessionProof,
+        ) -> impl Future<Output = Result<LockedSession, ApplicationError>> + Send {
+            let guard = self.state.lock().expect("memory store lock");
+            let account = AccountSnapshot {
+                user_id: guard.user_id,
+                password_verifier: SecretString::new("synthetic-hash".into()),
+                status: AccountStatus::Active,
+                must_change_password: false,
+            };
+            let session = SessionSnapshot {
+                session_id: guard.session_id,
+                user_id: guard.user_id,
+                auth_context_id: guard.auth_context_id,
+                client_type: ClientType::Web,
+                limited: false,
+                expires_at: guard.now + TimeDelta::minutes(10),
+                revoked_at: None,
+            };
+            let observed_at = guard.now;
+            drop(guard);
+            ready(Ok(LockedSession {
+                account,
+                session,
+                observed_at,
+            }))
+        }
+
+        fn lock_scope(
+            &mut self,
+            workspace_id: Uuid,
+            user_id: Uuid,
+        ) -> impl Future<Output = Result<WorkspaceSnapshot, ApplicationError>> + Send {
+            let guard = self.state.lock().expect("memory store lock");
+            let valid = workspace_id == guard.workspace_id && user_id == guard.user_id;
+            drop(guard);
+            if !valid {
+                return ready(Err(ApplicationError::ResourceNotFound));
+            }
+            ready(Ok(WorkspaceSnapshot {
+                workspace_id,
+                user_id,
+                workspace_active: true,
+                membership_active: true,
+                grant_active: true,
+                role: WorkspaceRole::Admin,
+                grant_generation: 1,
+                workspace_authorization_version: 1,
+                membership_authorization_version: 1,
+            }))
+        }
+
+        fn template_now(
+            &mut self,
+        ) -> impl Future<Output = Result<DateTime<Utc>, ApplicationError>> + Send {
+            ready(Ok(self.state.lock().expect("memory store lock").now))
+        }
+
+        fn lock_template(
+            &mut self,
+            workspace_id: Uuid,
+            template_id: Uuid,
+        ) -> impl Future<Output = Result<TemplateSnapshot, ApplicationError>> + Send {
+            let result = {
+                let guard = self.state.lock().expect("memory store lock");
+                guard
+                    .templates
+                    .get(&template_id)
+                    .filter(|snapshot| snapshot.workspace_id == workspace_id)
+                    .cloned()
+            };
+            ready(result.ok_or(ApplicationError::ResourceNotFound))
+        }
+
+        fn insert_template(
+            &mut self,
+            workspace_id: Uuid,
+            template_id: Uuid,
+            _actor_id: Uuid,
+            draft: &ValidatedTemplate,
+            now: DateTime<Utc>,
+        ) -> impl Future<Output = Result<TemplateSnapshot, ApplicationError>> + Send {
+            let snapshot = TemplateSnapshot {
+                workspace_id,
+                template_id,
+                revision: 1,
+                status: TemplateStatus::Draft,
+                draft: draft.clone(),
+                created_at: now,
+                updated_at: now,
+            };
+            self.state
+                .lock()
+                .expect("memory store lock")
+                .templates
+                .insert(template_id, snapshot.clone());
+            ready(Ok(snapshot))
+        }
+
+        fn replace_draft(
+            &mut self,
+            before: &TemplateSnapshot,
+            draft: &ValidatedTemplate,
+            next_revision: i64,
+            now: DateTime<Utc>,
+        ) -> impl Future<Output = Result<TemplateSnapshot, ApplicationError>> + Send {
+            let updated = TemplateSnapshot {
+                workspace_id: before.workspace_id,
+                template_id: before.template_id,
+                revision: next_revision,
+                status: TemplateStatus::Draft,
+                draft: draft.clone(),
+                created_at: before.created_at,
+                updated_at: now,
+            };
+            self.state
+                .lock()
+                .expect("memory store lock")
+                .templates
+                .insert(before.template_id, updated.clone());
+            ready(Ok(updated))
+        }
+
+        fn latest_version_number(
+            &mut self,
+            workspace_id: Uuid,
+            template_id: Uuid,
+        ) -> impl Future<Output = Result<i32, ApplicationError>> + Send {
+            let guard = self.state.lock().expect("memory store lock");
+            ready(Ok(guard
+                .versions
+                .values()
+                .filter(|version| {
+                    version.workspace_id == workspace_id && version.template_id == template_id
+                })
+                .map(|version| version.version_number)
+                .max()
+                .unwrap_or(0)))
+        }
+
+        fn publish_template(
+            &mut self,
+            before: &TemplateSnapshot,
+            version: &NewTemplateVersion,
+        ) -> impl Future<Output = Result<PublishedTemplate, ApplicationError>> + Send {
+            let mut guard = self.state.lock().expect("memory store lock");
+            let mut updated = before.clone();
+            updated.status = TemplateStatus::Published;
+            updated.revision = version.published_root_revision;
+            updated.updated_at = version.published_at;
+            guard.templates.insert(before.template_id, updated);
+            guard.versions.insert(
+                version.template_version_id,
+                TemplateVersionSnapshot {
+                    workspace_id: before.workspace_id,
+                    template_id: before.template_id,
+                    template_version_id: version.template_version_id,
+                    version_number: version.version_number,
+                    source_revision: Some(version.source_revision),
+                    published_root_revision: Some(version.published_root_revision),
+                    published_at: version.published_at,
+                    published_by_user_id: version.published_by_user_id,
+                    content_digest: version.content_digest,
+                    content: before.draft.clone(),
+                },
+            );
+            drop(guard);
+            ready(Ok(PublishedTemplate {
+                workspace_id: before.workspace_id,
+                template_id: before.template_id,
+                template_version_id: version.template_version_id,
+                version_number: version.version_number,
+                source_revision: version.source_revision,
+                published_root_revision: version.published_root_revision,
+                published_at: version.published_at,
+                content_digest: version.content_digest,
+                content: before.draft.clone(),
+            }))
+        }
+
+        fn append_template_audit(
+            &mut self,
+            _audit: AuditRecord,
+        ) -> impl Future<Output = Result<(), ApplicationError>> + Send {
+            self.state.lock().expect("memory store lock").audits += 1;
+            ready(Ok(()))
+        }
+
+        fn commit_template(self) -> impl Future<Output = Result<(), ApplicationError>> + Send {
+            ready(Ok(()))
+        }
+    }
+
+    fn setup_memory_service() -> (
+        TemplateService<MemoryStore, ShaDigest>,
+        Arc<Mutex<MemoryState>>,
+        SessionProof,
+        Uuid,
+    ) {
+        let workspace_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let auth_context_id = Uuid::new_v4();
+        let state = Arc::new(Mutex::new(MemoryState {
+            workspace_id,
+            user_id,
+            session_id: Uuid::new_v4(),
+            auth_context_id,
+            now: Utc::now(),
+            templates: HashMap::new(),
+            versions: HashMap::new(),
+            audits: 0,
+        }));
+        let proof = SessionProof {
+            token_digest: [9; 32],
+            expected_context: Some(auth_context_id),
+        };
+        let service = TemplateService::new(
+            MemoryStore {
+                state: Arc::clone(&state),
+            },
+            ShaDigest,
+        );
+        (service, state, proof, workspace_id)
+    }
+
+    fn seed_legacy_pin_and_draft(
+        state: &Arc<Mutex<MemoryState>>,
+        workspace_id: Uuid,
+        legacy_content: ValidatedTemplate,
+    ) -> (Uuid, Uuid, [u8; 32]) {
+        let legacy_version_id = Uuid::new_v4();
+        let legacy_draft_id = Uuid::new_v4();
+        let legacy_digest = ShaDigest.content_digest(&legacy_content.canonical_bytes());
+        let mut guard = state.lock().expect("memory store lock");
+        let user_id = guard.user_id;
+        let now = guard.now;
+        guard.versions.insert(
+            legacy_version_id,
+            TemplateVersionSnapshot {
+                workspace_id,
+                template_id: legacy_draft_id,
+                template_version_id: legacy_version_id,
+                version_number: 1,
+                source_revision: None,
+                published_root_revision: None,
+                published_at: now,
+                published_by_user_id: user_id,
+                content_digest: legacy_digest,
+                content: legacy_content.clone(),
+            },
+        );
+        guard.templates.insert(
+            legacy_draft_id,
+            TemplateSnapshot {
+                workspace_id,
+                template_id: legacy_draft_id,
+                revision: 1,
+                status: TemplateStatus::Draft,
+                draft: legacy_content,
+                created_at: now,
+                updated_at: now,
+            },
+        );
+        drop(guard);
+        (legacy_version_id, legacy_draft_id, legacy_digest)
+    }
+
+    fn legacy_mixed_draft(name: &str) -> TemplateDraft {
+        TemplateDraft {
+            name: name.into(),
+            model: "LEGACY_MODEL".into(),
+            description: None,
+            streams: vec![
+                StreamDraft {
+                    key: "setpoint".into(),
+                    display_name: "Setpoint".into(),
+                    channel_kind: ChannelKind::State,
+                    data_type: StreamType::Number,
+                    direction: StreamDirection::Write,
+                    unit: None,
+                    minimum: Some(0.0),
+                    maximum: Some(1.0),
+                    string_max_length: None,
+                    enum_values: vec![],
+                    safe_value: Some(StreamValue::Number(
+                        DecimalLiteral::new("1.0000000000000001").unwrap(),
+                    )),
+                },
+                StreamDraft {
+                    key: "legacy_mode".into(),
+                    display_name: "Legacy Mode".into(),
+                    channel_kind: ChannelKind::State,
+                    data_type: StreamType::Enum,
+                    direction: StreamDirection::Read,
+                    unit: None,
+                    minimum: None,
+                    maximum: None,
+                    string_max_length: None,
+                    enum_values: vec![
+                        StreamValue::Number(DecimalLiteral::new("1").unwrap()),
+                        StreamValue::Text("1".into()),
+                    ],
+                    safe_value: None,
+                },
+            ],
+        }
+    }
+
+    /// Pin legacy (`max=1`, `safeValue=1.0000000000000001`, enum `[1, "1"]`, tên chưa trim) vẫn đọc được digest, còn draft vượt biên thập phân bị chặn 422 trước publish và sửa được qua `replace`.
+    #[tokio::test]
+    async fn legacy_pin_loads_while_sub_ulp_draft_fails_publish_until_repaired() {
+        let (service, state, proof, workspace_id) = setup_memory_service();
+        let legacy_content = legacy_mixed_draft("  Room  ")
+            .validate()
+            .expect("legacy persisted shape stays readable");
+        let (legacy_version_id, legacy_draft_id, legacy_digest) =
+            seed_legacy_pin_and_draft(&state, workspace_id, legacy_content);
+
+        let loaded_pin = service
+            .get_version(&proof, workspace_id, legacy_version_id)
+            .await
+            .expect("legacy pinned snapshot reads cleanly");
+        assert_eq!(loaded_pin.content_digest, legacy_digest);
+        assert_eq!(loaded_pin.source_revision, None);
+
+        let mut sub_ulp_only = legacy_mixed_draft("Room");
+        sub_ulp_only.streams.truncate(1);
+        let replaced = service
+            .replace(
+                &proof,
+                workspace_id,
+                legacy_draft_id,
+                1,
+                sub_ulp_only.clone(),
+                Uuid::new_v4(),
+            )
+            .await
+            .expect("legacy sub-ULP draft stays repairable");
+        assert_eq!(replaced.revision, 2);
+
+        let publish_err = service
+            .publish(&proof, workspace_id, legacy_draft_id, 2, Uuid::new_v4())
+            .await
+            .expect_err("sub-ULP overflow safeValue fails at publish before commit");
+        assert_eq!(map_publish_error(publish_err).status, 422);
+
+        sub_ulp_only.streams[0].safe_value =
+            Some(StreamValue::Number(DecimalLiteral::new("1").unwrap()));
+        let ready = service
+            .replace(
+                &proof,
+                workspace_id,
+                legacy_draft_id,
+                2,
+                sub_ulp_only,
+                Uuid::new_v4(),
+            )
+            .await
+            .expect("replace repairs safeValue");
+        assert_eq!(ready.revision, 3);
+        let published = service
+            .publish(&proof, workspace_id, legacy_draft_id, 3, Uuid::new_v4())
+            .await
+            .expect("repaired draft publishes cleanly");
+        assert_eq!(published.version_number, 2);
+    }
+
+    /// Draft có tên chưa chuẩn hóa đọc/sửa được, bị chặn 422 trước publish nếu chưa sửa, còn ghi mới chuẩn hóa NFC/trim đồng nhất response và digest.
+    #[tokio::test]
+    async fn noncanonical_draft_name_blocks_publish_while_canonical_writes_align_digest_and_response()
+     {
+        let (service, state, proof, workspace_id) = setup_memory_service();
+        let legacy_content = legacy_mixed_draft("  Room  ")
+            .validate()
+            .expect("legacy persisted shape stays readable");
+        let (_, legacy_draft_id, _) =
+            seed_legacy_pin_and_draft(&state, workspace_id, legacy_content);
+
+        let loaded_draft = service
+            .get(&proof, workspace_id, legacy_draft_id)
+            .await
+            .expect("legacy stored draft stays readable");
+        assert_eq!(loaded_draft.draft.draft().name, "  Room  ");
+
+        let publish_err = service
+            .publish(&proof, workspace_id, legacy_draft_id, 1, Uuid::new_v4())
+            .await
+            .expect_err("noncanonical draft name must fail before publish commit");
+        let mapped = map_publish_error(publish_err);
+        assert_eq!(mapped.status, 422);
+        assert_eq!(mapped.code, "VALIDATION_ERROR");
+
+        let mut repaired = legacy_mixed_draft("  Pho\u{0300}ng  ");
+        repaired.streams.truncate(1);
+        repaired.streams[0].safe_value =
+            Some(StreamValue::Number(DecimalLiteral::new("1").unwrap()));
+        let created = service
+            .create(&proof, workspace_id, repaired, Uuid::new_v4())
+            .await
+            .expect("create normalizes name to NFC/trim");
+        assert_eq!(created.draft.draft().name, "Ph\u{00f2}ng");
+
+        let published = service
+            .publish(&proof, workspace_id, created.template_id, 1, Uuid::new_v4())
+            .await
+            .expect("canonical trimmed NFC draft publishes");
+        assert_eq!(published.content.draft().name, "Ph\u{00f2}ng");
+        let Ok(wire) = publish_response(&published) else {
+            panic!("validated published response succeeds");
+        };
+        assert_eq!(wire.version.name, "Ph\u{00f2}ng");
+        assert_eq!(
+            ShaDigest.content_digest(&published.content.canonical_bytes()),
+            published.content_digest
+        );
+        assert_eq!(state.lock().expect("memory store lock").audits, 2);
     }
 }

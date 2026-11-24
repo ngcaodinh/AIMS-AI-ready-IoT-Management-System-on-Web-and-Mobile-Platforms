@@ -136,6 +136,46 @@
       ],
       "description": "A stream has distinct channelKind and direction fields. safeValue is never stored on a stream in the wire contract."
     },
+    "LegacyEnumStream": {
+      "type": "object",
+      "properties": {
+        "key": {"$ref": "#/$defs/StreamKey"},
+        "type": {"const": "ENUM"},
+        "channelKind": {"$ref": "#/$defs/ChannelKind"},
+        "direction": {"$ref": "#/$defs/Direction"},
+        "unit": {"type": "null"},
+        "enumValues": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "oneOf": [
+              {"type": "number"},
+              {"type": "string"}
+            ]
+          },
+          "description": "Pre-0022 historical ENUM snapshots preserve persisted JSON number and string members with exact types and no coercion; number 1 and string \"1\" remain distinct."
+        },
+        "default": {
+          "oneOf": [
+            {"type": "number"},
+            {"type": "string"}
+          ]
+        }
+      },
+      "required": ["key", "type", "channelKind", "direction", "enumValues"],
+      "additionalProperties": false,
+      "description": "Read-only representation for pre-0022 historical ENUM streams that persisted numeric members; disallowed for new drafts and new publications."
+    },
+    "LegacyTemplateStream": {
+      "oneOf": [
+        {"$ref": "#/$defs/NumberStream"},
+        {"$ref": "#/$defs/BooleanStream"},
+        {"$ref": "#/$defs/LegacyEnumStream"},
+        {"$ref": "#/$defs/StringStream"}
+      ],
+      "description": "Historical read-by-ID stream union for pre-0022 snapshots whose sourceRevision is null; preserves legacy enum number-vs-string types without digest drift."
+    },
     "SetValueCommand": {
       "type": "object",
       "properties": {
@@ -282,16 +322,34 @@
         "streams": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 64,
-          "items": {"$ref": "#/$defs/TemplateStream"}
+          "items": {"$ref": "#/$defs/LegacyTemplateStream"}
         },
-        "commands": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/SetValueCommand"}},
+        "commands": {"type": "array", "items": {"$ref": "#/$defs/SetValueCommand"}},
         "sourceRevision": {"$ref": "#/$defs/OptionalSourceRevision"},
         "publishedAt": {"$ref": "#/$defs/UtcTimestamp"}
       },
       "required": ["id", "workspaceId", "templateId", "version", "schemaVersion", "status", "name", "model", "streams", "commands", "sourceRevision", "publishedAt"],
       "additionalProperties": false,
-      "description": "Immutable snapshot identity for read-by-ID. Historical versions report sourceRevision null; mutable root revision is intentionally absent."
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "sourceRevision": {"type": "integer"}
+            },
+            "required": ["sourceRevision"]
+          },
+          "then": {
+            "properties": {
+              "streams": {
+                "maxItems": 64,
+                "items": {"$ref": "#/$defs/TemplateStream"}
+              },
+              "commands": {"maxItems": 64}
+            }
+          }
+        }
+      ],
+      "description": "Immutable snapshot identity for read-by-ID. Historical pre-0022 versions report sourceRevision null and preserve legacy enum JSON types without coercion; post-0022 versions enforce strict TemplateStream rules. Mutable root revision is intentionally absent."
     },
     "PublishedTemplateVersionSnapshot": {
       "type": "object",

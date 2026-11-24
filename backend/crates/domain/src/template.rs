@@ -2,6 +2,7 @@
 
 use crate::template_value::DecimalLiteral;
 use std::collections::BTreeSet;
+use unicode_normalization::UnicodeNormalization;
 
 /// Phân loại ý nghĩa dữ liệu, không cấp quyền điều khiển hoặc thay reported evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,8 +213,14 @@ impl StreamDraft {
             .safe_value
             .as_ref()
             .ok_or_else(|| issue(TemplateIssueReason::Required))?;
+        // Giữ so sánh `f64` tương thích để đọc lại snapshot/pin và draft cũ; ràng buộc thập phân chính xác chạy tại `validate_publication_v1`.
         let valid = match (self.data_type, value) {
-            (StreamType::Number, StreamValue::Number(number)) => self.number_within_bounds(number),
+            (StreamType::Number, StreamValue::Number(number)) => {
+                number.finite_float().is_some_and(|float_value| {
+                    self.minimum.is_none_or(|minimum| float_value >= minimum)
+                        && self.maximum.is_none_or(|maximum| float_value <= maximum)
+                })
+            }
             (StreamType::Boolean, StreamValue::Boolean(_)) => true,
             (StreamType::Enum, value) => self.enum_values.contains(value),
             _ => false,
@@ -268,6 +275,38 @@ fn valid_key(key: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
 }
 
+/**
+ * Cắt whitespace Unicode ngoài biên và chuẩn hóa NFC theo hợp đồng `TemplateName`.
+ *
+ * # Input
+ * Param: `name` — tên template nguyên bản cần chuẩn hóa và kiểm tra biên `1..=100` code points.
+ *
+ * # Output
+ * Chuỗi NFC đã trim hợp lệ (`1..=100` Unicode scalar, không chứa `NUL`).
+ *
+ * # Errors
+ * Trả về `TemplateValidation` tại `TemplateField::Name` với `TemplateIssueReason::InvalidValue`
+ * khi tên chứa `NUL`, rỗng sau khi trim hoặc vượt quá 100 code points.
+ */
+pub fn canonical_template_name(name: &str) -> Result<String, TemplateValidation> {
+    if name.contains('\0') {
+        return Err(TemplateValidation {
+            stream_index: None,
+            field: TemplateField::Name,
+            reason: TemplateIssueReason::InvalidValue,
+        });
+    }
+    let normalized: String = name.trim().nfc().collect();
+    if !(1..=100).contains(&normalized.chars().count()) {
+        return Err(TemplateValidation {
+            stream_index: None,
+            field: TemplateField::Name,
+            reason: TemplateIssueReason::InvalidValue,
+        });
+    }
+    Ok(normalized)
+}
+
 /// Input aggregate chưa được xác thực, không chứa revision/actor do client tự cấp authority.
 #[derive(Clone, Debug)]
 pub struct TemplateDraft {
@@ -282,6 +321,20 @@ pub struct TemplateDraft {
 pub struct ValidatedTemplate(TemplateDraft);
 
 impl TemplateDraft {
+    /**
+     * Chuẩn hóa tên theo hợp đồng ghi mới rồi validate toàn draft, giữ nguyên đường đọc legacy trong `validate`.
+     *
+     * # Output
+     * Aggregate đã kiểm với `name` ở dạng NFC đã trim (`1..=100` code points).
+     *
+     * # Errors
+     * Trả về `TemplateValidation` khi tên hoặc bất kỳ stream/metadata nào không hợp lệ.
+     */
+    pub fn validate_canonical_write(mut self) -> Result<ValidatedTemplate, TemplateValidation> {
+        self.name = canonical_template_name(&self.name)?;
+        self.validate()
+    }
+
     /**
      * Validate metadata và mọi stream trước unit of work, không lưu phần hợp lệ của schema lỗi.
      * Output: aggregate đã kiểm, giữ nguyên text.
@@ -356,7 +409,9 @@ impl ValidatedTemplate {
             field,
             reason,
         };
-        if !(1..=100).contains(&draft.name.chars().count()) {
+        // Snapshot công bố phải khớp dạng NFC đã trim; draft cũ chưa chuẩn hóa bị từ chối trước commit.
+        let canonical_name = canonical_template_name(&draft.name)?;
+        if draft.name != canonical_name {
             return Err(root_issue(
                 TemplateField::Name,
                 TemplateIssueReason::InvalidValue,

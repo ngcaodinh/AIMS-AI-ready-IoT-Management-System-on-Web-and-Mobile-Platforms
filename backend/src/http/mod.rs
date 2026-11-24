@@ -265,12 +265,51 @@ pub(super) async fn read_json(request: Request) -> Result<Map<String, Value>, Ht
 
 /**
  * Chặn body trên mutation bodyless theo cùng giới hạn và phân biệt MIME đã dùng cho logout.
- * Input
- * Param: request — request mạng chưa tin cậy; chỉ đọc content type và tối đa64KiB body.
- * Output: Ok khi body vắng hoặc dài0 byte.
- * Errors: 413 quá lớn, 415 MIME không hỗ trợ, 400 JSON hỏng/duplicate, 422 JSON hợp lệ nhưng body bị cấm.
+ *
+ * # Input
+ * Param: request — request mạng chưa tin cậy; chỉ đọc `Content-Type` và tối đa 64 KiB body.
+ *
+ * # Output
+ * Trả `Ok(())` khi body vắng hoặc dài 0 byte.
+ *
+ * # Errors
+ * Trả `413` khi quá lớn, `415` khi MIME không hỗ trợ, `400` khi JSON hỏng/duplicate key,
+ * và `422` khi JSON hợp lệ nhưng endpoint cấm gửi body.
  */
 pub(super) async fn require_empty_body(request: Request) -> Result<(), HttpError> {
+    require_empty_body_policy(request, true).await
+}
+
+/**
+ * Chặn mọi body không rỗng cho endpoint bodyless từ chối cả JSON hỏng ở mức 422 mà không parse JSON.
+ *
+ * # Input
+ * Param: request — request mạng chưa tin cậy; chỉ kiểm `Content-Type` và kích thước tối đa 64 KiB.
+ *
+ * # Output
+ * Trả `Ok(())` khi body vắng hoặc dài 0 byte.
+ *
+ * # Errors
+ * Trả `413` khi vượt 64 KiB, `400` khi trùng header `Content-Type`, `415` khi sai MIME,
+ * hoặc `422 VALIDATION_ERROR` cho mọi body `application/json` khác rỗng kể cả JSON hỏng.
+ */
+pub(super) async fn require_empty_body_without_json_parse(
+    request: Request,
+) -> Result<(), HttpError> {
+    require_empty_body_policy(request, false).await
+}
+
+/**
+ * Thực thi kiểm tra bodyless chung cho hai chính sách parse JSON hoặc từ chối trực tiếp tại 422.
+ *
+ * # Input
+ * Param: `request` — request mạng chưa tin cậy.
+ * Param: `parse_json` — bật để trả 400 cho JSON hỏng/trùng key (giữ contract logout), tắt để trả 422 trực tiếp.
+ *
+ * # Output
+ * Trả `Ok(())` khi body rỗng hoặc `HttpError` tương ứng chính sách.
+ */
+async fn require_empty_body_policy(request: Request, parse_json: bool) -> Result<(), HttpError> {
     let content_type =
         security::single_header(request.headers(), "content-type")?.map(str::to_owned);
     let bytes = to_bytes(request.into_body(), 65_536)
@@ -287,8 +326,10 @@ pub(super) async fn require_empty_body(request: Request) -> Result<(), HttpError
     }) {
         return Err(HttpError::code(415, "VALIDATION_ERROR"));
     }
-    serde_json::from_slice::<input::StrictValue>(&bytes)
-        .map_err(|_| HttpError::code(400, "VALIDATION_ERROR"))?;
+    if parse_json {
+        serde_json::from_slice::<input::StrictValue>(&bytes)
+            .map_err(|_| HttpError::code(400, "VALIDATION_ERROR"))?;
+    }
     Err(HttpError::code(422, "VALIDATION_ERROR"))
 }
 

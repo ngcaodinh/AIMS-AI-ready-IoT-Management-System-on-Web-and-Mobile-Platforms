@@ -71,4 +71,80 @@ impl DecimalLiteral {
         let value = self.0.parse::<f64>().ok()?;
         (value.is_finite() && (value != 0.0 || self.0 == "0")).then_some(value)
     }
+
+    /**
+     * Tách dấu, chuỗi chữ số chuẩn hóa và số mũ thập phân để so sánh số học chính xác.
+     *
+     * # Output
+     * Trả `None` cho số 0; trả `Some((negative, digits, exponent))` cho mọi số khác 0.
+     */
+    fn decimal_parts(&self) -> Option<(bool, &str, i64)> {
+        if self.0 == "0" {
+            return None;
+        }
+        let negative = self.0.starts_with('-');
+        let unsigned = self.0.strip_prefix('-').unwrap_or(&self.0);
+        let (digits, exponent) = match unsigned.split_once('e') {
+            Some((digits, exponent)) => (digits, exponent.parse::<i64>().ok()?),
+            None => (unsigned, 0),
+        };
+        Some((negative, digits, exponent))
+    }
+
+    /**
+     * So sánh giá trị thập phân chính xác mà không làm tròn qua `f64`.
+     *
+     * # Input
+     * Param: other — literal decimal chuẩn hóa cần đối chiếu.
+     *
+     * # Output
+     * Trả `Ordering` theo giá trị toán học thực, không làm thay đổi thứ tự từ điển `Ord` dùng cho dedupe.
+     */
+    #[must_use]
+    pub fn cmp_numeric(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        match (self.decimal_parts(), other.decimal_parts()) {
+            (None, None) => Ordering::Equal,
+            (None, Some((other_neg, _, _))) => {
+                if other_neg {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+            (Some((self_neg, _, _)), None) => {
+                if self_neg {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            }
+            (
+                Some((self_neg, self_digits, self_exp)),
+                Some((other_neg, other_digits, other_exp)),
+            ) => {
+                if self_neg != other_neg {
+                    return if self_neg {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    };
+                }
+                // Bậc lũy thừa 10 lớn nhất quyết định độ lớn trước; khi cùng bậc, so chữ số từ trái sang phải là chính xác.
+                let self_mag = i128::from(i64::try_from(self_digits.len()).unwrap_or(i64::MAX))
+                    + i128::from(self_exp);
+                let other_mag = i128::from(i64::try_from(other_digits.len()).unwrap_or(i64::MAX))
+                    + i128::from(other_exp);
+                let magnitude = self_mag
+                    .cmp(&other_mag)
+                    .then_with(|| self_digits.cmp(other_digits));
+                if self_neg {
+                    magnitude.reverse()
+                } else {
+                    magnitude
+                }
+            }
+        }
+    }
 }

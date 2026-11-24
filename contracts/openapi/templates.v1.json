@@ -166,7 +166,7 @@
         "tags": ["Templates"],
         "operationId": "listTemplateVersions",
         "summary": "List published versions for a template",
-        "description": "Current ADMIN of the ACTIVE workspace only. The optional sourceRevision filter supports lost-ack recovery and selects the draft revision captured by a version, never the post-publish root revision. Cursor is opaque and bound to actor, workspace, and filters. Version IDs are exact UUID snapshot identities; version numbers and schemaVersion are not interchangeable.",
+        "description": "Current ADMIN of the ACTIVE workspace only. The optional sourceRevision filter supports lost-ack recovery and selects the draft revision captured by a version, never the post-publish root revision. Historical versions published before source_revision tracking report sourceRevision null on unfiltered reads and are excluded when filtering by sourceRevision. Cursor is opaque and bound to actor, workspace, and filters. Version IDs are exact UUID snapshot identities; version numbers and schemaVersion are not interchangeable.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
         "parameters": [
           {"$ref": "#/components/parameters/WorkspaceId"},
@@ -193,7 +193,7 @@
         "tags": ["Templates"],
         "operationId": "getTemplateVersion",
         "summary": "Read an immutable published snapshot by UUID",
-        "description": "Current ADMIN of the ACTIVE workspace only. The path parent, version UUID, and workspace must match. This library route does not grant USER access to browse templates; a USER reads only a snapshot embedded in an independently authorized device projection. The returned snapshot is independent of mutable root metadata and remains unchanged after later publishes.",
+        "description": "Current ADMIN of the ACTIVE workspace only. The path parent, version UUID, and workspace must match. Historical versions published before source_revision tracking report sourceRevision null. This library route does not grant USER access to browse templates; a USER reads only a snapshot embedded in an independently authorized device projection. The returned snapshot is independent of mutable root metadata and remains unchanged after later publishes.",
         "security": [{"WebSession": []}, {"AppBearer": []}],
         "parameters": [
           {"$ref": "#/components/parameters/WorkspaceId"},
@@ -322,6 +322,7 @@
       "TemplateRoot": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateRoot"},
       "TemplateListResponse": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateListResponse"},
       "TemplateVersionSnapshot": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateVersionSnapshot"},
+      "PublishedTemplateVersionSnapshot": {"$ref": "../schemas/templates.v1.schema.json#/$defs/PublishedTemplateVersionSnapshot"},
       "TemplateVersionListResponse": {"$ref": "../schemas/templates.v1.schema.json#/$defs/TemplateVersionListResponse"},
       "PublishResponse": {"$ref": "../schemas/templates.v1.schema.json#/$defs/PublishResponse"},
       "CloneDraftRequest": {"$ref": "../schemas/templates.v1.schema.json#/$defs/CloneDraftRequest"},

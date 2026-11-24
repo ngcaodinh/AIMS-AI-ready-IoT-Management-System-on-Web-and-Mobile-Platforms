@@ -475,3 +475,45 @@ async fn ios_login_uses_app_contract_and_keeps_browser_origin_guard() {
     assert_eq!(denied.status(), StatusCode::FORBIDDEN);
     assert!(denied.headers().get("set-cookie").is_none());
 }
+
+/** Root JSON số thực/nguyên ở auth vẫn là root TYPE 422 và duplicate object vẫn 400 dù bật `raw_value` cho publish. */
+#[tokio::test]
+async fn login_preserves_root_numeric_type_and_duplicate_field_errors() {
+    for scalar in ["1.5", "1", "-5"] {
+        let response = login_request(scalar, None).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "scalar={scalar}"
+        );
+        let payload: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+        assert_eq!(payload["error"]["code"], "VALIDATION_ERROR");
+        assert_eq!(payload["error"]["details"]["fieldErrors"][0]["path"], "");
+        assert_eq!(
+            payload["error"]["details"]["fieldErrors"][0]["code"],
+            "TYPE"
+        );
+    }
+
+    let duplicate = login_request(r#"{"a":1.5,"a":2.5}"#, None).await;
+    assert_eq!(duplicate.status(), StatusCode::BAD_REQUEST);
+    let payload: Value =
+        serde_json::from_slice(&to_bytes(duplicate.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(
+        payload["error"]["details"]["fieldErrors"][0]["code"],
+        "DUPLICATE_FIELD"
+    );
+
+    let malformed_logout = router()
+        .await
+        .oneshot(
+            Request::post("/api/v1/auth/logout")
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(malformed_logout.status(), StatusCode::BAD_REQUEST);
+}

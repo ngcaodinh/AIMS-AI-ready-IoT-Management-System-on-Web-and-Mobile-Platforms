@@ -212,14 +212,8 @@ impl StreamDraft {
             .safe_value
             .as_ref()
             .ok_or_else(|| issue(TemplateIssueReason::Required))?;
-        // NUMBER chỉ dùng float projection cho bounds; ENUM tiếp tục so literal exact, không mất precision.
         let valid = match (self.data_type, value) {
-            (StreamType::Number, StreamValue::Number(number)) => {
-                number.finite_float().is_some_and(|number| {
-                    self.minimum.is_none_or(|minimum| number >= minimum)
-                        && self.maximum.is_none_or(|maximum| number <= maximum)
-                })
-            }
+            (StreamType::Number, StreamValue::Number(number)) => self.number_within_bounds(number),
             (StreamType::Boolean, StreamValue::Boolean(_)) => true,
             (StreamType::Enum, value) => self.enum_values.contains(value),
             _ => false,
@@ -229,6 +223,33 @@ impl StreamDraft {
         } else {
             Err(issue(TemplateIssueReason::InvalidValue))
         }
+    }
+
+    /**
+     * Kiểm `safe_value` số theo đúng giá trị thập phân của các biên biểu diễn trên wire.
+     *
+     * # Input
+     * Param: number — literal decimal chính xác của `safe_value`.
+     *
+     * # Output
+     * Trả `true` khi `number` hữu hạn theo `f64` và nằm trong `[minimum, maximum]` theo so sánh thập phân chính xác.
+     */
+    fn number_within_bounds(&self, number: &DecimalLiteral) -> bool {
+        if number.finite_float().is_none() {
+            return false;
+        }
+        // So sánh qua chuỗi thập phân chuẩn hóa của biên wire để chặn giá trị vượt nhẹ bị làm tròn về biên trong `f64`.
+        let within_min = self.minimum.is_none_or(|minimum| {
+            minimum.is_finite()
+                && DecimalLiteral::new(&minimum.to_string())
+                    .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Less)
+        });
+        let within_max = self.maximum.is_none_or(|maximum| {
+            maximum.is_finite()
+                && DecimalLiteral::new(&maximum.to_string())
+                    .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Greater)
+        });
+        within_min && within_max
     }
 }
 
@@ -316,7 +337,12 @@ impl ValidatedTemplate {
 
     /**
      * Kiểm các ràng buộc wire snapshot v1 trước commit publication, không đổi nội dung đã lưu.
-     * Output: schema có thể biểu diễn đúng theo contract v1; Errors: field/reason typed, không chứa raw value.
+     *
+     * # Output
+     * Schema có thể biểu diễn đúng theo contract v1.
+     *
+     * # Errors
+     * Trả `TemplateValidation` typed khi vượt giới hạn hoặc không tương thích wire v1; không chứa raw value.
      */
     pub fn validate_publication_v1(&self) -> Result<(), TemplateValidation> {
         let draft = self.draft();
@@ -379,11 +405,22 @@ impl ValidatedTemplate {
                         TemplateIssueReason::Required,
                     ));
                 }
+                if let Some(StreamValue::Number(number)) = &stream.safe_value {
+                    if !stream.number_within_bounds(number) {
+                        return Err(stream_issue(
+                            index,
+                            TemplateField::SafeValue,
+                            TemplateIssueReason::InvalidValue,
+                        ));
+                    }
+                }
             }
+            // Contract v1 giới hạn ENUM từ 1 đến 64 phần tử chuỗi khác rỗng và không quá 64 ký tự.
             if stream.data_type == StreamType::Enum
-                && stream.enum_values.iter().any(|value| {
-                    !matches!(value, StreamValue::Text(text) if (1..=64).contains(&text.chars().count()))
-                })
+                && (!(1..=64).contains(&stream.enum_values.len())
+                    || stream.enum_values.iter().any(|value| {
+                        !matches!(value, StreamValue::Text(text) if (1..=64).contains(&text.chars().count()))
+                    }))
             {
                 return Err(stream_issue(
                     index,

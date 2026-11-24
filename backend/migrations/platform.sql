@@ -4193,3 +4193,66 @@ DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
 \endif
 \endif
 COMMIT;
+
+\set migration_version platform-0022-template-version-revisions
+\set migration_checksum 7dae7852cf56d008fda0c3eae0821cecdb24e947467450192eb028d0c8726e3a
+
+/* Template psql của runner; hai marker chỉ được thay bằng file SQL nguồn trong repo.
+ * migration_version/checksum là literal qua :'name', không chèn input vào SQL.
+ * DDL và ledger commit cùng nhau; advisory lock dùng chung cho mọi version/runner.
+ */
+BEGIN;
+SET LOCAL lock_timeout='5s';
+SET LOCAL statement_timeout='30s';
+SELECT pg_advisory_xact_lock(17001,1);
+/* Lịch sử runner lab: lưu checksum và thời điểm áp thật, không chứa credential.
+ * Phải chạy trong transaction đã lấy advisory lock; không thay SQLx production history.
+ */
+CREATE SCHEMA IF NOT EXISTS migration_control;
+CREATE TABLE IF NOT EXISTS migration_control.applied_migrations (
+    version text PRIMARY KEY,
+    checksum text NOT NULL CHECK(checksum ~ '^[0-9a-f]{64}$'),
+    applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+SELECT NOT EXISTS(
+    SELECT 1 FROM migration_control.applied_migrations WHERE version=:'migration_version'
+) AS should_apply \gset
+\if :should_apply
+/* Tách revision draft trước publish khỏi revision root sau publish.
+ * Row cũ được giữ unknown; CHECK NOT VALID bảo vệ mọi row mới mà không bịa provenance
+ * lịch sử từ root mutable hoặc thứ tự version.
+ */
+ALTER TABLE public.template_versions
+    ADD COLUMN source_revision bigint,
+    ADD COLUMN published_root_revision bigint;
+
+ALTER TABLE public.template_versions
+    ADD CONSTRAINT template_versions_revision_provenance
+    CHECK (
+        source_revision IS NOT NULL
+        AND source_revision > 0
+        AND published_root_revision IS NOT NULL
+        AND published_root_revision > source_revision
+        AND published_root_revision - source_revision = 1
+    ) NOT VALID;
+
+COMMENT ON COLUMN public.template_versions.source_revision IS
+    'Revision draft root trước publication; NULL trên version cũ khi chưa lưu provenance đáng tin cậy.';
+COMMENT ON COLUMN public.template_versions.published_root_revision IS
+    'Revision root được publication commit; NULL trên version cũ khi không chứng minh được trạng thái root lịch sử.';
+
+INSERT INTO migration_control.applied_migrations(version,checksum)
+    VALUES(:'migration_version',:'migration_checksum');
+\echo APPLIED
+\else
+SELECT checksum=:'migration_checksum' AS checksum_matches
+    FROM migration_control.applied_migrations WHERE version=:'migration_version' \gset
+\if :checksum_matches
+\echo ALREADY_APPLIED
+\else
+/* Drift phải rollback, không UPDATE checksum để hợp thức hóa lịch sử bị thay đổi. */
+DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
+\endif
+\endif
+COMMIT;

@@ -123,6 +123,65 @@ fn publication_v1_rejects_content_outside_wire_shape() {
     );
 }
 
+/// ENUM publish v1 chấp nhận tối đa 64 giá trị chuỗi duy nhất và từ chối phần tử thứ 65 trước commit.
+#[test]
+fn publication_v1_enforces_enum_value_count_limit() {
+    let make_enum = |count: usize| {
+        let values = (0..count)
+            .map(|index| StreamValue::Text(format!("state_{index}")))
+            .collect();
+        StreamDraft {
+            key: "operating_state".into(),
+            display_name: "Operating State".into(),
+            channel_kind: ChannelKind::State,
+            data_type: StreamType::Enum,
+            direction: StreamDirection::ReadWrite,
+            unit: None,
+            minimum: None,
+            maximum: None,
+            string_max_length: None,
+            enum_values: values,
+            safe_value: Some(StreamValue::Text("state_0".into())),
+        }
+    };
+
+    let at_limit = draft(vec![make_enum(64)]).validate().unwrap();
+    assert!(at_limit.validate_publication_v1().is_ok());
+
+    let over_limit = draft(vec![make_enum(65)]).validate().unwrap();
+    let error = over_limit.validate_publication_v1().unwrap_err();
+    assert_eq!(error.stream_index, Some(0));
+    assert_eq!(error.field, TemplateField::EnumValues);
+}
+
+/// Giá trị số `safeValue` vượt nhẹ ngoài biên trên wire dù tròn bằng biên trong `f64` vẫn phải bị từ chối.
+#[test]
+fn numeric_safe_value_bounds_reject_sub_ulp_overflow_without_float_rounding() {
+    let mut stream = temperature();
+    stream.direction = StreamDirection::Write;
+    stream.minimum = Some(-1.0);
+    stream.maximum = Some(1.0);
+    stream.safe_value = Some(number("1.0000000000000001"));
+    let over_max = draft(vec![stream.clone()]).validate().unwrap_err();
+    assert_eq!(over_max.stream_index, Some(0));
+    assert_eq!(over_max.field, TemplateField::SafeValue);
+
+    stream.safe_value = Some(number("-1.0000000000000001"));
+    let under_min = draft(vec![stream.clone()]).validate().unwrap_err();
+    assert_eq!(under_min.stream_index, Some(0));
+    assert_eq!(under_min.field, TemplateField::SafeValue);
+
+    stream.minimum = Some(0.1);
+    stream.maximum = Some(0.1);
+    stream.safe_value = Some(number("0.100000000000000005"));
+    let over_decimal_max = draft(vec![stream.clone()]).validate().unwrap_err();
+    assert_eq!(over_decimal_max.field, TemplateField::SafeValue);
+
+    stream.safe_value = Some(number("0.1"));
+    let exact_match = draft(vec![stream]).validate().unwrap();
+    assert!(exact_match.validate_publication_v1().is_ok());
+}
+
 /// Channel kind không cấp capability; writable cần safeValue đúng type/range, READ không có `SET_VALUE`.
 #[test]
 fn direction_and_safe_value_are_independent_from_channel_kind() {

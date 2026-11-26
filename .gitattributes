@@ -1,0 +1,3 @@
+# Giữ byte LF mà runner dùng để tính checksum cho numbered migration và bản SQL đã áp.
+backend/migrations/platform/[0-9][0-9][0-9][0-9]_*.sql text eol=lf
+backend/migrations/platform/applied_sql/[0-9][0-9][0-9][0-9]_*.sql text eol=lf

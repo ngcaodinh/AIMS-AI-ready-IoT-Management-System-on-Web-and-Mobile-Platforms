@@ -17,9 +17,9 @@ impl PgUnitOfWork {
         before: &TemplateSnapshot,
         version: &NewTemplateVersion,
     ) -> Result<PublishedTemplate, ApplicationError> {
-        // Parent INSERT tạo native transaction marker trước children; mọi value được bind, không sửa marker theo caller.
-        sqlx::query("INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_at,published_by_user_id,content_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
-            .bind(before.workspace_id).bind(version.template_version_id).bind(before.template_id).bind(version.version_number).bind(&before.draft.draft().name).bind(&before.draft.draft().model).bind(version.published_at).bind(version.published_by_user_id).bind(version.content_digest.as_slice())
+        // Parent INSERT tạo native transaction marker trước children; provenance phải là revision thật dưới root lock.
+        sqlx::query("INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_at,published_by_user_id,content_digest,source_revision,published_root_revision) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+            .bind(before.workspace_id).bind(version.template_version_id).bind(before.template_id).bind(version.version_number).bind(&before.draft.draft().name).bind(&before.draft.draft().model).bind(version.published_at).bind(version.published_by_user_id).bind(version.content_digest.as_slice()).bind(version.source_revision).bind(version.published_root_revision)
             .execute(&mut *self.transaction).await.map_err(storage_error)?;
         for stream in &before.draft.draft().streams {
             // Snapshot từ validated memory dưới root fence, gồm cả loại kênh/direction, không lấy scope từ payload.
@@ -38,7 +38,7 @@ impl PgUnitOfWork {
             }
         }
         let changed=sqlx::query("UPDATE templates SET lifecycle_status='PUBLISHED',revision=$4,updated_at=$5 WHERE workspace_id=$1 AND template_id=$2 AND revision=$3 AND lifecycle_status='DRAFT'")
-            .bind(before.workspace_id).bind(before.template_id).bind(before.revision).bind(version.template_revision).bind(version.published_at).execute(&mut *self.transaction).await.map_err(storage_error)?.rows_affected();
+            .bind(before.workspace_id).bind(before.template_id).bind(before.revision).bind(version.published_root_revision).bind(version.published_at).execute(&mut *self.transaction).await.map_err(storage_error)?.rows_affected();
         if changed != 1 {
             return Err(ApplicationError::StaleRevision);
         }
@@ -47,9 +47,11 @@ impl PgUnitOfWork {
             template_id: before.template_id,
             template_version_id: version.template_version_id,
             version_number: version.version_number,
-            template_revision: version.template_revision,
+            source_revision: version.source_revision,
+            published_root_revision: version.published_root_revision,
             published_at: version.published_at,
             content_digest: version.content_digest,
+            content: before.draft.clone(),
         })
     }
 }

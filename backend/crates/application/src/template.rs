@@ -82,7 +82,7 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
      * Input
      * Param: proof — session/context chưa được tin cậy.
      * Param: `workspace_id` — selector scope phải được current membership authorize.
-     * Output: transaction đang giữ User→Workspace fence cùng snapshot actor; Errors: quyền/storage.
+     * Output: transaction giữ User→Workspace fence; scope vắng mặt thành ResourceNotFound, member không đủ quyền thành Forbidden.
      */
     async fn open(
         &self,
@@ -95,10 +95,15 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
             locked
                 .session
                 .authorize(&locked.account, proof, locked.observed_at, false)?;
-        transaction
+        let scope = transaction
             .lock_scope(workspace_id, principal.user_id())
-            .await?
-            .authorize(&principal, true)?;
+            .await
+            .map_err(|error| match error {
+                // Workspace/member vắng mặt trả cùng kết quả đã che scope như template thuộc tenant khác.
+                ApplicationError::Forbidden => ApplicationError::ResourceNotFound,
+                other => other,
+            })?;
+        scope.authorize(&principal, true)?;
         Ok((transaction, locked))
     }
 
@@ -172,7 +177,7 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
         correlation_id: Uuid,
     ) -> Result<TemplateSnapshot, ApplicationError> {
         let draft = draft
-            .validate()
+            .validate_canonical_write()
             .map_err(ApplicationError::TemplateInvalid)?;
         let (mut transaction, locked) = self.open(proof, workspace_id).await?;
         let (principal, now) = Self::current(&mut transaction, &locked, proof).await?;
@@ -241,7 +246,7 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
             return Err(ApplicationError::InvalidInput);
         }
         let draft = draft
-            .validate()
+            .validate_canonical_write()
             .map_err(ApplicationError::TemplateInvalid)?;
         let (mut transaction, locked) = self.open(proof, workspace_id).await?;
         let before = transaction.lock_template(workspace_id, template_id).await?;
@@ -293,6 +298,10 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
         let before = transaction.lock_template(workspace_id, template_id).await?;
         let (principal, now) = Self::current(&mut transaction, &locked, proof).await?;
         let revision = before.next_revision(expected_revision, TemplateMutation::Publish)?;
+        before
+            .draft
+            .validate_publication_v1()
+            .map_err(ApplicationError::TemplateInvalid)?;
         let version_number = transaction
             .latest_version_number(workspace_id, template_id)
             .await?
@@ -301,7 +310,8 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
         let intent = NewTemplateVersion {
             template_version_id: Uuid::new_v4(),
             version_number,
-            template_revision: revision,
+            source_revision: before.revision,
+            published_root_revision: revision,
             content_digest: self.digest.content_digest(&before.draft.canonical_bytes()),
             published_by_user_id: principal.user_id(),
             published_at: now,

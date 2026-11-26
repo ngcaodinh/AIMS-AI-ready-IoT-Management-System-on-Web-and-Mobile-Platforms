@@ -175,3 +175,15 @@ Run the static suite for artifact consistency; then API/Web/Mobile owners
 review CP-L1/CP-01. Backend transaction/guards and real browser/Android tests
 remain blocked by FEAT001/START-03 and must not be replaced by these fixtures.
 
+### Template draft and published-version contract v1
+
+`openapi/templates.v1.json` and `schemas/templates.v1.schema.json` define the
+shared FEAT-TN-005 T1 / FEAT-TN-006 V1 contract for draft create/read/list/patch,
+publish, immutable version read/list and clone. The synthetic scenarios and
+field reconciliation are documented in `fixtures/templates/README.md` and
+`fixtures/templates/scenarios.json`. All template scenarios are
+`SPEC_ONLY`/`NOT_RUN`; they are not provider, hardware, G1 or acceptance
+evidence. The note records the remaining `mode`/`direction`, command
+`safeValue` storage, stream `default`, and published `sourceRevision` integration
+gaps.
+

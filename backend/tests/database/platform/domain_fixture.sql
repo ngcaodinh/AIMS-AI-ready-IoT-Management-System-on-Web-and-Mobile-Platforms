@@ -2,8 +2,8 @@
 SET CONSTRAINTS ALL DEFERRED;
 INSERT INTO templates(workspace_id,template_id,name,model,created_by_user_id)
  SELECT workspace_id,pg_temp.fixture_id(200+row_number() OVER(ORDER BY workspace_id)::int),'Room','ESP32',created_by_user_id FROM workspaces;
-INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest)
- SELECT workspace_id,pg_temp.fixture_id(210+row_number() OVER(ORDER BY workspace_id)::int),template_id,1,name,model,created_by_user_id,decode(repeat('01',32),'hex') FROM templates;
+INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision)
+ SELECT workspace_id,pg_temp.fixture_id(210+row_number() OVER(ORDER BY workspace_id)::int),template_id,1,name,model,created_by_user_id,decode(repeat('01',32),'hex'),1,2 FROM templates;
 INSERT INTO datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,channel_kind,min_value,max_value)
  SELECT workspace_id,template_version_id,stream_key,stream_key,data_type,direction,channel_kind,min_value,max_value FROM template_versions CROSS JOIN
  (VALUES('fan','BOOLEAN','READ_WRITE','STATE',NULL::float8,NULL::float8),('temperature','NUMBER','READ','TELEMETRY',-20::float8,100::float8),('mode','ENUM','READ_WRITE','STATE',NULL::float8,NULL::float8)) AS stream(stream_key,data_type,direction,channel_kind,min_value,max_value);

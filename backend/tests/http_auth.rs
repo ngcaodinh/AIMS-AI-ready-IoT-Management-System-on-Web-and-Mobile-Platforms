@@ -475,3 +475,107 @@ async fn ios_login_uses_app_contract_and_keeps_browser_origin_guard() {
     assert_eq!(denied.status(), StatusCode::FORBIDDEN);
     assert!(denied.headers().get("set-cookie").is_none());
 }
+
+/** Root JSON số thực/nguyên ở auth vẫn là root TYPE 422 và duplicate object vẫn 400 dù bật `raw_value` cho publish. */
+#[tokio::test]
+async fn login_preserves_root_numeric_type_and_duplicate_field_errors() {
+    for scalar in ["1.5", "1", "-5"] {
+        let response = login_request(scalar, None).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "scalar={scalar}"
+        );
+        let payload: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+        assert_eq!(payload["error"]["code"], "VALIDATION_ERROR");
+        assert_eq!(payload["error"]["details"]["fieldErrors"][0]["path"], "");
+        assert_eq!(
+            payload["error"]["details"]["fieldErrors"][0]["code"],
+            "TYPE"
+        );
+    }
+
+    let duplicate = login_request(r#"{"a":1.5,"a":2.5}"#, None).await;
+    assert_eq!(duplicate.status(), StatusCode::BAD_REQUEST);
+    let payload: Value =
+        serde_json::from_slice(&to_bytes(duplicate.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(
+        payload["error"]["details"]["fieldErrors"][0]["code"],
+        "DUPLICATE_FIELD"
+    );
+
+    let malformed_logout = router()
+        .await
+        .oneshot(
+            Request::post("/api/v1/auth/logout")
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(malformed_logout.status(), StatusCode::BAD_REQUEST);
+}
+
+/** Kiểm route publish template được gắn trực tiếp vào `auth_router`, áp dụng `X-Workspace-Id`, `no-store`, fallback và từ chối HTTP method sai trước DB. */
+#[tokio::test]
+async fn publish_template_route_is_mounted_on_auth_router() {
+    let router = router().await;
+    let publish_path = "/api/v1/templates/00000000-0000-4000-8000-0000000000b1/publish";
+
+    let missing_workspace = router
+        .clone()
+        .oneshot(Request::post(publish_path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(missing_workspace.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(missing_workspace.headers()["cache-control"], "no-store");
+    let body: Value = serde_json::from_slice(
+        &to_bytes(missing_workspace.into_body(), 65536)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        body["error"]["details"]["fieldErrors"][0]["path"],
+        "/headers/X-Workspace-Id"
+    );
+    assert_eq!(
+        body["error"]["details"]["fieldErrors"][0]["code"],
+        "REQUIRED"
+    );
+
+    let wrong_method = router
+        .clone()
+        .oneshot(Request::get(publish_path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(wrong_method.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(wrong_method.headers()["cache-control"], "no-store");
+
+    let unauthenticated = router
+        .clone()
+        .oneshot(
+            Request::post(publish_path)
+                .header("x-workspace-id", "00000000-0000-4000-8000-0000000000a1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(unauthenticated.headers()["cache-control"], "no-store");
+
+    // Các route template chưa triển khai vẫn đi qua fallback bảo vệ phiên của `auth_router`.
+    let unimplemented = router
+        .oneshot(
+            Request::get("/api/v1/templates")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unimplemented.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(unimplemented.headers()["cache-control"], "no-store");
+}

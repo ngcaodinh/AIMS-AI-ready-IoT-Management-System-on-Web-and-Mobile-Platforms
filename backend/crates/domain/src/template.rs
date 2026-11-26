@@ -2,6 +2,7 @@
 
 use crate::template_value::DecimalLiteral;
 use std::collections::BTreeSet;
+use unicode_normalization::UnicodeNormalization;
 
 /// Phân loại ý nghĩa dữ liệu, không cấp quyền điều khiển hoặc thay reported evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +58,7 @@ pub enum TemplateField {
     Name,
     Model,
     Description,
+    Streams,
     Key,
     DisplayName,
     Unit,
@@ -211,12 +213,12 @@ impl StreamDraft {
             .safe_value
             .as_ref()
             .ok_or_else(|| issue(TemplateIssueReason::Required))?;
-        // NUMBER chỉ dùng float projection cho bounds; ENUM tiếp tục so literal exact, không mất precision.
+        // Giữ so sánh `f64` tương thích để đọc lại snapshot/pin và draft cũ; ràng buộc thập phân chính xác chạy tại `validate_publication_v1`.
         let valid = match (self.data_type, value) {
             (StreamType::Number, StreamValue::Number(number)) => {
-                number.finite_float().is_some_and(|number| {
-                    self.minimum.is_none_or(|minimum| number >= minimum)
-                        && self.maximum.is_none_or(|maximum| number <= maximum)
+                number.finite_float().is_some_and(|float_value| {
+                    self.minimum.is_none_or(|minimum| float_value >= minimum)
+                        && self.maximum.is_none_or(|maximum| float_value <= maximum)
                 })
             }
             (StreamType::Boolean, StreamValue::Boolean(_)) => true,
@@ -228,6 +230,31 @@ impl StreamDraft {
         } else {
             Err(issue(TemplateIssueReason::InvalidValue))
         }
+    }
+
+    /**
+     * Kiểm `safe_value` số theo đúng giá trị thập phân của các biên biểu diễn trên wire.
+     *
+     * # Input
+     * Param: number — literal decimal chính xác của `safe_value`.
+     *
+     * # Output
+     * Trả `true` khi `number` hữu hạn theo `f64` và nằm trong `[minimum, maximum]` theo so sánh thập phân chính xác.
+     */
+    fn number_within_bounds(&self, number: &DecimalLiteral) -> bool {
+        if number.finite_float().is_none() {
+            return false;
+        }
+        // Dùng đúng token `ryu` từ `DecimalLiteral::from_finite_f64` để kiểm publish khớp tuyệt đối với `min`/`max` phát ra trên wire.
+        let within_min = self.minimum.is_none_or(|minimum| {
+            DecimalLiteral::from_finite_f64(minimum)
+                .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Less)
+        });
+        let within_max = self.maximum.is_none_or(|maximum| {
+            DecimalLiteral::from_finite_f64(maximum)
+                .is_some_and(|bound| number.cmp_numeric(&bound) != std::cmp::Ordering::Greater)
+        });
+        within_min && within_max
     }
 }
 
@@ -246,6 +273,38 @@ fn valid_key(key: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
 }
 
+/**
+ * Cắt whitespace Unicode ngoài biên và chuẩn hóa NFC theo hợp đồng `TemplateName`.
+ *
+ * # Input
+ * Param: `name` — tên template nguyên bản cần chuẩn hóa và kiểm tra biên `1..=100` code points.
+ *
+ * # Output
+ * Chuỗi NFC đã trim hợp lệ (`1..=100` Unicode scalar, không chứa `NUL`).
+ *
+ * # Errors
+ * Trả về `TemplateValidation` tại `TemplateField::Name` với `TemplateIssueReason::InvalidValue`
+ * khi tên chứa `NUL`, rỗng sau khi trim hoặc vượt quá 100 code points.
+ */
+pub fn canonical_template_name(name: &str) -> Result<String, TemplateValidation> {
+    if name.contains('\0') {
+        return Err(TemplateValidation {
+            stream_index: None,
+            field: TemplateField::Name,
+            reason: TemplateIssueReason::InvalidValue,
+        });
+    }
+    let normalized: String = name.trim().nfc().collect();
+    if !(1..=100).contains(&normalized.chars().count()) {
+        return Err(TemplateValidation {
+            stream_index: None,
+            field: TemplateField::Name,
+            reason: TemplateIssueReason::InvalidValue,
+        });
+    }
+    Ok(normalized)
+}
+
 /// Input aggregate chưa được xác thực, không chứa revision/actor do client tự cấp authority.
 #[derive(Clone, Debug)]
 pub struct TemplateDraft {
@@ -260,6 +319,20 @@ pub struct TemplateDraft {
 pub struct ValidatedTemplate(TemplateDraft);
 
 impl TemplateDraft {
+    /**
+     * Chuẩn hóa tên theo hợp đồng ghi mới rồi validate toàn draft, giữ nguyên đường đọc legacy trong `validate`.
+     *
+     * # Output
+     * Aggregate đã kiểm với `name` ở dạng NFC đã trim (`1..=100` code points).
+     *
+     * # Errors
+     * Trả về `TemplateValidation` khi tên hoặc bất kỳ stream/metadata nào không hợp lệ.
+     */
+    pub fn validate_canonical_write(mut self) -> Result<ValidatedTemplate, TemplateValidation> {
+        self.name = canonical_template_name(&self.name)?;
+        self.validate()
+    }
+
     /**
      * Validate metadata và mọi stream trước unit of work, không lưu phần hợp lệ của schema lỗi.
      * Output: aggregate đã kiểm, giữ nguyên text.
@@ -311,5 +384,104 @@ impl ValidatedTemplate {
     #[must_use]
     pub const fn draft(&self) -> &TemplateDraft {
         &self.0
+    }
+
+    /**
+     * Kiểm các ràng buộc wire snapshot v1 trước commit publication, không đổi nội dung đã lưu.
+     *
+     * # Output
+     * Schema có thể biểu diễn đúng theo contract v1.
+     *
+     * # Errors
+     * Trả `TemplateValidation` typed khi vượt giới hạn hoặc không tương thích wire v1; không chứa raw value.
+     */
+    pub fn validate_publication_v1(&self) -> Result<(), TemplateValidation> {
+        let draft = self.draft();
+        let root_issue = |field, reason| TemplateValidation {
+            stream_index: None,
+            field,
+            reason,
+        };
+        let stream_issue = |stream_index, field, reason| TemplateValidation {
+            stream_index: Some(stream_index),
+            field,
+            reason,
+        };
+        // Snapshot công bố phải khớp dạng NFC đã trim; draft cũ chưa chuẩn hóa bị từ chối trước commit.
+        let canonical_name = canonical_template_name(&draft.name)?;
+        if draft.name != canonical_name {
+            return Err(root_issue(
+                TemplateField::Name,
+                TemplateIssueReason::InvalidValue,
+            ));
+        }
+        if !(1..=64).contains(&draft.model.chars().count()) {
+            return Err(root_issue(
+                TemplateField::Model,
+                TemplateIssueReason::InvalidValue,
+            ));
+        }
+        if draft.streams.is_empty() || draft.streams.len() > 64 {
+            return Err(root_issue(
+                TemplateField::Streams,
+                if draft.streams.is_empty() {
+                    TemplateIssueReason::Required
+                } else {
+                    TemplateIssueReason::InvalidValue
+                },
+            ));
+        }
+        for (index, stream) in draft.streams.iter().enumerate() {
+            if let Some(unit) = stream.unit.as_deref() {
+                if stream.data_type != StreamType::Number
+                    || !(1..=32).contains(&unit.chars().count())
+                {
+                    return Err(stream_issue(
+                        index,
+                        TemplateField::Unit,
+                        TemplateIssueReason::Incompatible,
+                    ));
+                }
+            }
+            if stream.data_type == StreamType::Number && stream.direction != StreamDirection::Read {
+                if stream.minimum.is_none() {
+                    return Err(stream_issue(
+                        index,
+                        TemplateField::Minimum,
+                        TemplateIssueReason::Required,
+                    ));
+                }
+                if stream.maximum.is_none() {
+                    return Err(stream_issue(
+                        index,
+                        TemplateField::Maximum,
+                        TemplateIssueReason::Required,
+                    ));
+                }
+                if let Some(StreamValue::Number(number)) = &stream.safe_value {
+                    if !stream.number_within_bounds(number) {
+                        return Err(stream_issue(
+                            index,
+                            TemplateField::SafeValue,
+                            TemplateIssueReason::InvalidValue,
+                        ));
+                    }
+                }
+            }
+            // Contract v1 giới hạn ENUM từ 1 đến 64 phần tử chuỗi khác rỗng và không quá 64 ký tự.
+            if stream.data_type == StreamType::Enum
+                && (!(1..=64).contains(&stream.enum_values.len())
+                    || stream.enum_values.iter().any(|value| {
+                        !matches!(value, StreamValue::Text(text) if (1..=64).contains(&text.chars().count()))
+                    }))
+            {
+                return Err(stream_issue(
+                    index,
+                    TemplateField::EnumValues,
+                    TemplateIssueReason::InvalidValue,
+                ));
+            }
+        }
+        Ok(())
     }
 }

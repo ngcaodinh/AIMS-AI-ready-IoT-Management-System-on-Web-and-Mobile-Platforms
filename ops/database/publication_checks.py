@@ -28,8 +28,8 @@ def verify(sql):
         VALUES('{workspace_id}','{user_id}',1);
         INSERT INTO public.templates(workspace_id,template_id,name,model,created_by_user_id)
         VALUES('{workspace_id}','{template_id}','Publication probe','TEST','{user_id}');
-        INSERT INTO public.template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest)
-        VALUES('{workspace_id}','{version_id}','{template_id}',1,'Publication probe','TEST','{user_id}',decode(repeat('55',32),'hex'));
+        INSERT INTO public.template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision)
+        VALUES('{workspace_id}','{version_id}','{template_id}',1,'Publication probe','TEST','{user_id}',decode(repeat('55',32),'hex'),1,2);
         INSERT INTO public.datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,channel_kind)
         VALUES('{workspace_id}','{version_id}','base','Base','BOOLEAN','READ','STATE');
         INSERT INTO public.devices(device_id,workspace_id,serial_number,template_version_id,owner_user_id,name,model,hardware_revision,lifecycle_status)
@@ -56,8 +56,8 @@ def verify(sql):
         statements=(
             ("committed_parent_rejects_child_append",append),
             ("noop_update_cannot_reopen_publication",f"UPDATE public.template_versions SET name=name WHERE template_version_id='{version_id}';"+append),
-            ("on_conflict_does_not_mint_publication",f"""INSERT INTO public.template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest)
-             VALUES('{workspace_id}','{version_id}','{template_id}',1,'Publication probe','TEST','{user_id}',decode(repeat('55',32),'hex')) ON CONFLICT DO NOTHING;"""+append),
+            ("on_conflict_does_not_mint_publication",f"""INSERT INTO public.template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision)
+             VALUES('{workspace_id}','{version_id}','{template_id}',1,'Publication probe','TEST','{user_id}',decode(repeat('55',32),'hex'),1,2) ON CONFLICT DO NOTHING;"""+append),
             ("api_key_metadata_update_cannot_extend_scopes",f"""UPDATE public.api_keys SET name='Updated probe',last_used_at=clock_timestamp() WHERE api_key_id='{key_id}';
               INSERT INTO public.api_key_scopes VALUES('{workspace_id}','{key_id}','telemetry:read');"""),
             ("rule_noop_update_cannot_extend_actions",f"""UPDATE public.rule_versions SET priority=priority WHERE rule_version_id='{rule_version_id}';

@@ -5,6 +5,9 @@ mod members;
 mod realtime;
 mod security;
 mod sessions;
+mod templates;
+
+pub use templates::{TemplateHttpState, template_router};
 
 use crate::adapters::security::{CryptoService, PasswordService};
 use axum::{
@@ -17,6 +20,7 @@ use axum::{
 };
 use iot_application::{
     auth_diagnostics::AuthDiagnostics, error::ApplicationError, identity::IdentityService,
+    template::TemplateService,
 };
 use iot_domain::{
     identity::ClientType,
@@ -34,6 +38,7 @@ pub(super) type AuthService = IdentityService<PgIdentityStore, CryptoService>;
 #[derive(Clone)]
 pub struct HttpState {
     pub(super) auth: AuthService,
+    pub(super) templates: Arc<TemplateService<PgIdentityStore, CryptoService>>,
     realtime: realtime::RealtimeHub,
     pub(super) signing_key: Arc<[u8; 32]>,
     pub(super) origin: Arc<str>,
@@ -86,8 +91,10 @@ impl HttpState {
             store = store.with_diagnostics(sink);
         }
         let crypto = CryptoService::new(passwords, signing_key).await?;
+        let templates = Arc::new(TemplateService::new(store.clone(), crypto.clone()));
         Ok(Self {
             auth: IdentityService::new(store, crypto),
+            templates,
             realtime: realtime::RealtimeHub::with_handshake_db_capacity(handshake_db_capacity),
             signing_key: Arc::new(signing_key),
             origin: Arc::from(origin),
@@ -107,6 +114,16 @@ pub(super) struct HttpError {
 impl HttpError {
     /** Tạo validation theo path/code cố định; không đưa field value chưa tin cậy vào response. */
     fn validation(status: u16, path: &'static str, code: &'static str) -> Self {
+        Self {
+            status,
+            code: "VALIDATION_ERROR",
+            details: json!({"fieldErrors":[{"path":path,"code":code}]}),
+            retry_after: None,
+            correlation_id: Uuid::new_v4(),
+        }
+    }
+    /** Tạo validation JSON Pointer động từ typed domain field; không đưa raw value vào response. */
+    pub(super) fn field_validation(status: u16, path: String, code: &'static str) -> Self {
         Self {
             status,
             code: "VALIDATION_ERROR",
@@ -252,12 +269,51 @@ pub(super) async fn read_json(request: Request) -> Result<Map<String, Value>, Ht
 
 /**
  * Chặn body trên mutation bodyless theo cùng giới hạn và phân biệt MIME đã dùng cho logout.
- * Input
- * Param: request — request mạng chưa tin cậy; chỉ đọc content type và tối đa64KiB body.
- * Output: Ok khi body vắng hoặc dài0 byte.
- * Errors: 413 quá lớn, 415 MIME không hỗ trợ, 400 JSON hỏng/duplicate, 422 JSON hợp lệ nhưng body bị cấm.
+ *
+ * # Input
+ * Param: request — request mạng chưa tin cậy; chỉ đọc `Content-Type` và tối đa 64 KiB body.
+ *
+ * # Output
+ * Trả `Ok(())` khi body vắng hoặc dài 0 byte.
+ *
+ * # Errors
+ * Trả `413` khi quá lớn, `415` khi MIME không hỗ trợ, `400` khi JSON hỏng/duplicate key,
+ * và `422` khi JSON hợp lệ nhưng endpoint cấm gửi body.
  */
 pub(super) async fn require_empty_body(request: Request) -> Result<(), HttpError> {
+    require_empty_body_policy(request, true).await
+}
+
+/**
+ * Chặn mọi body không rỗng cho endpoint bodyless từ chối cả JSON hỏng ở mức 422 mà không parse JSON.
+ *
+ * # Input
+ * Param: request — request mạng chưa tin cậy; chỉ kiểm `Content-Type` và kích thước tối đa 64 KiB.
+ *
+ * # Output
+ * Trả `Ok(())` khi body vắng hoặc dài 0 byte.
+ *
+ * # Errors
+ * Trả `413` khi vượt 64 KiB, `400` khi trùng header `Content-Type`, `415` khi sai MIME,
+ * hoặc `422 VALIDATION_ERROR` cho mọi body `application/json` khác rỗng kể cả JSON hỏng.
+ */
+pub(super) async fn require_empty_body_without_json_parse(
+    request: Request,
+) -> Result<(), HttpError> {
+    require_empty_body_policy(request, false).await
+}
+
+/**
+ * Thực thi kiểm tra bodyless chung cho hai chính sách parse JSON hoặc từ chối trực tiếp tại 422.
+ *
+ * # Input
+ * Param: `request` — request mạng chưa tin cậy.
+ * Param: `parse_json` — bật để trả 400 cho JSON hỏng/trùng key (giữ contract logout), tắt để trả 422 trực tiếp.
+ *
+ * # Output
+ * Trả `Ok(())` khi body rỗng hoặc `HttpError` tương ứng chính sách.
+ */
+async fn require_empty_body_policy(request: Request, parse_json: bool) -> Result<(), HttpError> {
     let content_type =
         security::single_header(request.headers(), "content-type")?.map(str::to_owned);
     let bytes = to_bytes(request.into_body(), 65_536)
@@ -274,8 +330,10 @@ pub(super) async fn require_empty_body(request: Request) -> Result<(), HttpError
     }) {
         return Err(HttpError::code(415, "VALIDATION_ERROR"));
     }
-    serde_json::from_slice::<input::StrictValue>(&bytes)
-        .map_err(|_| HttpError::code(400, "VALIDATION_ERROR"))?;
+    if parse_json {
+        serde_json::from_slice::<input::StrictValue>(&bytes)
+            .map_err(|_| HttpError::code(400, "VALIDATION_ERROR"))?;
+    }
     Err(HttpError::code(422, "VALIDATION_ERROR"))
 }
 
@@ -385,15 +443,25 @@ pub(super) fn session_headers(
 }
 
 /**
- * Tạo auth router và chạy DB reconciler cho socket của instance này.
- * Input: state dùng chung auth/pool/key và registry local do composition root khởi tạo.
- * Side effects: một reconciler bounded được spawn; task kết thúc khi state/router được drop.
+ * Tạo router HTTP chuẩn gồm các tuyến auth/workspace/realtime và `POST /api/v1/templates/{templateId}/publish`, đồng thời chạy DB reconciler.
+ *
+ * # Input
+ * Param: `state` — state dùng chung auth/pool/`TemplateService`/khóa ký và registry local do composition root khởi tạo.
+ *
+ * # Output
+ * Router Axum đã gắn các route IAM, workspace, realtime và route publish template dùng chung lớp bảo vệ `no-store` và xác thực hiện hành.
+ *
+ * # Side effects
+ * Một reconciler bounded được spawn; task kết thúc khi state/router được drop.
  */
 pub fn auth_router(state: HttpState) -> Router {
     state.realtime.start_reconciliation(state.auth.clone());
+    // Gắn route publish template lên router chuẩn để dùng chung auth, PgPool, PgIdentityStore và CryptoService.
+    let templates = template_router(TemplateHttpState::from_http_state(state.clone()));
     sessions::routes()
         .merge(members::routes())
         .merge(realtime::routes())
         .route("/api/v1/auth/login", post(login))
         .with_state(state)
+        .merge(templates)
 }

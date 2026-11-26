@@ -182,8 +182,8 @@ async fn seed_key_device(
     // Metadata fixture tối thiểu, mọi UUID/marker đều bind; đây không là template publish/device provisioning acceptance.
     sqlx::query("INSERT INTO templates(workspace_id,template_id,name,model,created_by_user_id) VALUES($1,$2,'Probe','PROBE',$3)")
         .bind(workspace).bind(template).bind(context.config.user_ids[0]).execute(&mut **transaction).await.map_err(|_|ApplicationError::Unavailable)?;
-    sqlx::query("INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest) VALUES($1,$2,$3,1,'Probe','PROBE',$4,$5)")
-        .bind(workspace).bind(version).bind(template).bind(context.config.user_ids[0]).bind([53_u8;32].as_slice()).execute(&mut **transaction).await.map_err(|_|ApplicationError::Unavailable)?;
+    sqlx::query("INSERT INTO template_versions(workspace_id,template_version_id,template_id,version_number,name,model,published_by_user_id,content_digest,source_revision,published_root_revision) VALUES($1,$2,$3,1,'Probe','PROBE',$4,$5,$6,$7)")
+        .bind(workspace).bind(version).bind(template).bind(context.config.user_ids[0]).bind([53_u8;32].as_slice()).bind(1_i64).bind(2_i64).execute(&mut **transaction).await.map_err(|_|ApplicationError::Unavailable)?;
     sqlx::query("INSERT INTO datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,channel_kind) VALUES($1,$2,'temperature','Temperature','NUMBER','READ','TELEMETRY')")
         .bind(workspace).bind(version).execute(&mut **transaction).await.map_err(|_|ApplicationError::Unavailable)?;
     for stream in ["fan", "fan_secondary"] {

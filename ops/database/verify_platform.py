@@ -32,6 +32,7 @@ SOURCE_NAMES = (
     "0020_auth_ios_client.sql",
     "0021_password_change_attempt_buckets.sql",
     "0023_provisioning_poll_metadata.sql",
+    "0024_template_stream_defaults.sql",
 )
 # Các view/check dùng cùng search_path để regclass/regprocedure không drift do pg_dump reset.
 FINGERPRINT = "SET search_path=public,pg_catalog;\n" + (

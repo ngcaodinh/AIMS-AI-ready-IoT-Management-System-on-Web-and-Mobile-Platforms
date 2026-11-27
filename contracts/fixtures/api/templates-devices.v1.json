@@ -1,0 +1,1866 @@
+{
+  "contractVersion": "0.2.0",
+  "fixtureKind": "synthetic-contract-example",
+  "scenarios": [
+    {
+      "id": "CT-TEMPLATE-001",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": true
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "workspaceId": "00000000-0000-4000-8000-000000000001",
+          "status": "DRAFT",
+          "schemaVersion": 1,
+          "revision": 1,
+          "latestPublishedVersionId": null,
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": true
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ],
+          "createdAt": "2026-11-27T05:00:00Z",
+          "updatedAt": "2026-11-27T05:00:00Z"
+        }
+      }
+    },
+    {
+      "id": "CT-TEMPLATE-LEGACY-DIRECTION",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "default": true,
+              "mode": "READ_WRITE",
+              "channelKind": "STATE"
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "workspaceId": "00000000-0000-4000-8000-000000000001",
+          "status": "DRAFT",
+          "schemaVersion": 1,
+          "revision": 1,
+          "latestPublishedVersionId": null,
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": true
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ],
+          "createdAt": "2026-11-27T05:00:00Z",
+          "updatedAt": "2026-11-27T05:00:00Z"
+        }
+      }
+    },
+    {
+      "id": "CT-TEMPLATE-LEGACY-KIND",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "mode": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": true
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "workspaceId": "00000000-0000-4000-8000-000000000001",
+          "status": "DRAFT",
+          "schemaVersion": 1,
+          "revision": 1,
+          "latestPublishedVersionId": null,
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": true
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ],
+          "createdAt": "2026-11-27T05:00:00Z",
+          "updatedAt": "2026-11-27T05:00:00Z"
+        }
+      }
+    },
+    {
+      "id": "CT-TEMPLATE-MODE-ONLY-DIRECTION",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "mode": "READ"
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/mode",
+                  "code": "FORMAT"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-MODE-ONLY-KIND",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "mode": "STATE"
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/mode",
+                  "code": "FORMAT"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-MODE-DUPLICATE-DIRECTION",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "mode": "READ",
+              "direction": "READ"
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/mode",
+                  "code": "FORMAT"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-MODE-DUPLICATE-KIND",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "mode": "STATE",
+              "channelKind": "STATE"
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/mode",
+                  "code": "FORMAT"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-MODE-MIXED-CANONICAL",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "mode": "READ",
+              "channelKind": "STATE",
+              "direction": "READ"
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/mode",
+                  "code": "FORMAT"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-MODE-UNKNOWN",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "mode": "SENSOR",
+              "direction": "READ"
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/mode",
+                  "code": "FORMAT"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-CANONICAL-ONE-AXIS",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "direction": "READ"
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/channelKind",
+                  "code": "REQUIRED"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-006",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100,
+              "safeValue": 0
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/safeValue",
+                  "code": "UNKNOWN"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-READ-COMMAND",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan_reported",
+              "safeValue": false
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "STREAM_INVALID",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/commands/0/stream",
+                  "code": "INCOMPATIBLE"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-DUPLICATE-STREAM",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "STREAM_INVALID",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/1/key",
+                  "code": "DUPLICATE"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-DEFAULT-BOUND",
+      "operationId": "createTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100,
+              "default": 101
+            }
+          ],
+          "commands": []
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "STREAM_INVALID",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {
+              "fieldErrors": [
+                {
+                  "path": "/streams/0/default",
+                  "code": "INVALID_VALUE"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-003-STALE",
+      "operationId": "patchTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000002",
+        "headers": {
+          "If-Match": "\"1\""
+        },
+        "body": {
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": false
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 412,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VERSION_CONFLICT",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      },
+      "assertions": [
+        "no-mutation"
+      ]
+    },
+    {
+      "id": "CT-TEMPLATE-004",
+      "operationId": "getTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000022",
+        "pathId": "00000000-0000-4000-8000-000000000002"
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "RESOURCE_NOT_FOUND",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-PUBLISH-001",
+      "operationId": "publishTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000002",
+        "headers": {
+          "If-Match": "\"1\""
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "templateId": "00000000-0000-4000-8000-000000000002",
+          "revision": 2,
+          "version": {
+            "id": "00000000-0000-4000-8000-000000000003",
+            "workspaceId": "00000000-0000-4000-8000-000000000001",
+            "templateId": "00000000-0000-4000-8000-000000000002",
+            "version": 1,
+            "schemaVersion": 1,
+            "status": "PUBLISHED",
+            "name": "Room demo",
+            "model": "SYNTHETIC-ROOM",
+            "streams": [
+              {
+                "key": "temperature",
+                "type": "NUMBER",
+                "channelKind": "TELEMETRY",
+                "direction": "READ",
+                "unit": "C",
+                "min": -20,
+                "max": 100
+              },
+              {
+                "key": "fan_reported",
+                "type": "BOOLEAN",
+                "channelKind": "STATE",
+                "direction": "READ"
+              },
+              {
+                "key": "fan",
+                "type": "BOOLEAN",
+                "channelKind": "STATE",
+                "direction": "READ_WRITE",
+                "default": true
+              }
+            ],
+            "commands": [
+              {
+                "type": "SET_VALUE",
+                "stream": "fan",
+                "safeValue": false
+              }
+            ],
+            "sourceRevision": 1,
+            "publishedAt": "2026-11-27T05:00:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-PUBLISH-002-MISSING",
+      "operationId": "publishTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000002"
+      },
+      "response": {
+        "status": 428,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "PRECONDITION_REQUIRED",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-PUBLISH-002-STALE",
+      "operationId": "publishTemplate",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000002",
+        "headers": {
+          "If-Match": "\"1\""
+        }
+      },
+      "response": {
+        "status": 412,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VERSION_CONFLICT",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-PUBLISH-006",
+      "operationId": "getTemplateVersion",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000002",
+        "versionId": "00000000-0000-4000-8000-000000000003"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "workspaceId": "00000000-0000-4000-8000-000000000001",
+          "templateId": "00000000-0000-4000-8000-000000000002",
+          "version": 1,
+          "schemaVersion": 1,
+          "status": "PUBLISHED",
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": true
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ],
+          "sourceRevision": 1,
+          "publishedAt": "2026-11-27T05:00:00Z"
+        }
+      }
+    },
+    {
+      "id": "CT-PUBLISH-LEGACY-PROVENANCE",
+      "operationId": "getTemplateVersion",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000002",
+        "versionId": "00000000-0000-4000-8000-000000000018"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000018",
+          "workspaceId": "00000000-0000-4000-8000-000000000001",
+          "templateId": "00000000-0000-4000-8000-000000000002",
+          "version": 1,
+          "schemaVersion": 1,
+          "status": "PUBLISHED",
+          "name": "Room demo",
+          "model": "SYNTHETIC-ROOM",
+          "streams": [
+            {
+              "key": "temperature",
+              "type": "NUMBER",
+              "channelKind": "TELEMETRY",
+              "direction": "READ",
+              "unit": "C",
+              "min": -20,
+              "max": 100
+            },
+            {
+              "key": "fan_reported",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ"
+            },
+            {
+              "key": "fan",
+              "type": "BOOLEAN",
+              "channelKind": "STATE",
+              "direction": "READ_WRITE",
+              "default": true
+            }
+          ],
+          "commands": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ],
+          "sourceRevision": null,
+          "publishedAt": "2026-11-27T05:00:00Z"
+        }
+      },
+      "assertions": [
+        "known-immutable-version-id",
+        "unknown-legacy-provenance"
+      ]
+    },
+    {
+      "id": "CT-PUBLISH-RECOVERY",
+      "operationId": "listTemplateVersions",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000002",
+        "query": {
+          "sourceRevision": 3
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "items": [
+            {
+              "id": "00000000-0000-4000-8000-000000000004",
+              "workspaceId": "00000000-0000-4000-8000-000000000001",
+              "templateId": "00000000-0000-4000-8000-000000000002",
+              "version": 2,
+              "schemaVersion": 1,
+              "status": "PUBLISHED",
+              "name": "Room demo",
+              "model": "SYNTHETIC-ROOM",
+              "streams": [
+                {
+                  "key": "temperature",
+                  "type": "NUMBER",
+                  "channelKind": "TELEMETRY",
+                  "direction": "READ",
+                  "unit": "C",
+                  "min": -20,
+                  "max": 100
+                },
+                {
+                  "key": "fan_reported",
+                  "type": "BOOLEAN",
+                  "channelKind": "STATE",
+                  "direction": "READ"
+                },
+                {
+                  "key": "fan",
+                  "type": "BOOLEAN",
+                  "channelKind": "STATE",
+                  "direction": "READ_WRITE",
+                  "default": false
+                }
+              ],
+              "commands": [
+                {
+                  "type": "SET_VALUE",
+                  "stream": "fan",
+                  "safeValue": false
+                }
+              ],
+              "sourceRevision": 3,
+              "publishedAt": "2026-11-27T05:00:00Z"
+            }
+          ],
+          "nextCursor": null
+        }
+      }
+    },
+    {
+      "id": "CT-DEVICE-REGISTERED",
+      "operationId": "registerDevice",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "serial": "synthetic-room-001",
+          "name": "Room device",
+          "model": "SYNTHETIC-ROOM",
+          "templateVersionId": "00000000-0000-4000-8000-000000000003",
+          "ownerId": "00000000-0000-4000-8000-000000000005"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000006",
+          "workspaceId": "00000000-0000-4000-8000-000000000001",
+          "serial": "synthetic-room-001",
+          "name": "Room device",
+          "model": "SYNTHETIC-ROOM",
+          "templateVersionId": "00000000-0000-4000-8000-000000000003",
+          "ownerId": "00000000-0000-4000-8000-000000000005",
+          "room": null,
+          "tags": [],
+          "lifecycle": "REGISTERED",
+          "connectivity": "UNKNOWN",
+          "lastSeen": null,
+          "firmwareVersion": null,
+          "firmwareDigest": null,
+          "hardwareRevision": null,
+          "credentialStatus": "PROVISIONING",
+          "maintenance": "NONE",
+          "capabilities": [
+            {
+              "type": "SET_VALUE",
+              "stream": "fan",
+              "safeValue": false
+            }
+          ],
+          "revision": 1,
+          "createdAt": "2026-11-27T05:00:00Z",
+          "updatedAt": "2026-11-27T05:00:00Z",
+          "nextStep": {
+            "type": "SELECT_SETUP_METHOD",
+            "methods": [
+              "USB",
+              "QR_BLE"
+            ]
+          }
+        }
+      },
+      "assertions": [
+        "no-credential-issued",
+        "no-reported-value"
+      ]
+    },
+    {
+      "id": "CT-DEVICE-UUID-NOT-SEQUENCE",
+      "operationId": "registerDevice",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "serial": "synthetic-room-001",
+          "name": "Room device",
+          "model": "SYNTHETIC-ROOM",
+          "templateVersionId": 1,
+          "ownerId": "00000000-0000-4000-8000-000000000005"
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-DEVICE-WORKSPACE-INJECTION",
+      "operationId": "registerDevice",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "serial": "synthetic-room-001",
+          "name": "Room device",
+          "model": "SYNTHETIC-ROOM",
+          "templateVersionId": "00000000-0000-4000-8000-000000000003",
+          "ownerId": "00000000-0000-4000-8000-000000000005",
+          "workspaceId": "00000000-0000-4000-8000-000000000022"
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-PUBLISH-005",
+      "operationId": "registerDevice",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "serial": "synthetic-room-001",
+          "name": "Room device",
+          "model": "SYNTHETIC-ROOM",
+          "templateVersionId": "00000000-0000-4000-8000-000000000002",
+          "ownerId": "00000000-0000-4000-8000-000000000005"
+        }
+      },
+      "response": {
+        "status": 422,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "TEMPLATE_NOT_PUBLISHED",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-DEVICE-DUPLICATE",
+      "operationId": "registerDevice",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "body": {
+          "serial": "synthetic-room-001",
+          "name": "Room device",
+          "model": "SYNTHETIC-ROOM",
+          "templateVersionId": "00000000-0000-4000-8000-000000000003",
+          "ownerId": "00000000-0000-4000-8000-000000000005"
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "DEVICE_EXISTS",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-CRED-001",
+      "operationId": "createDeviceCredential",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000006",
+        "headers": {
+          "Idempotency-Key": "synthetic-key-00001"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "BUNDLE",
+          "operation": {
+            "kind": "CREDENTIAL",
+            "operationId": "00000000-0000-4000-8000-000000000007",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "deliveryMode": "USB_ONE_TIME",
+            "status": "READY",
+            "deliveryStatus": "CLAIMED",
+            "secretAvailable": false,
+            "escrowExpiresAt": "2026-11-27T05:10:00Z",
+            "claimedAt": "2026-11-27T05:00:00Z",
+            "errorCode": null,
+            "retryCount": 0
+          },
+          "credential": {
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "credentialId": "00000000-0000-4000-8000-000000000013",
+            "brokerHost": "broker.example.test",
+            "brokerPort": 8883,
+            "clientId": "synthetic-room-client",
+            "username": "synthetic-username-placeholder",
+            "password": "<synthetic-placeholder>",
+            "templateVersion": "00000000-0000-4000-8000-000000000003",
+            "expiresAt": "2026-11-27T05:10:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-CRED-002",
+      "operationId": "createDeviceCredential",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000006",
+        "headers": {
+          "Idempotency-Key": "synthetic-key-00002"
+        }
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "PENDING",
+          "operation": {
+            "kind": "CREDENTIAL",
+            "operationId": "00000000-0000-4000-8000-000000000007",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "deliveryMode": "USB_ONE_TIME",
+            "status": "PENDING",
+            "deliveryStatus": "PENDING",
+            "secretAvailable": false,
+            "escrowExpiresAt": "2026-11-27T05:10:00Z",
+            "claimedAt": null,
+            "errorCode": null,
+            "retryCount": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-CRED-003-USB-AVAILABLE",
+      "operationId": "getProvisioningOperation",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000007"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "STATUS",
+          "operation": {
+            "kind": "CREDENTIAL",
+            "operationId": "00000000-0000-4000-8000-000000000007",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "deliveryMode": "USB_ONE_TIME",
+            "status": "READY",
+            "deliveryStatus": "AVAILABLE",
+            "secretAvailable": true,
+            "escrowExpiresAt": "2026-11-27T05:10:00Z",
+            "claimedAt": null,
+            "errorCode": null,
+            "retryCount": 0
+          }
+        }
+      },
+      "assertions": [
+        "no-secret-data"
+      ]
+    },
+    {
+      "id": "CT-CRED-003-USB-CLAIMED",
+      "operationId": "getProvisioningOperation",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000007"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "STATUS",
+          "operation": {
+            "kind": "CREDENTIAL",
+            "operationId": "00000000-0000-4000-8000-000000000007",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "deliveryMode": "USB_ONE_TIME",
+            "status": "READY",
+            "deliveryStatus": "CLAIMED",
+            "secretAvailable": false,
+            "escrowExpiresAt": "2026-11-27T05:10:00Z",
+            "claimedAt": "2026-11-27T05:00:00Z",
+            "errorCode": null,
+            "retryCount": 0
+          }
+        }
+      },
+      "assertions": [
+        "no-secret-data"
+      ]
+    },
+    {
+      "id": "CT-CRED-003-USB-EXPIRED",
+      "operationId": "getProvisioningOperation",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000007"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "STATUS",
+          "operation": {
+            "kind": "CREDENTIAL",
+            "operationId": "00000000-0000-4000-8000-000000000007",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "deliveryMode": "USB_ONE_TIME",
+            "status": "READY",
+            "deliveryStatus": "EXPIRED",
+            "secretAvailable": false,
+            "escrowExpiresAt": "2026-11-27T05:10:00Z",
+            "claimedAt": null,
+            "errorCode": null,
+            "retryCount": 0
+          }
+        }
+      },
+      "assertions": [
+        "no-secret-data"
+      ]
+    },
+    {
+      "id": "CT-CRED-003-BLE",
+      "operationId": "getProvisioningOperation",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000007"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "STATUS",
+          "operation": {
+            "kind": "CREDENTIAL",
+            "operationId": "00000000-0000-4000-8000-000000000007",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "deliveryMode": "ENROLLMENT_BLE",
+            "status": "READY",
+            "deliveryStatus": "AVAILABLE",
+            "secretAvailable": true,
+            "escrowExpiresAt": "2026-11-27T05:10:00Z",
+            "claimedAt": null,
+            "errorCode": null,
+            "retryCount": 0
+          }
+        }
+      },
+      "assertions": [
+        "no-secret-data"
+      ]
+    },
+    {
+      "id": "CT-CRED-003-LIFECYCLE",
+      "operationId": "getProvisioningOperation",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000011"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "STATUS",
+          "operation": {
+            "kind": "DEVICE_LIFECYCLE",
+            "operationId": "00000000-0000-4000-8000-000000000011",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "type": "RESUME",
+            "status": "PENDING",
+            "lifecycle": "SUSPENDED",
+            "connectivity": "UNKNOWN",
+            "credentialStatus": "PROVISIONING",
+            "brokerStatus": "PENDING",
+            "revision": 2,
+            "createdAt": "2026-11-27T05:00:00Z",
+            "deadline": "2026-11-27T05:10:00Z",
+            "errorCode": null,
+            "credentialOperationId": "00000000-0000-4000-8000-000000000007"
+          }
+        }
+      },
+      "assertions": [
+        "no-secret-data"
+      ]
+    },
+    {
+      "id": "CT-CRED-003-CLEANUP",
+      "operationId": "getProvisioningOperation",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000008"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "STATUS",
+          "operation": {
+            "id": "00000000-0000-4000-8000-000000000008",
+            "kind": "ENROLLMENT_CLEANUP",
+            "state": "FAILED",
+            "enrollmentId": "00000000-0000-4000-8000-000000000009",
+            "reason": "EXPIRED",
+            "applicationBlocked": true,
+            "escrowPurged": true,
+            "brokerRevocation": "PENDING",
+            "boardCleanup": "UNKNOWN",
+            "attempts": 1,
+            "nextAttemptAt": "2026-11-27T05:10:00Z",
+            "lastError": "BROKER_UNAVAILABLE"
+          }
+        }
+      },
+      "assertions": [
+        "no-secret-data"
+      ]
+    },
+    {
+      "id": "CT-CRED-004-USED",
+      "operationId": "claimDeviceCredential",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000007",
+        "headers": {
+          "Idempotency-Key": "synthetic-key-00003"
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "CREDENTIAL_ALREADY_CLAIMED",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-CRED-004-EXPIRED",
+      "operationId": "claimDeviceCredential",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000007",
+        "headers": {
+          "Idempotency-Key": "synthetic-key-00004"
+        }
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "CREDENTIAL_ESCROW_EXPIRED",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-CRED-005",
+      "operationId": "getProvisioningOperation",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000022",
+        "pathId": "00000000-0000-4000-8000-000000000007"
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "RESOURCE_NOT_FOUND",
+            "message": "Synthetic contract error.",
+            "correlationId": "00000000-0000-4000-8000-000000000021",
+            "details": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "CT-CRED-006",
+      "operationId": "createDeviceCredential",
+      "request": {
+        "workspaceId": "00000000-0000-4000-8000-000000000001",
+        "pathId": "00000000-0000-4000-8000-000000000006",
+        "headers": {
+          "Idempotency-Key": "synthetic-key-00001"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "kind": "STATUS",
+          "operation": {
+            "kind": "CREDENTIAL",
+            "operationId": "00000000-0000-4000-8000-000000000007",
+            "deviceId": "00000000-0000-4000-8000-000000000006",
+            "deliveryMode": "USB_ONE_TIME",
+            "status": "READY",
+            "deliveryStatus": "CLAIMED",
+            "secretAvailable": false,
+            "escrowExpiresAt": "2026-11-27T05:10:00Z",
+            "claimedAt": "2026-11-27T05:00:00Z",
+            "errorCode": null,
+            "retryCount": 0
+          }
+        }
+      },
+      "assertions": [
+        "no-secret-data"
+      ]
+    }
+  ],
+  "rejectedResponses": [
+    {
+      "id": "UNKNOWN-OPERATION-KIND",
+      "operationId": "getProvisioningOperation",
+      "body": {
+        "kind": "STATUS",
+        "operation": {
+          "kind": "FUTURE_OPERATION",
+          "operationId": "00000000-0000-4000-8000-000000000007",
+          "deviceId": "00000000-0000-4000-8000-000000000006",
+          "deliveryMode": "USB_ONE_TIME",
+          "status": "PENDING",
+          "deliveryStatus": "PENDING",
+          "secretAvailable": false,
+          "escrowExpiresAt": "2026-11-27T05:10:00Z",
+          "claimedAt": null,
+          "errorCode": null,
+          "retryCount": 0
+        }
+      }
+    },
+    {
+      "id": "UNEXPECTED-POLL-BUNDLE",
+      "operationId": "getProvisioningOperation",
+      "body": {
+        "kind": "BUNDLE",
+        "operation": {
+          "kind": "CREDENTIAL",
+          "operationId": "00000000-0000-4000-8000-000000000007",
+          "deviceId": "00000000-0000-4000-8000-000000000006",
+          "deliveryMode": "USB_ONE_TIME",
+          "status": "READY",
+          "deliveryStatus": "CLAIMED",
+          "secretAvailable": false,
+          "escrowExpiresAt": "2026-11-27T05:10:00Z",
+          "claimedAt": "2026-11-27T05:00:00Z",
+          "errorCode": null,
+          "retryCount": 0
+        },
+        "credential": {
+          "deviceId": "00000000-0000-4000-8000-000000000006",
+          "credentialId": "00000000-0000-4000-8000-000000000013",
+          "brokerHost": "broker.example.test",
+          "brokerPort": 8883,
+          "clientId": "synthetic-room-client",
+          "username": "synthetic-username-placeholder",
+          "password": "<synthetic-placeholder>",
+          "templateVersion": "00000000-0000-4000-8000-000000000003",
+          "expiresAt": "2026-11-27T05:10:00Z"
+        }
+      }
+    },
+    {
+      "id": "POLL-OUTER-SECRET",
+      "operationId": "getProvisioningOperation",
+      "body": {
+        "kind": "STATUS",
+        "operation": {
+          "kind": "CREDENTIAL",
+          "operationId": "00000000-0000-4000-8000-000000000007",
+          "deviceId": "00000000-0000-4000-8000-000000000006",
+          "deliveryMode": "USB_ONE_TIME",
+          "status": "READY",
+          "deliveryStatus": "CLAIMED",
+          "secretAvailable": false,
+          "escrowExpiresAt": "2026-11-27T05:10:00Z",
+          "claimedAt": "2026-11-27T05:00:00Z",
+          "errorCode": null,
+          "retryCount": 0
+        },
+        "credential": {
+          "deviceId": "00000000-0000-4000-8000-000000000006",
+          "credentialId": "00000000-0000-4000-8000-000000000013",
+          "brokerHost": "broker.example.test",
+          "brokerPort": 8883,
+          "clientId": "synthetic-room-client",
+          "username": "synthetic-username-placeholder",
+          "password": "<synthetic-placeholder>",
+          "templateVersion": "00000000-0000-4000-8000-000000000003",
+          "expiresAt": "2026-11-27T05:10:00Z"
+        }
+      }
+    },
+    {
+      "id": "POLL-NESTED-SECRET",
+      "operationId": "getProvisioningOperation",
+      "body": {
+        "kind": "STATUS",
+        "operation": {
+          "kind": "CREDENTIAL",
+          "operationId": "00000000-0000-4000-8000-000000000007",
+          "deviceId": "00000000-0000-4000-8000-000000000006",
+          "deliveryMode": "USB_ONE_TIME",
+          "status": "READY",
+          "deliveryStatus": "CLAIMED",
+          "secretAvailable": false,
+          "escrowExpiresAt": "2026-11-27T05:10:00Z",
+          "claimedAt": "2026-11-27T05:00:00Z",
+          "errorCode": null,
+          "retryCount": 0,
+          "password": "<synthetic-placeholder>"
+        }
+      }
+    }
+  ],
+  "mqttAclProfile": {
+    "deviceId": "00000000-0000-4000-8000-000000000040",
+    "clientId": "00000000-0000-4000-8000-000000000040",
+    "otherDeviceId": "00000000-0000-4000-8000-000000000041",
+    "publish": [
+      "iot/v1/devices/00000000-0000-4000-8000-000000000040/telemetry",
+      "iot/v1/devices/00000000-0000-4000-8000-000000000040/hello",
+      "iot/v1/devices/00000000-0000-4000-8000-000000000040/heartbeat",
+      "iot/v1/devices/00000000-0000-4000-8000-000000000040/results"
+    ],
+    "subscribeAndReceive": [
+      "iot/v1/devices/00000000-0000-4000-8000-000000000040/commands",
+      "iot/v1/devices/00000000-0000-4000-8000-000000000040/receipts"
+    ],
+    "qos": 1,
+    "retain": false
+  },
+  "manifestCompatibility": {
+    "deviceTemplateVersionId": "00000000-0000-4000-8000-000000000003",
+    "sameFamilyNewVersion": "00000000-0000-4000-8000-000000000004",
+    "otherFamilyFirstVersion": "00000000-0000-4000-8000-000000000010",
+    "cases": [
+      {
+        "supportedTemplateVersions": [
+          "00000000-0000-4000-8000-000000000003"
+        ],
+        "compatible": true
+      },
+      {
+        "supportedTemplateVersions": [
+          "00000000-0000-4000-8000-000000000004"
+        ],
+        "compatible": false
+      },
+      {
+        "supportedTemplateVersions": [
+          "00000000-0000-4000-8000-000000000010"
+        ],
+        "compatible": false
+      }
+    ]
+  }
+}

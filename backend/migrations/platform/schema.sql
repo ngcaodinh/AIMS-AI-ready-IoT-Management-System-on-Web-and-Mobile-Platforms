@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict X4V7aSGo0IxvXY3uth3NhnG10B37auMQefvqEpHo4v9jXuyItjAKtfSEbfgCayN
+\restrict YCSLmjW9Qxb1g87Yb06sYfwZjTKQeVZcepDAyWFNn47gEexb7jgfFE2L3aQcQK0
 
 -- Dumped from database version 17.11 (Debian 17.11-1.pgdg12+2)
 -- Dumped by pg_dump version 17.11 (Debian 17.11-1.pgdg12+2)
@@ -213,11 +213,23 @@ CREATE TABLE public.datastream_definitions (
     -- CHECK ((channel_kind = ANY (ARRAY['TELEMETRY'::text, 'STATE'::text])))
     channel_kind text NOT NULL,
 
+    -- Default typed đóng băng cùng snapshot và digest; NULL khi draft không khai báo.
+    -- jsonb: tài liệu JSON lưu dạng nhị phân; kiểm object/scalar không thay validation đầy đủ cấu trúc và tham chiếu
+    -- nghiệp vụ.
+    -- Cho phép NULL: chưa có/không áp dụng giá trị theo nghiệp vụ; không đồng nghĩa chuỗi rỗng hoặc số 0.
+    -- Ràng buộc hiện hành ck_datastream_default_scalar: CHECK chỉ chặn khi biểu thức là FALSE; NULL/UNKNOWN vẫn qua,
+    -- nên phải phối hợp NOT NULL và CHECK shape khi cần.
+    -- CHECK ((jsonb_typeof(default_value) = ANY (ARRAY['number'::text, 'boolean'::text, 'string'::text])))
+    default_value jsonb,
+
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT ck_datastream_bounds CHECK ((((min_value IS NULL) OR ((data_type = 'NUMBER'::text) AND (min_value > '-Infinity'::double precision) AND (min_value < 'Infinity'::double precision))) AND ((max_value IS NULL) OR ((data_type = 'NUMBER'::text) AND (max_value > '-Infinity'::double precision) AND (max_value < 'Infinity'::double precision))) AND ((min_value IS NULL) OR (max_value IS NULL) OR (min_value <= max_value)) AND ((string_max_length IS NULL) OR (data_type = 'STRING'::text)))),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT ck_datastream_channel_kind CHECK ((channel_kind = ANY (ARRAY['TELEMETRY'::text, 'STATE'::text]))),
+
+    -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
+    CONSTRAINT ck_datastream_default_scalar CHECK ((jsonb_typeof(default_value) = ANY (ARRAY['number'::text, 'boolean'::text, 'string'::text]))),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT datastream_definitions_data_type_check CHECK ((data_type = ANY (ARRAY['NUMBER'::text, 'BOOLEAN'::text, 'STRING'::text, 'ENUM'::text]))),
@@ -315,6 +327,13 @@ COMMENT ON COLUMN public.datastream_definitions.string_max_length IS 'Độ dài
 --
 
 COMMENT ON COLUMN public.datastream_definitions.channel_kind IS 'Loại kênh TELEMETRY cho số liệu quan sát hoặc STATE cho trạng thái; bắt buộc khai báo tường minh, độc lập với direction và không tự cấp capability hay quyền điều khiển.';
+
+
+--
+-- Name: COLUMN datastream_definitions.default_value; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datastream_definitions.default_value IS 'Default typed đóng băng cùng snapshot và digest; NULL khi draft không khai báo.';
 
 
 --
@@ -15800,11 +15819,23 @@ CREATE TABLE public.template_draft_streams (
     -- CHECK ((channel_kind = ANY (ARRAY['TELEMETRY'::text, 'STATE'::text])))
     channel_kind text NOT NULL,
 
+    -- Default cấu hình typed; không phải safeValue, command hoặc giá trị thiết bị đã báo cáo.
+    -- jsonb: tài liệu JSON lưu dạng nhị phân; kiểm object/scalar không thay validation đầy đủ cấu trúc và tham chiếu
+    -- nghiệp vụ.
+    -- Cho phép NULL: chưa có/không áp dụng giá trị theo nghiệp vụ; không đồng nghĩa chuỗi rỗng hoặc số 0.
+    -- Ràng buộc hiện hành ck_template_draft_default_scalar: CHECK chỉ chặn khi biểu thức là FALSE; NULL/UNKNOWN vẫn
+    -- qua, nên phải phối hợp NOT NULL và CHECK shape khi cần.
+    -- CHECK ((jsonb_typeof(default_value) = ANY (ARRAY['number'::text, 'boolean'::text, 'string'::text])))
+    default_value jsonb,
+
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT ck_draft_stream_bounds CHECK ((((min_value IS NULL) OR ((data_type = 'NUMBER'::text) AND (min_value > '-Infinity'::double precision) AND (min_value < 'Infinity'::double precision))) AND ((max_value IS NULL) OR ((data_type = 'NUMBER'::text) AND (max_value > '-Infinity'::double precision) AND (max_value < 'Infinity'::double precision))) AND ((min_value IS NULL) OR (max_value IS NULL) OR (min_value <= max_value)) AND ((string_max_length IS NULL) OR (data_type = 'STRING'::text)))),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT ck_draft_stream_channel_kind CHECK ((channel_kind = ANY (ARRAY['TELEMETRY'::text, 'STATE'::text]))),
+
+    -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
+    CONSTRAINT ck_template_draft_default_scalar CHECK ((jsonb_typeof(default_value) = ANY (ARRAY['number'::text, 'boolean'::text, 'string'::text]))),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT template_draft_streams_data_type_check CHECK ((data_type = ANY (ARRAY['NUMBER'::text, 'BOOLEAN'::text, 'STRING'::text, 'ENUM'::text]))),
@@ -15912,6 +15943,13 @@ COMMENT ON COLUMN public.template_draft_streams.revision IS 'Phiên bản chỉn
 --
 
 COMMENT ON COLUMN public.template_draft_streams.channel_kind IS 'Loại kênh TELEMETRY cho số liệu quan sát hoặc STATE cho trạng thái; bắt buộc khai báo tường minh, độc lập với direction và không tự cấp capability hay quyền điều khiển.';
+
+
+--
+-- Name: COLUMN template_draft_streams.default_value; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.template_draft_streams.default_value IS 'Default cấu hình typed; không phải safeValue, command hoặc giá trị thiết bị đã báo cáo.';
 
 
 --
@@ -24902,6 +24940,13 @@ GRANT SELECT(channel_kind) ON TABLE public.datastream_definitions TO iot_dbeaver
 
 
 --
+-- Name: COLUMN datastream_definitions.default_value; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(default_value) ON TABLE public.datastream_definitions TO iot_dbeaver_reader;
+
+
+--
 -- Name: FUNCTION assert_stream_value(definition public.datastream_definitions, candidate jsonb, writable boolean); Type: ACL; Schema: public; Owner: -
 --
 
@@ -30053,6 +30098,13 @@ GRANT SELECT(channel_kind) ON TABLE public.template_draft_streams TO iot_dbeaver
 
 
 --
+-- Name: COLUMN template_draft_streams.default_value; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(default_value) ON TABLE public.template_draft_streams TO iot_dbeaver_reader;
+
+
+--
 -- Name: COLUMN template_versions.workspace_id; Type: ACL; Schema: public; Owner: -
 --
 
@@ -31260,7 +31312,7 @@ GRANT SELECT(archived_at) ON TABLE public.workspaces TO iot_dbeaver_reader;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict X4V7aSGo0IxvXY3uth3NhnG10B37auMQefvqEpHo4v9jXuyItjAKtfSEbfgCayN
+\unrestrict YCSLmjW9Qxb1g87Yb06sYfwZjTKQeVZcepDAyWFNn47gEexb7jgfFE2L3aQcQK0
 
 
 /* Khôi phục ACL mặc định public mà pg_dump có thể lược bỏ. */

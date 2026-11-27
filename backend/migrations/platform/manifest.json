@@ -2313,6 +2313,13 @@
           "default": null,
           "nullable": "NO",
           "description": "Loại kênh TELEMETRY cho số liệu quan sát hoặc STATE cho trạng thái; bắt buộc khai báo tường minh, độc lập với direction và không tự cấp capability hay quyền điều khiển."
+        },
+        {
+          "name": "default_value",
+          "type": "jsonb",
+          "default": null,
+          "nullable": "YES",
+          "description": "Default typed đóng băng cùng snapshot và digest; NULL khi draft không khai báo."
         }
       ],
       "indexes": [
@@ -2331,6 +2338,11 @@
           "name": "ck_datastream_channel_kind",
           "type": "c",
           "definition": "CHECK ((channel_kind = ANY (ARRAY['TELEMETRY'::text, 'STATE'::text])))"
+        },
+        {
+          "name": "ck_datastream_default_scalar",
+          "type": "c",
+          "definition": "CHECK ((jsonb_typeof(default_value) = ANY (ARRAY['number'::text, 'boolean'::text, 'string'::text])))"
         },
         {
           "name": "datastream_definitions_data_type_check",
@@ -9407,6 +9419,13 @@
           "default": null,
           "nullable": "NO",
           "description": "Loại kênh TELEMETRY cho số liệu quan sát hoặc STATE cho trạng thái; bắt buộc khai báo tường minh, độc lập với direction và không tự cấp capability hay quyền điều khiển."
+        },
+        {
+          "name": "default_value",
+          "type": "jsonb",
+          "default": null,
+          "nullable": "YES",
+          "description": "Default cấu hình typed; không phải safeValue, command hoặc giá trị thiết bị đã báo cáo."
         }
       ],
       "indexes": [
@@ -9425,6 +9444,11 @@
           "name": "ck_draft_stream_channel_kind",
           "type": "c",
           "definition": "CHECK ((channel_kind = ANY (ARRAY['TELEMETRY'::text, 'STATE'::text])))"
+        },
+        {
+          "name": "ck_template_draft_default_scalar",
+          "type": "c",
+          "definition": "CHECK ((jsonb_typeof(default_value) = ANY (ARRAY['number'::text, 'boolean'::text, 'string'::text])))"
         },
         {
           "name": "template_draft_streams_data_type_check",

@@ -1,0 +1,3231 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Nexa IoT template, device registry and provisioning",
+    "version": "0.2.0",
+    "description": "Shared software G1 contract for FEAT-TN-005–008. The compatibility note and synthetic golden fixtures accompany this contract.",
+    "x-contract-status": "DRAFT_G1"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "WebSession": []
+    },
+    {
+      "AppBearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/templates": {
+      "get": {
+        "operationId": "listTemplates",
+        "summary": "List scoped template candidates",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Opaque cursor binds actor, workspace and filter. Required for manual lost-create recovery.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "#/components/parameters/Status"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped page",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplatePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR, CURSOR_INVALID",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH"
+          ],
+          "422": [
+            "VALIDATION_ERROR",
+            "CURSOR_INVALID"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      },
+      "post": {
+        "operationId": "createTemplate",
+        "summary": "Create a template draft",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. No automatic POST retry after an unknown outcome.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateCreate"
+              }
+            }
+          }
+        },
+        "x-max-body-bytes": 65536,
+        "responses": {
+          "201": {
+            "description": "Created DRAFT",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR, STREAM_INVALID",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH"
+          ],
+          "413": [
+            "VALIDATION_ERROR"
+          ],
+          "415": [
+            "VALIDATION_ERROR"
+          ],
+          "422": [
+            "VALIDATION_ERROR",
+            "STREAM_INVALID"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "/api/v1/templates/{id}": {
+      "get": {
+        "operationId": "getTemplate",
+        "summary": "Read current template root",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current root projection",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      },
+      "patch": {
+        "operationId": "patchTemplate",
+        "summary": "Update a template draft",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Arrays replace in full. Compare the revision before checking draft status.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplatePatch"
+              }
+            }
+          }
+        },
+        "x-max-body-bytes": 65536,
+        "responses": {
+          "200": {
+            "description": "Updated draft",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH, IMMUTABLE_SCHEMA",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "VERSION_CONFLICT",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR, STREAM_INVALID",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "PRECONDITION_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH",
+            "IMMUTABLE_SCHEMA"
+          ],
+          "412": [
+            "VERSION_CONFLICT"
+          ],
+          "413": [
+            "VALIDATION_ERROR"
+          ],
+          "415": [
+            "VALIDATION_ERROR"
+          ],
+          "422": [
+            "VALIDATION_ERROR",
+            "STREAM_INVALID"
+          ],
+          "428": [
+            "PRECONDITION_REQUIRED"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "/api/v1/templates/{id}/publish": {
+      "post": {
+        "operationId": "publishTemplate",
+        "summary": "Publish an immutable snapshot",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Compare revision before state. Publication requires an approved model/capability profile.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "x-max-body-bytes": 65536,
+        "x-body-policy": "No content. JSON including {} is rejected.",
+        "responses": {
+          "200": {
+            "description": "Root revision and immutable version",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplatePublished"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH, IMMUTABLE_SCHEMA",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "VERSION_CONFLICT",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR, STREAM_INVALID",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "PRECONDITION_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH",
+            "IMMUTABLE_SCHEMA"
+          ],
+          "412": [
+            "VERSION_CONFLICT"
+          ],
+          "413": [
+            "VALIDATION_ERROR"
+          ],
+          "422": [
+            "VALIDATION_ERROR",
+            "STREAM_INVALID"
+          ],
+          "428": [
+            "PRECONDITION_REQUIRED"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ],
+          "415": [
+            "VALIDATION_ERROR"
+          ]
+        }
+      }
+    },
+    "/api/v1/templates/{id}/draft": {
+      "post": {
+        "operationId": "cloneTemplateDraft",
+        "summary": "Open a draft from an exact snapshot",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. The source version must belong to this template family.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateClone"
+              }
+            }
+          }
+        },
+        "x-max-body-bytes": 65536,
+        "responses": {
+          "200": {
+            "description": "New current draft",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Template"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH, DRAFT_EXISTS, IMMUTABLE_SCHEMA",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "VERSION_CONFLICT",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "PRECONDITION_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH",
+            "DRAFT_EXISTS",
+            "IMMUTABLE_SCHEMA"
+          ],
+          "412": [
+            "VERSION_CONFLICT"
+          ],
+          "413": [
+            "VALIDATION_ERROR"
+          ],
+          "415": [
+            "VALIDATION_ERROR"
+          ],
+          "422": [
+            "VALIDATION_ERROR"
+          ],
+          "428": [
+            "PRECONDITION_REQUIRED"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "/api/v1/templates/{id}/versions": {
+      "get": {
+        "operationId": "listTemplateVersions",
+        "summary": "List immutable published versions",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Recover an uncertain publish via the submitted sourceRevision and a scoped stable cursor.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/SourceRevision"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published versions in the selected family",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateVersionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR, CURSOR_INVALID",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH"
+          ],
+          "422": [
+            "VALIDATION_ERROR",
+            "CURSOR_INVALID"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "/api/v1/templates/{id}/versions/{versionId}": {
+      "get": {
+        "operationId": "getTemplateVersion",
+        "summary": "Read one exact published version",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/VersionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable snapshot",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateVersion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "operationId": "recoverDeviceRegistration",
+        "summary": "Find a registered device by exact serial",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Serial recovery is case sensitive and never a global lookup.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "#/components/parameters/Serial"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most one scoped exact match",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRecoveryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH"
+          ],
+          "422": [
+            "VALIDATION_ERROR"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      },
+      "post": {
+        "operationId": "registerDevice",
+        "summary": "Register a device and pin an exact version",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Owner must be ACTIVE in scope. Registration creates no credential.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCreate"
+              }
+            }
+          }
+        },
+        "x-max-body-bytes": 65536,
+        "responses": {
+          "201": {
+            "description": "Registered device and setup choices",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRegistered"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH, DEVICE_EXISTS",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR, OWNER_INVALID, MODEL_MISMATCH, TEMPLATE_NOT_PUBLISHED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH",
+            "DEVICE_EXISTS"
+          ],
+          "413": [
+            "VALIDATION_ERROR"
+          ],
+          "415": [
+            "VALIDATION_ERROR"
+          ],
+          "422": [
+            "VALIDATION_ERROR",
+            "OWNER_INVALID",
+            "MODEL_MISMATCH",
+            "TEMPLATE_NOT_PUBLISHED"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "/api/v1/devices/{id}/credentials": {
+      "post": {
+        "operationId": "createDeviceCredential",
+        "summary": "Request USB credential issuance",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Check current scope before idempotency. The key is bound to the target UUID.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "x-max-body-bytes": 65536,
+        "x-body-policy": "No content. JSON including {} is rejected.",
+        "responses": {
+          "200": {
+            "description": "Metadata-only key replay",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisioningStatus"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Confirmed and consumed one-time bundle",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialDelivery"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durable intent or pending adapter outcome",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialPending"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH, IDEMPOTENCY_CONFLICT, PROVISIONING_IN_PROGRESS, INVALID_TRANSITION",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH",
+            "IDEMPOTENCY_CONFLICT",
+            "PROVISIONING_IN_PROGRESS",
+            "INVALID_TRANSITION"
+          ],
+          "413": [
+            "VALIDATION_ERROR"
+          ],
+          "422": [
+            "VALIDATION_ERROR"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ],
+          "415": [
+            "VALIDATION_ERROR"
+          ]
+        }
+      }
+    },
+    "/api/v1/provisioning-operations/{id}": {
+      "get": {
+        "operationId": "getProvisioningOperation",
+        "summary": "Poll an operation by explicit kind",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Credential variants are further scoped to the current authorized initiator. Unknown kind must fail closed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metadata only for every operation kind",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisioningStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "/api/v1/provisioning-operations/{id}/claim-credential": {
+      "post": {
+        "operationId": "claimDeviceCredential",
+        "summary": "Consume one available USB credential bundle",
+        "description": "Current ACTIVE Admin in the selected ACTIVE workspace. Foreign IDs are indistinguishable from missing resources. Only the authorized initiator of a USB_ONE_TIME child may consume it.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/AuthContext"
+          },
+          {
+            "$ref": "./auth.v1.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "x-max-body-bytes": 65536,
+        "x-body-policy": "No content. JSON including {} is rejected.",
+        "responses": {
+          "200": {
+            "description": "One-time delivery or metadata-only replay",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WORKSPACE_REQUIRED, VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SESSION_EXPIRED, SESSION_REVOKED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN, CSRF_INVALID, PASSWORD_CHANGE_REQUIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AUTH_CONTEXT_MISMATCH, IDEMPOTENCY_CONFLICT, CREDENTIAL_NOT_READY, CREDENTIAL_ALREADY_CLAIMED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "CREDENTIAL_ESCROW_EXPIRED",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "VALIDATION_ERROR",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents caching scoped resource data and one-time responses.",
+                "schema": {
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "WORKSPACE_REQUIRED",
+            "VALIDATION_ERROR"
+          ],
+          "401": [
+            "SESSION_EXPIRED",
+            "SESSION_REVOKED"
+          ],
+          "403": [
+            "FORBIDDEN",
+            "CSRF_INVALID",
+            "PASSWORD_CHANGE_REQUIRED"
+          ],
+          "404": [
+            "RESOURCE_NOT_FOUND"
+          ],
+          "409": [
+            "AUTH_CONTEXT_MISMATCH",
+            "IDEMPOTENCY_CONFLICT",
+            "CREDENTIAL_NOT_READY",
+            "CREDENTIAL_ALREADY_CLAIMED"
+          ],
+          "410": [
+            "CREDENTIAL_ESCROW_EXPIRED"
+          ],
+          "413": [
+            "VALIDATION_ERROR"
+          ],
+          "422": [
+            "VALIDATION_ERROR"
+          ],
+          "503": [
+            "SERVICE_UNAVAILABLE"
+          ],
+          "415": [
+            "VALIDATION_ERROR"
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Uuid": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/Uuid"
+      },
+      "UtcTimestamp": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/UtcTimestamp"
+      },
+      "StreamInput": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/StreamInput"
+      },
+      "StreamOutput": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/StreamOutput"
+      },
+      "Command": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/Command"
+      },
+      "TemplateCreate": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplateCreate"
+      },
+      "TemplatePatch": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplatePatch"
+      },
+      "TemplateStatus": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplateStatus"
+      },
+      "Template": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/Template"
+      },
+      "TemplatePage": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplatePage"
+      },
+      "TemplateClone": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplateClone"
+      },
+      "TemplateVersion": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplateVersion"
+      },
+      "TemplateVersionPage": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplateVersionPage"
+      },
+      "TemplatePublished": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/TemplatePublished"
+      },
+      "SupportedTemplateVersions": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/SupportedTemplateVersions"
+      },
+      "DeviceCreate": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/DeviceCreate"
+      },
+      "Device": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/Device"
+      },
+      "DeviceRegistered": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/DeviceRegistered"
+      },
+      "DeviceRecoveryPage": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/DeviceRecoveryPage"
+      },
+      "CredentialOperation": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/CredentialOperation"
+      },
+      "DeviceLifecycleOperation": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/DeviceLifecycleOperation"
+      },
+      "EnrollmentCleanupOperation": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/EnrollmentCleanupOperation"
+      },
+      "ProvisioningOperation": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/ProvisioningOperation",
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "CREDENTIAL": "#/components/schemas/CredentialOperation",
+            "DEVICE_LIFECYCLE": "#/components/schemas/DeviceLifecycleOperation",
+            "ENROLLMENT_CLEANUP": "#/components/schemas/EnrollmentCleanupOperation"
+          }
+        }
+      },
+      "ProvisioningStatus": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/ProvisioningStatus"
+      },
+      "CredentialPending": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/CredentialPending"
+      },
+      "CredentialBundle": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/CredentialBundle"
+      },
+      "CredentialDelivery": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/CredentialDelivery"
+      },
+      "ErrorEnvelope": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/ErrorEnvelope"
+      },
+      "ClaimResponse": {
+        "$ref": "../schemas/device/template-device-provisioning.v1.json#/$defs/ClaimResponse"
+      }
+    },
+    "parameters": {
+      "WorkspaceId": {
+        "name": "X-Workspace-Id",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        }
+      },
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        }
+      },
+      "VersionId": {
+        "name": "versionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\"[1-9][0-9]*\"$"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^[ -~]+$"
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "Status": {
+        "name": "status",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/TemplateStatus"
+        }
+      },
+      "SourceRevision": {
+        "name": "sourceRevision",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "Serial": {
+        "name": "serial",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+        }
+      }
+    },
+    "securitySchemes": {
+      "WebSession": {
+        "$ref": "./auth.v1.json#/components/securitySchemes/WebSession"
+      },
+      "AppBearer": {
+        "$ref": "./auth.v1.json#/components/securitySchemes/AppBearer"
+      }
+    }
+  }
+}

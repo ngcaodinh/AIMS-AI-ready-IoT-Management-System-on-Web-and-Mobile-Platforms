@@ -4244,3 +4244,55 @@ DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
 \endif
 \endif
 COMMIT;
+
+\set migration_version platform-0024-template-stream-defaults
+\set migration_checksum 51491189d29eb9e439d52741d71c8326aa726cd875d46e166ef9a284b10f7f06
+
+/* Template psql của runner; hai marker chỉ được thay bằng file SQL nguồn trong repo.
+ * migration_version/checksum là literal qua :'name', không chèn input vào SQL.
+ * DDL và ledger commit cùng nhau; advisory lock dùng chung cho mọi version/runner.
+ */
+BEGIN;
+SET LOCAL lock_timeout='5s';
+SET LOCAL statement_timeout='30s';
+SELECT pg_advisory_xact_lock(17001,1);
+/* Lịch sử runner lab: lưu checksum và thời điểm áp thật, không chứa credential.
+ * Phải chạy trong transaction đã lấy advisory lock; không thay SQLx production history.
+ */
+CREATE SCHEMA IF NOT EXISTS migration_control;
+CREATE TABLE IF NOT EXISTS migration_control.applied_migrations (
+    version text PRIMARY KEY,
+    checksum text NOT NULL CHECK(checksum ~ '^[0-9a-f]{64}$'),
+    applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+SELECT NOT EXISTS(
+    SELECT 1 FROM migration_control.applied_migrations WHERE version=:'migration_version'
+) AS should_apply \gset
+\if :should_apply
+/* Giữ default typed của stream draft và snapshot, tách khỏi safeValue và reportedValue.
+ * Cột nullable giữ row cũ và INSERT của writer cũ; không backfill hay đổi digest lịch sử.
+ * ALTER cần ACCESS EXCLUSIVE khi thêm cột và kiểm CHECK. Áp trước writer đọc/ghi cột mới.
+ */
+ALTER TABLE public.template_draft_streams ADD COLUMN default_value jsonb
+ CONSTRAINT ck_template_draft_default_scalar CHECK(jsonb_typeof(default_value) IN ('number','boolean','string'));
+ALTER TABLE public.datastream_definitions ADD COLUMN default_value jsonb
+ CONSTRAINT ck_datastream_default_scalar CHECK(jsonb_typeof(default_value) IN ('number','boolean','string'));
+
+COMMENT ON COLUMN public.template_draft_streams.default_value IS 'Default cấu hình typed; không phải safeValue, command hoặc giá trị thiết bị đã báo cáo.';
+COMMENT ON COLUMN public.datastream_definitions.default_value IS 'Default typed đóng băng cùng snapshot và digest; NULL khi draft không khai báo.';
+
+INSERT INTO migration_control.applied_migrations(version,checksum)
+    VALUES(:'migration_version',:'migration_checksum');
+\echo APPLIED
+\else
+SELECT checksum=:'migration_checksum' AS checksum_matches
+    FROM migration_control.applied_migrations WHERE version=:'migration_version' \gset
+\if :checksum_matches
+\echo ALREADY_APPLIED
+\else
+/* Drift phải rollback, không UPDATE checksum để hợp thức hóa lịch sử bị thay đổi. */
+DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
+\endif
+\endif
+COMMIT;

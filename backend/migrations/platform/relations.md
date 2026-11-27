@@ -153,7 +153,7 @@ Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE v�
 
 Grain: một stream trong version.
 Khóa tối thiểu theo constraints: (workspace_id, template_version_id, stream_key).
-Thuộc tính: workspace_id, template_version_id, stream_key, display_name, data_type, direction, unit, min_value, max_value, string_max_length, channel_kind.
+Thuộc tính: workspace_id, template_version_id, stream_key, display_name, data_type, direction, unit, min_value, max_value, string_max_length, channel_kind, default_value.
 FD/ngoại lệ: các candidate key→thuộc tính còn lại; business FD bổ sung phải review trước đổi schema.
 Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE và CHECK shape khi cần, chi tiết từng constraint ở manifest. Không cascade lifecycle thành xóa lịch sử.
 
@@ -593,7 +593,7 @@ Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE v�
 
 Grain: một stream draft.
 Khóa tối thiểu theo constraints: (workspace_id, template_id, stream_key).
-Thuộc tính: workspace_id, template_id, stream_key, display_name, data_type, direction, unit, min_value, max_value, string_max_length, revision, channel_kind.
+Thuộc tính: workspace_id, template_id, stream_key, display_name, data_type, direction, unit, min_value, max_value, string_max_length, revision, channel_kind, default_value.
 FD/ngoại lệ: các candidate key→thuộc tính còn lại; business FD bổ sung phải review trước đổi schema.
 Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE và CHECK shape khi cần, chi tiết từng constraint ở manifest. Không cascade lifecycle thành xóa lịch sử.
 

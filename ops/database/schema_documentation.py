@@ -456,6 +456,12 @@ COLUMN_DESCRIPTIONS = {
 
 # Override cho các tên xuất hiện nhiều nhưng khác nghĩa hoặc có TTL/NULL riêng quan trọng.
 COLUMN_OVERRIDES = {
+    "template_draft_streams": {
+        "default_value": "Default cấu hình typed; không phải safeValue, command hoặc giá trị thiết bị đã báo cáo.",
+    },
+    "datastream_definitions": {
+        "default_value": "Default typed đóng băng cùng snapshot và digest; NULL khi draft không khai báo.",
+    },
     "password_change_attempt_buckets": {
         "user_id": "User sở hữu limiter đổi mật khẩu; khóa ngoại giữ bucket gắn đúng account và không dùng email, session hoặc IP làm định danh.",
         "failure_count": "Số lần currentPassword sai trong fixed window hiện hành, miền 0..5; count 0 đi cùng window_started_at NULL.",

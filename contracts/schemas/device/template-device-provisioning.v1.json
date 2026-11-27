@@ -1,0 +1,1427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FEAT-TN-005–008 shared wire schemas",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+    },
+    "UtcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "StreamInput": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "NUMBER",
+            "BOOLEAN",
+            "STRING",
+            "ENUM"
+          ]
+        },
+        "channelKind": {
+          "type": "string",
+          "enum": [
+            "TELEMETRY",
+            "STATE"
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "READ",
+            "WRITE",
+            "READ_WRITE"
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "enumValues": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "default": {
+          "type": [
+            "number",
+            "boolean",
+            "string"
+          ],
+          "description": "Optional typed display/configuration default. Does not initialize a reported value or set a physical output."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "READ",
+            "WRITE",
+            "READ_WRITE",
+            "TELEMETRY",
+            "STATE"
+          ],
+          "deprecated": true,
+          "description": "Names exactly one axis. Supply the other axis explicitly and omit the axis already named by mode."
+        }
+      },
+      "required": [
+        "key",
+        "type"
+      ],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "channelKind",
+            "direction"
+          ],
+          "not": {
+            "required": [
+              "mode"
+            ]
+          }
+        },
+        {
+          "required": [
+            "mode",
+            "channelKind"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "READ",
+                "WRITE",
+                "READ_WRITE"
+              ]
+            }
+          },
+          "not": {
+            "required": [
+              "direction"
+            ]
+          }
+        },
+        {
+          "required": [
+            "mode",
+            "direction"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "TELEMETRY",
+                "STATE"
+              ]
+            }
+          },
+          "not": {
+            "required": [
+              "channelKind"
+            ]
+          }
+        }
+      ],
+      "description": "Both axes are independent. Type-specific limits, ordering, referenced command cardinality and value membership are checked over the whole candidate by the provider."
+    },
+    "StreamOutput": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "NUMBER",
+            "BOOLEAN",
+            "STRING",
+            "ENUM"
+          ]
+        },
+        "channelKind": {
+          "type": "string",
+          "enum": [
+            "TELEMETRY",
+            "STATE"
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "READ",
+            "WRITE",
+            "READ_WRITE"
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "enumValues": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Historical persisted ENUM numeric members retain exact JSON number type on read. New request ENUM members are strings."
+        },
+        "default": {
+          "type": [
+            "number",
+            "boolean",
+            "string"
+          ],
+          "description": "Optional typed display/configuration default. Does not initialize a reported value or set a physical output."
+        }
+      },
+      "required": [
+        "key",
+        "type",
+        "channelKind",
+        "direction"
+      ],
+      "additionalProperties": false
+    },
+    "Command": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "SET_VALUE"
+        },
+        "stream": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "safeValue": {
+          "type": [
+            "number",
+            "boolean",
+            "string"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "stream",
+        "safeValue"
+      ],
+      "additionalProperties": false
+    },
+    "TemplateCreate": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Length applies after Unicode NFC and trim."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Exact approved model identifier. Approval is provided by reviewed deployment configuration."
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StreamInput"
+          },
+          "maxItems": 64
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "name",
+        "model",
+        "streams",
+        "commands"
+      ],
+      "additionalProperties": false
+    },
+    "TemplatePatch": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Length applies after Unicode NFC and trim."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Exact approved model identifier. Approval is provided by reviewed deployment configuration."
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StreamInput"
+          },
+          "maxItems": 64
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Present arrays replace the whole array. Validate the merged candidate atomically under the root revision fence."
+    },
+    "TemplateStatus": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "PUBLISHED",
+        "ARCHIVED"
+      ]
+    },
+    "Template": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/TemplateStatus"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latestPublishedVersionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Length applies after Unicode NFC and trim."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Exact approved model identifier. Approval is provided by reviewed deployment configuration."
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StreamOutput"
+          },
+          "maxItems": 64
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "maxItems": 64
+        },
+        "createdAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "status",
+        "schemaVersion",
+        "revision",
+        "latestPublishedVersionId",
+        "name",
+        "model",
+        "streams",
+        "commands",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false
+    },
+    "TemplatePage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Template"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "TemplateClone": {
+      "type": "object",
+      "properties": {
+        "sourceVersionId": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "sourceVersionId"
+      ],
+      "additionalProperties": false
+    },
+    "TemplateVersion": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "templateId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "status": {
+          "const": "PUBLISHED"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Length applies after Unicode NFC and trim."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Exact approved model identifier. Approval is provided by reviewed deployment configuration."
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StreamOutput"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "maxItems": 64
+        },
+        "sourceRevision": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Draft revision at publication, or null for an immutable legacy snapshot without recorded provenance."
+        },
+        "publishedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "templateId",
+        "version",
+        "schemaVersion",
+        "status",
+        "name",
+        "model",
+        "streams",
+        "commands",
+        "sourceRevision",
+        "publishedAt"
+      ],
+      "additionalProperties": false
+    },
+    "TemplateVersionPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TemplateVersion"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "TemplatePublished": {
+      "type": "object",
+      "properties": {
+        "templateId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "version": {
+          "$ref": "#/$defs/TemplateVersion",
+          "properties": {
+            "sourceRevision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "required": [
+        "templateId",
+        "revision",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "SupportedTemplateVersions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Uuid"
+      },
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "description": "Exact immutable TemplateVersion.id UUID membership under FEAT-TN-053. Part of the signed manifest bytes."
+    },
+    "DeviceCreate": {
+      "type": "object",
+      "properties": {
+        "serial": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Length applies after Unicode NFC and trim."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Exact approved model identifier. Approval is provided by reviewed deployment configuration."
+        },
+        "templateVersionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "serial",
+        "name",
+        "model",
+        "templateVersionId",
+        "ownerId"
+      ],
+      "additionalProperties": false
+    },
+    "Device": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "templateVersionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "serial": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Length applies after Unicode NFC and trim."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Exact approved model identifier. Approval is provided by reviewed deployment configuration."
+        },
+        "room": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "REGISTERED",
+            "ACTIVE",
+            "SUSPENDED",
+            "ARCHIVED"
+          ]
+        },
+        "connectivity": {
+          "type": "string",
+          "enum": [
+            "UNKNOWN",
+            "ONLINE",
+            "OFFLINE"
+          ]
+        },
+        "lastSeen": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firmwareVersion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firmwareDigest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hardwareRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "credentialStatus": {
+          "type": "string",
+          "enum": [
+            "PROVISIONING",
+            "ACTIVE",
+            "REVOCATION_PENDING",
+            "REVOKED"
+          ]
+        },
+        "maintenance": {
+          "type": "string",
+          "enum": [
+            "NONE",
+            "OTA"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Command"
+          }
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "ownerId",
+        "templateVersionId",
+        "serial",
+        "name",
+        "model",
+        "room",
+        "tags",
+        "lifecycle",
+        "connectivity",
+        "lastSeen",
+        "firmwareVersion",
+        "firmwareDigest",
+        "hardwareRevision",
+        "credentialStatus",
+        "maintenance",
+        "capabilities",
+        "revision",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false
+    },
+    "DeviceRegistered": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "ownerId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "templateVersionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "serial": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Length applies after Unicode NFC and trim."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Exact approved model identifier. Approval is provided by reviewed deployment configuration."
+        },
+        "room": {
+          "const": null
+        },
+        "tags": {
+          "const": []
+        },
+        "lifecycle": {
+          "const": "REGISTERED"
+        },
+        "connectivity": {
+          "const": "UNKNOWN"
+        },
+        "lastSeen": {
+          "const": null
+        },
+        "firmwareVersion": {
+          "const": null
+        },
+        "firmwareDigest": {
+          "const": null
+        },
+        "hardwareRevision": {
+          "const": null
+        },
+        "credentialStatus": {
+          "const": "PROVISIONING"
+        },
+        "maintenance": {
+          "const": "NONE"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Command"
+          }
+        },
+        "revision": {
+          "const": 1
+        },
+        "createdAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "nextStep": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "SELECT_SETUP_METHOD"
+            },
+            "methods": {
+              "const": [
+                "USB",
+                "QR_BLE"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "methods"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "ownerId",
+        "templateVersionId",
+        "serial",
+        "name",
+        "model",
+        "room",
+        "tags",
+        "lifecycle",
+        "connectivity",
+        "lastSeen",
+        "firmwareVersion",
+        "firmwareDigest",
+        "hardwareRevision",
+        "credentialStatus",
+        "maintenance",
+        "capabilities",
+        "revision",
+        "createdAt",
+        "updatedAt",
+        "nextStep"
+      ],
+      "additionalProperties": false
+    },
+    "DeviceRecoveryPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Device"
+          },
+          "maxItems": 1
+        },
+        "nextCursor": {
+          "const": null
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "CredentialOperation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "CREDENTIAL"
+        },
+        "operationId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "deliveryMode": {
+          "type": "string",
+          "enum": [
+            "USB_ONE_TIME",
+            "ENROLLMENT_BLE"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "READY",
+            "FAILED"
+          ]
+        },
+        "deliveryStatus": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "AVAILABLE",
+            "CLAIMED",
+            "EXPIRED",
+            "UNAVAILABLE"
+          ]
+        },
+        "secretAvailable": {
+          "type": "boolean"
+        },
+        "escrowExpiresAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "claimedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retryCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "kind",
+        "operationId",
+        "deviceId",
+        "deliveryMode",
+        "status",
+        "deliveryStatus",
+        "secretAvailable",
+        "escrowExpiresAt",
+        "claimedAt",
+        "errorCode",
+        "retryCount"
+      ],
+      "additionalProperties": false
+    },
+    "DeviceLifecycleOperation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "DEVICE_LIFECYCLE"
+        },
+        "operationId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "SUSPEND",
+            "RESUME"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED"
+          ]
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "REGISTERED",
+            "ACTIVE",
+            "SUSPENDED",
+            "ARCHIVED"
+          ]
+        },
+        "connectivity": {
+          "type": "string",
+          "enum": [
+            "UNKNOWN",
+            "ONLINE",
+            "OFFLINE"
+          ]
+        },
+        "credentialStatus": {
+          "type": "string",
+          "enum": [
+            "PROVISIONING",
+            "ACTIVE",
+            "REVOCATION_PENDING",
+            "REVOKED"
+          ]
+        },
+        "brokerStatus": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "CONFIRMED",
+            "FAILED",
+            "NOT_REQUIRED"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "credentialOperationId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "operationId",
+        "deviceId",
+        "type",
+        "status",
+        "lifecycle",
+        "connectivity",
+        "credentialStatus",
+        "brokerStatus",
+        "revision",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "EnrollmentCleanupOperation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "ENROLLMENT_CLEANUP"
+        },
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "enrollmentId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SUCCEEDED",
+            "FAILED"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "applicationBlocked": {
+          "type": "boolean"
+        },
+        "escrowPurged": {
+          "type": "boolean"
+        },
+        "brokerRevocation": {
+          "type": "string",
+          "enum": [
+            "NOT_REQUIRED",
+            "PENDING",
+            "CONFIRMED"
+          ]
+        },
+        "boardCleanup": {
+          "type": "string",
+          "enum": [
+            "UNKNOWN",
+            "CONFIRMED"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextAttemptAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastError": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "enrollmentId",
+        "state",
+        "reason",
+        "applicationBlocked",
+        "escrowPurged",
+        "brokerRevocation",
+        "boardCleanup",
+        "attempts",
+        "nextAttemptAt",
+        "lastError"
+      ],
+      "additionalProperties": false
+    },
+    "ProvisioningOperation": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/CredentialOperation"
+        },
+        {
+          "$ref": "#/$defs/DeviceLifecycleOperation"
+        },
+        {
+          "$ref": "#/$defs/EnrollmentCleanupOperation"
+        }
+      ]
+    },
+    "ProvisioningStatus": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "STATUS"
+        },
+        "operation": {
+          "$ref": "#/$defs/ProvisioningOperation"
+        }
+      },
+      "required": [
+        "kind",
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    "CredentialPending": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "PENDING"
+        },
+        "operation": {
+          "$ref": "#/$defs/CredentialOperation"
+        }
+      },
+      "required": [
+        "kind",
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    "CredentialBundle": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "credentialId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "brokerHost": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brokerPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "password": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-time disclosure after durable consume."
+        },
+        "templateVersion": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "deviceId",
+        "credentialId",
+        "brokerHost",
+        "brokerPort",
+        "clientId",
+        "username",
+        "password",
+        "templateVersion",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "CredentialDelivery": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "BUNDLE"
+        },
+        "operation": {
+          "$ref": "#/$defs/CredentialOperation"
+        },
+        "credential": {
+          "$ref": "#/$defs/CredentialBundle"
+        }
+      },
+      "required": [
+        "kind",
+        "operation",
+        "credential"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "correlationId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "details": {
+              "type": "object",
+              "properties": {
+                "fieldErrors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "code"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "currentRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "operationId": {
+                  "$ref": "#/$defs/Uuid"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "correlationId",
+            "details"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "ClaimResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/CredentialDelivery"
+        },
+        {
+          "$ref": "#/$defs/ProvisioningStatus"
+        }
+      ]
+    }
+  }
+}

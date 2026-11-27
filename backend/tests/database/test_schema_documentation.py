@@ -38,6 +38,20 @@ class SchemaDocumentationTests(unittest.TestCase):
         self.assertEqual(relations["public.provisioning_operations"]["columns"], expected)
 
     # Phủ schema thật và ledger, giữ description cho cả view projection.
+    def test_template_defaults_comments_match_forward_migration(self):
+        """Giữ comment native cho hai cột default typed của draft và snapshot đồng nhất với dictionary."""
+        migration = ROOT / "backend/migrations/platform/0024_template_stream_defaults.sql"
+        source = migration.read_text(encoding="utf-8")
+        expected = dict(re.findall(r"COMMENT ON COLUMN public\.(\w+)\.default_value IS '([^']*)';", source))
+        self.assertEqual(set(expected), {"template_draft_streams", "datastream_definitions"})
+        manifest = {"tables": [
+            {"name": name, "columns": [{"name": "default_value"}]}
+            for name in expected
+        ]}
+        relations = documentation.documented_relations(manifest)
+        for table, comment in expected.items():
+            self.assertEqual(relations[f"public.{table}"]["columns"]["default_value"], comment)
+
     def test_covers_every_canonical_table_and_attribute(self):
         """Output: đầy đủ91 bảng public, ledger và5 history view, không mô tả rỗng."""
         manifest = json.loads((ROOT / "backend/migrations/platform/manifest.json").read_text(encoding="utf-8"))

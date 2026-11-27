@@ -92,7 +92,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let principal =
             locked
                 .session
-                .authorize(&locked.account, proof, locked.observed_at, false)?;
+                .authorize_actor(&locked.account, proof, locked.observed_at, false)?;
         transaction
             .lock_device_scope(workspace_id, principal.user_id())
             .await?
@@ -116,7 +116,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let now = transaction.device_now().await?;
         locked
             .session
-            .authorize(&locked.account, proof, now, false)?;
+            .authorize_actor(&locked.account, proof, now, false)?;
         let device_id = Uuid::new_v4();
         let receipt = transaction
             .insert_registered_device(workspace_id, device_id, &draft, now)
@@ -126,7 +126,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let now = transaction.device_now().await?;
         let principal = locked
             .session
-            .authorize(&locked.account, proof, now, false)?;
+            .authorize_actor(&locked.account, proof, now, false)?;
         transaction
             .append_device_audit(AuditRecord {
                 workspace_id: Some(workspace_id),
@@ -166,7 +166,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let principal =
             locked
                 .session
-                .authorize(&locked.account, proof, locked.observed_at, false)?;
+                .authorize_actor(&locked.account, proof, locked.observed_at, false)?;
         let admission = transaction
             .lock_device_scope(workspace_id, principal.user_id())
             .await?
@@ -182,7 +182,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let now = transaction.device_now().await?;
         locked
             .session
-            .authorize(&locked.account, proof, now, false)?;
+            .authorize_actor(&locked.account, proof, now, false)?;
         transaction.commit_device().await?;
         Ok(schema)
     }

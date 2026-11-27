@@ -23,6 +23,7 @@ pub enum ApplicationError {
     DeviceOwnerInvalid,
     DeviceModelMismatch,
     DeviceModelUnsupported,
+    DeviceTemplateNotPublished,
     DeviceExists,
     ResourceNotFound,
     ImmutableSchema,

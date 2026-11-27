@@ -3,9 +3,9 @@
 use crate::{PgIdentityStore, PgUnitOfWork, commit_error, storage_error};
 use chrono::{DateTime, Utc};
 use iot_application::{
-    device_ports::{DeviceStore, DeviceTransaction},
+    device_ports::{DeviceStore, DeviceTransaction, LockedActorSession},
     error::ApplicationError,
-    ports::{IdentityTransaction, LockedSession, WorkspaceTransaction},
+    ports::{IdentityTransaction, WorkspaceTransaction},
 };
 use iot_domain::{
     device::{DeviceDraft, DevicePin, RegisteredDevice},
@@ -45,11 +45,11 @@ impl DeviceTransaction for PgUnitOfWork {
         &mut self,
         proof: &SessionProof,
         owner: Option<Uuid>,
-    ) -> Result<LockedSession, ApplicationError> {
+    ) -> Result<LockedActorSession, ApplicationError> {
         if let Some(owner_id) = owner {
             self.lock_session_subjects(proof, owner_id).await?;
         }
-        IdentityTransaction::lock_session(self, proof).await
+        self.lock_actor_session(proof).await
     }
     /**
      * Delegate scope/member/grant fence sau User, giữ transaction chung và domain admission policy.
@@ -102,7 +102,7 @@ impl DeviceTransaction for PgUnitOfWork {
      * Input
      * Param: `workspace_id` — scope đã authorize.
      * Param: `version_id` — version published trong tenant, không lookup global.
-     * Output: immutable snapshot; Errors: not-found foreign/missing/archive, storage khi content sai.
+     * Output: snapshot bất biến; draft cùng tenant trả lỗi khác version thiếu, ngoài scope hoặc đã archive.
      */
     async fn registration_schema(
         &mut self,
@@ -116,7 +116,17 @@ impl DeviceTransaction for PgUnitOfWork {
             Some("DRAFT" | "PUBLISHED") => {
                 self.read_template_version(workspace_id, version_id).await
             }
-            Some("ARCHIVED") | None => Err(ApplicationError::ResourceNotFound),
+            Some("ARCHIVED") => Err(ApplicationError::ResourceNotFound),
+            None => {
+                // Chỉ phân biệt draft selector trong tenant đã authorize; foreign UUID vẫn cùng 404.
+                let draft: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM templates WHERE workspace_id=$1 AND template_id=$2 AND lifecycle_status='DRAFT')")
+                    .bind(workspace_id).bind(version_id).fetch_one(&mut *self.transaction).await.map_err(storage_error)?;
+                Err(if draft {
+                    ApplicationError::DeviceTemplateNotPublished
+                } else {
+                    ApplicationError::ResourceNotFound
+                })
+            }
             _ => Err(ApplicationError::Unavailable),
         }
     }

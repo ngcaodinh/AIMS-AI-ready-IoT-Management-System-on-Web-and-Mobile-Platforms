@@ -80,6 +80,15 @@ fn request_key() -> iot_platform_backend::domain::idempotency::IdempotencyKey {
 }
 
 /**
+ * Tạo credential tổng hợp đủ policy để probe kiểm tra nhánh Auth thay vì dừng tại validation.
+ * # Output
+ * Trả password ngẫu nhiên chỉ giữ trong `SecretString`, không đưa vào log hoặc evidence.
+ */
+fn policy_valid_probe_password() -> SecretString {
+    SecretString::new(format!("Aa1{}", generate_token().expose()))
+}
+
+/**
  * Tạo ba principal tổng hợp để chạy workflow thật; role probe mới có INSERT này, runtime vẫn đóng.
  * Input
  * Param: pool — pool SCRAM tạm đã giới hạn schema và table.
@@ -430,7 +439,7 @@ async fn password_checks(
         )
         .await?;
     let proof = service.session_proof(temporary.token.expose(), None);
-    let next = generate_token();
+    let next = policy_valid_probe_password();
     if !matches!(
         service
             .change_password(
@@ -703,7 +712,7 @@ async fn invitation_rejoin_checks(
                 config.run_id
             )
             .await,
-        Err(ApplicationError::Conflict)
+        Err(ApplicationError::MemberExists)
     ) {
         return Err(ApplicationError::Conflict);
     }
@@ -970,11 +979,13 @@ async fn password_revocation_checks(
     sqlx::query("WITH instant AS(SELECT clock_timestamp() AS issued) INSERT INTO websocket_tickets(ticket_id,ticket_digest,workspace_id,user_id,session_id,grant_generation,workspace_authorization_version,membership_authorization_version,issued_at,expires_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,issued,issued+interval '30 seconds' FROM instant")
         .bind(ticket).bind([23_u8;32].as_slice()).bind(workspace).bind(app.user_id).bind(app.session_id).bind(admission.grant_generation)
         .bind(admission.workspace_authorization_version).bind(admission.membership_authorization_version).execute(pool).await.map_err(|_|ApplicationError::Unavailable)?;
+    // Candidate đủ policy để lần đổi này đi tới commit cần kiểm tra side effect thu hồi.
+    let next_password = policy_valid_probe_password();
     service
         .change_password(
             &proof,
             password.expose().to_owned(),
-            generate_token().expose().to_owned(),
+            next_password.expose().to_owned(),
             config.run_id,
         )
         .await?;

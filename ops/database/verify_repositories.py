@@ -19,7 +19,7 @@ import verify_platform as platform
 ROOT = Path(__file__).resolve().parents[2]
 ROLE = "iot_repository_probe"
 DATABASE = "iot_platform_lab"
-TABLES = ("users", "sessions", "login_attempt_buckets", "workspaces", "memberships", "membership_grants", "user_preferences", "push_installations", "websocket_tickets", "outbox_events", "outbox_consumptions", "global_idempotency_records", "workspace_invitations", "membership_admission_fences", "workspace_idempotency_records", "password_reset_admissions")
+TABLES = ("users", "sessions", "login_attempt_buckets", "password_change_attempt_buckets", "workspaces", "memberships", "membership_grants", "user_preferences", "push_installations", "websocket_tickets", "outbox_events", "outbox_consumptions", "global_idempotency_records", "workspace_invitations", "membership_admission_fences", "workspace_idempotency_records", "password_reset_admissions")
 MEMBER_TABLES = ("rules", "rule_versions", "rule_version_actions", "rule_executions", "action_executions", "action_jobs", "workspace_runtime_quotas", "commands", "api_keys", "push_deliveries", "webhook_subscriptions", "webhook_deliveries")
 MEMBER_KEY_TABLES = ("templates", "template_versions", "template_draft_streams", "template_draft_enum_values", "template_draft_capabilities", "datastream_definitions", "datastream_enum_values", "datastream_capabilities", "actuator_states", "devices", "device_runtime", "device_credentials", "api_key_devices", "api_key_scopes")
 
@@ -76,7 +76,8 @@ ALTER ROLE iot_repository_probe PASSWORD '""" + password + """';
 ALTER ROLE iot_repository_probe VALID UNTIL '"""+valid_until+"""';
 GRANT CONNECT ON DATABASE iot_platform_lab TO iot_repository_probe;
 GRANT USAGE ON SCHEMA public TO iot_repository_probe;
-GRANT SELECT,INSERT,UPDATE ON users,sessions,login_attempt_buckets,workspaces,memberships,membership_grants,user_preferences TO iot_repository_probe;
+/* Đường đổi mật khẩu cần đọc/ghi bucket 0021; role probe không được cấp DELETE. */
+GRANT SELECT,INSERT,UPDATE ON users,sessions,login_attempt_buckets,password_change_attempt_buckets,workspaces,memberships,membership_grants,user_preferences TO iot_repository_probe;
 GRANT SELECT,INSERT ON audit_events TO iot_repository_probe;
 GRANT SELECT,INSERT,UPDATE ON push_installations,websocket_tickets TO iot_repository_probe;
 GRANT SELECT,INSERT ON outbox_events,outbox_consumptions TO iot_repository_probe;

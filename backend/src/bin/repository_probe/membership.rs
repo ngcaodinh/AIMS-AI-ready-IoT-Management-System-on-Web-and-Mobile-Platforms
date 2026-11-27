@@ -591,7 +591,7 @@ async fn remove_reinvite_checks(
                 context.config.run_id
             )
             .await,
-        Err(ApplicationError::Conflict)
+        Err(ApplicationError::InvalidTransition)
     ) {
         return Err(ApplicationError::Conflict);
     }

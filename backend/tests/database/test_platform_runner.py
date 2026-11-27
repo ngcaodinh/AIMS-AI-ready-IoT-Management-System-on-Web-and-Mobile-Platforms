@@ -1,9 +1,12 @@
 """Kiểm boundary runner DB chung, không truy cập engine hoặc cấu hình bí mật."""
 
 import hashlib
+import json
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -44,6 +47,65 @@ class PlatformRunnerTests(unittest.TestCase):
             self.assertGreater(position, previous_position)
             self.assertIn("\\set migration_checksum " + checksum, bundle)
             previous_position = position
+
+    def test_schema_manifest_uses_tracked_grains_and_checks_ddl(self):
+        """Dựng manifest thiếu docs và vẫn từ chối bảng engine không khai báo trong DDL."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = root / "ops/database/schema-catalog-grains.json"
+            catalog.parent.mkdir(parents=True)
+            source = {"path": "docs/plan/database/schema-catalog.md", "sha256": "a" * 64}
+            grains = {"users": "một account", "password_change_attempt_buckets": "một bucket theo user"}
+            catalog_data = json.dumps({"source": source, "grains": grains}).encode("utf-8")
+            catalog.write_bytes(catalog_data)
+
+            migration = root / "fixture.sql"
+            migration.write_text(
+                "CREATE TABLE users (user_id uuid PRIMARY KEY);\n"
+                "CREATE TABLE public.password_change_attempt_buckets (user_id uuid PRIMARY KEY);\n"
+                "CREATE TABLE rule_draft_references (user_id uuid PRIMARY KEY);\n",
+                encoding="utf-8",
+            )
+            table_names = (*grains, "rule_draft_references")
+            tables = [
+                {
+                    "name": table_name,
+                    "columns": [{"name": "user_id", "nullable": "NO"}],
+                    "constraints": [{"definition": "PRIMARY KEY (user_id)"}],
+                }
+                for table_name in table_names
+            ]
+            internal = SimpleNamespace(stdout="[]")
+            matching = SimpleNamespace(stdout=json.dumps({"tables": tables}))
+            mismatching = SimpleNamespace(stdout=json.dumps({"tables": tables + [{"name": "unexpected_table"}]}))
+            with patch.object(platform, "ROOT", root), patch.object(platform, "sources", return_value=(migration,)):
+                with patch.object(platform, "sql", side_effect=(matching, internal)):
+                    manifest = platform.schema_manifest()
+                with patch.object(platform, "sql", side_effect=(mismatching, internal)):
+                    with self.assertRaisesRegex(RuntimeError, "DDL drift=.*unexpected_table"):
+                        platform.schema_manifest()
+
+            self.assertEqual(manifest["table_count"], 3)
+            self.assertEqual(manifest["catalog_table_count"], 3)
+            self.assertEqual(manifest["tables"][1]["grain"], grains["password_change_attempt_buckets"])
+            self.assertEqual(manifest["catalog_input"], {
+                "path": "ops/database/schema-catalog-grains.json",
+                "sha256": hashlib.sha256(catalog_data).hexdigest(),
+                "source": source,
+            })
+
+    def test_catalog_projection_requires_pinned_source_hash(self):
+        """Từ chối bản chiếu thiếu SHA nguồn hợp lệ thay vì sinh evidence không truy vết được."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = root / "ops/database/schema-catalog-grains.json"
+            catalog.parent.mkdir(parents=True)
+            catalog.write_text(json.dumps({
+                "source": {"path": "docs/plan/database/schema-catalog.md", "sha256": "unverified"},
+                "grains": {"users": "một account"},
+            }), encoding="utf-8")
+            with patch.object(platform, "ROOT", root), self.assertRaisesRegex(ValueError, "Invalid catalog source"):
+                platform.read_catalog_grains()
 
     # Fixture cleanup chỉ được sinh cho UUID đã biết, không nhận ID/path tùy ý.
     def test_concurrency_fixture_target_is_bounded(self):

@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict n3XRCjpJ7DbGk9sAnX5leXOl2Cg57XsefwZs1IAUxHNUgRV3hvmeoFrjN3lUlGt
+\restrict X4V7aSGo0IxvXY3uth3NhnG10B37auMQefvqEpHo4v9jXuyItjAKtfSEbfgCayN
 
 -- Dumped from database version 17.11 (Debian 17.11-1.pgdg12+2)
 -- Dumped by pg_dump version 17.11 (Debian 17.11-1.pgdg12+2)
@@ -10589,6 +10589,89 @@ COMMENT ON COLUMN public.outbox_events.created_at IS 'Thời điểm tạo bản
 
 
 --
+-- Name: password_change_attempt_buckets; Type: TABLE; Schema: public; Owner: -
+--
+
+/* public.password_change_attempt_buckets
+ * Bộ đếm sai currentPassword riêng theo User ID; PostgreSQL khóa nguyên tử để chia sẻ giới hạn đổi mật
+ * khẩu giữa session và instance.
+ */
+-- Bảng password_change_attempt_buckets: Bộ đếm sai currentPassword riêng theo User ID; PostgreSQL khóa nguyên tử
+-- để chia sẻ giới hạn đổi mật khẩu giữa session và instance.
+CREATE TABLE public.password_change_attempt_buckets (
+    -- User sở hữu limiter đổi mật khẩu; khóa ngoại giữ bucket gắn đúng account và không dùng email, session hoặc IP
+    -- làm định danh.
+    -- UUID: định danh 128 bit; kiểu dữ liệu không tự sinh ID và không tự bảo đảm khó đoán, cần cách sinh UUID phù hợp.
+    -- NOT NULL: bắt buộc có giá trị.
+    -- Không có DEFAULT: đường ghi phải cung cấp giá trị, trừ khi trigger được chỉ định gán trước INSERT.
+    -- Ràng buộc hiện hành password_change_attempt_buckets_pkey: khóa chính duy nhất và không NULL; nếu gồm nhiều cột
+    -- thì uniqueness áp dụng cho cả tổ hợp.
+    -- PRIMARY KEY (user_id)
+    -- Ràng buộc hiện hành password_change_attempt_buckets_user_id_fkey: khóa ngoại giữ đúng bản ghi cha; tổ hợp có
+    -- workspace_id giữ quan hệ trong đúng tenant, không thay kiểm quyền hiện hành.
+    -- FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    user_id uuid NOT NULL,
+
+    -- Số lần currentPassword sai trong fixed window hiện hành, miền 0..5; count 0 đi cùng window_started_at NULL.
+    -- integer: số nguyên có dấu 32 bit; CHECK giới hạn miền nghiệp vụ thay vì chỉ dựa phạm vi kiểu.
+    -- NOT NULL: bắt buộc có giá trị.
+    -- DEFAULT 0: giá trị dùng khi INSERT bỏ qua cột; không thay NULL được truyền tường minh và không tự áp lại khi
+    -- UPDATE.
+    -- Ràng buộc hiện hành password_change_attempt_buckets_coherence: CHECK chỉ chặn khi biểu thức là FALSE;
+    -- NULL/UNKNOWN vẫn qua, nên phải phối hợp NOT NULL và CHECK shape khi cần.
+    -- CHECK ((((failure_count = 0) AND (window_started_at IS NULL)) OR ((failure_count > 0) AND (window_started_at IS
+    -- NOT NULL))))
+    -- Ràng buộc hiện hành password_change_attempt_buckets_failure_count_check: CHECK chỉ chặn khi biểu thức là FALSE;
+    -- NULL/UNKNOWN vẫn qua, nên phải phối hợp NOT NULL và CHECK shape khi cần.
+    -- CHECK (((failure_count >= 0) AND (failure_count <= 5)))
+    failure_count integer DEFAULT 0 NOT NULL,
+
+    -- Thời điểm failure đầu tiên mở fixed window 15 phút; không trượt khi retry hoặc nhận 429, NULL khi bucket rỗng.
+    -- timestamptz: lưu thời điểm tuyệt đối theo UTC, hiển thị theo TimeZone của phiên; không lưu tên múi giờ gốc.
+    -- Cho phép NULL: chưa có/không áp dụng giá trị theo nghiệp vụ; không đồng nghĩa chuỗi rỗng hoặc số 0.
+    -- Ràng buộc hiện hành password_change_attempt_buckets_coherence: CHECK chỉ chặn khi biểu thức là FALSE;
+    -- NULL/UNKNOWN vẫn qua, nên phải phối hợp NOT NULL và CHECK shape khi cần.
+    -- CHECK ((((failure_count = 0) AND (window_started_at IS NULL)) OR ((failure_count > 0) AND (window_started_at IS
+    -- NOT NULL))))
+    window_started_at timestamp with time zone,
+
+    -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
+    CONSTRAINT password_change_attempt_buckets_coherence CHECK ((((failure_count = 0) AND (window_started_at IS NULL)) OR ((failure_count > 0) AND (window_started_at IS NOT NULL)))),
+
+    -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
+    CONSTRAINT password_change_attempt_buckets_failure_count_check CHECK (((failure_count >= 0) AND (failure_count <= 5)))
+);
+
+
+--
+-- Name: TABLE password_change_attempt_buckets; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.password_change_attempt_buckets IS 'Bộ đếm sai currentPassword riêng theo User ID; PostgreSQL khóa nguyên tử để chia sẻ giới hạn đổi mật khẩu giữa session và instance.';
+
+
+--
+-- Name: COLUMN password_change_attempt_buckets.user_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.password_change_attempt_buckets.user_id IS 'User sở hữu limiter đổi mật khẩu; khóa ngoại giữ bucket gắn đúng account và không dùng email, session hoặc IP làm định danh.';
+
+
+--
+-- Name: COLUMN password_change_attempt_buckets.failure_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.password_change_attempt_buckets.failure_count IS 'Số lần currentPassword sai trong fixed window hiện hành, miền 0..5; count 0 đi cùng window_started_at NULL.';
+
+
+--
+-- Name: COLUMN password_change_attempt_buckets.window_started_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.password_change_attempt_buckets.window_started_at IS 'Thời điểm failure đầu tiên mở fixed window 15 phút; không trượt khi retry hoặc nhận 429, NULL khi bucket rỗng.';
+
+
+--
 -- Name: password_reset_admissions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -10866,8 +10949,34 @@ CREATE TABLE public.provisioning_operations (
     -- 'UNAVAILABLE'::text])))
     delivery_status text DEFAULT 'PENDING'::text NOT NULL,
 
+    -- Số lần adapter retry đã ghi bền vững; không gồm attempt đầu và không chứa raw diagnostics.
+    -- integer: số nguyên có dấu 32 bit; CHECK giới hạn miền nghiệp vụ thay vì chỉ dựa phạm vi kiểu.
+    -- NOT NULL: bắt buộc có giá trị.
+    -- DEFAULT 0: giá trị dùng khi INSERT bỏ qua cột; không thay NULL được truyền tường minh và không tự áp lại khi
+    -- UPDATE.
+    -- Ràng buộc hiện hành ck_provisioning_retry_count: CHECK chỉ chặn khi biểu thức là FALSE; NULL/UNKNOWN vẫn qua,
+    -- nên phải phối hợp NOT NULL và CHECK shape khi cần.
+    -- CHECK ((retry_count >= 0))
+    retry_count integer DEFAULT 0 NOT NULL,
+
+    -- Mã lỗi public đã lọc cho status poll; không dùng lỗi broker hoặc giá trị credential làm nội dung.
+    -- text: chuỗi Unicode có độ dài biến đổi; kiểu này không tự trim, đổi chữ thường hoặc xác minh định dạng nghiệp
+    -- vụ.
+    -- Cho phép NULL: chưa có/không áp dụng giá trị theo nghiệp vụ; không đồng nghĩa chuỗi rỗng hoặc số 0.
+    -- Ràng buộc hiện hành ck_provisioning_public_error: CHECK chỉ chặn khi biểu thức là FALSE; NULL/UNKNOWN vẫn qua,
+    -- nên phải phối hợp NOT NULL và CHECK shape khi cần.
+    -- CHECK ((error_code = ANY (ARRAY['CREDENTIAL_ESCROW_EXPIRED'::text, 'BROKER_UNAVAILABLE'::text,
+    -- 'BROKER_ACK_REJECTED'::text])))
+    error_code text,
+
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT ck_provisioning_escrow_expiry CHECK ((expires_at = (intent_at + '00:10:00'::interval))),
+
+    -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
+    CONSTRAINT ck_provisioning_public_error CHECK ((error_code = ANY (ARRAY['CREDENTIAL_ESCROW_EXPIRED'::text, 'BROKER_UNAVAILABLE'::text, 'BROKER_ACK_REJECTED'::text]))),
+
+    -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
+    CONSTRAINT ck_provisioning_retry_count CHECK ((retry_count >= 0)),
 
     -- Ràng buộc cấp bảng: kiểm quan hệ giữa các thuộc tính; mô tả ở từng cột dùng metadata hiện hành.
     CONSTRAINT ck_provisioning_state CHECK ((state = ANY (ARRAY['PENDING'::text, 'READY'::text, 'FAILED'::text]))),
@@ -10989,6 +11098,20 @@ COMMENT ON COLUMN public.provisioning_operations.encryption_key_reference IS 'Th
 --
 
 COMMENT ON COLUMN public.provisioning_operations.delivery_status IS 'Tiến độ phát credential PENDING/AVAILABLE/CLAIMED/EXPIRED/UNAVAILABLE, tách khỏi state PENDING/READY/FAILED của operation.';
+
+
+--
+-- Name: COLUMN provisioning_operations.retry_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.provisioning_operations.retry_count IS 'Số lần adapter retry đã ghi bền vững; không gồm attempt đầu và không chứa raw diagnostics.';
+
+
+--
+-- Name: COLUMN provisioning_operations.error_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.provisioning_operations.error_code IS 'Mã lỗi public đã lọc cho status poll; không dùng lỗi broker hoặc giá trị credential làm nội dung.';
 
 
 --
@@ -19933,6 +20056,14 @@ ALTER TABLE ONLY public.outbox_events
 
 
 --
+-- Name: password_change_attempt_buckets password_change_attempt_buckets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.password_change_attempt_buckets
+    ADD CONSTRAINT password_change_attempt_buckets_pkey PRIMARY KEY (user_id);
+
+
+--
 -- Name: password_reset_admissions password_reset_admissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -22522,6 +22653,13 @@ CREATE TRIGGER tr_ota_ticket_expiry BEFORE INSERT ON public.ota_download_tickets
 
 
 --
+-- Name: password_change_attempt_buckets tr_password_change_attempt_bucket_identity; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER tr_password_change_attempt_bucket_identity BEFORE UPDATE ON public.password_change_attempt_buckets FOR EACH ROW EXECUTE FUNCTION public.enforce_identity_columns('user_id');
+
+
+--
 -- Name: telemetry_points tr_point_validate; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -24087,6 +24225,14 @@ ALTER TABLE ONLY public.outbox_consumptions
 
 ALTER TABLE ONLY public.outbox_events
     ADD CONSTRAINT outbox_events_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspaces(workspace_id);
+
+
+--
+-- Name: password_change_attempt_buckets password_change_attempt_buckets_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.password_change_attempt_buckets
+    ADD CONSTRAINT password_change_attempt_buckets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE;
 
 
 --
@@ -28164,6 +28310,27 @@ GRANT SELECT(created_at) ON TABLE public.outbox_events TO iot_dbeaver_reader;
 
 
 --
+-- Name: COLUMN password_change_attempt_buckets.user_id; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(user_id) ON TABLE public.password_change_attempt_buckets TO iot_dbeaver_reader;
+
+
+--
+-- Name: COLUMN password_change_attempt_buckets.failure_count; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(failure_count) ON TABLE public.password_change_attempt_buckets TO iot_dbeaver_reader;
+
+
+--
+-- Name: COLUMN password_change_attempt_buckets.window_started_at; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(window_started_at) ON TABLE public.password_change_attempt_buckets TO iot_dbeaver_reader;
+
+
+--
 -- Name: COLUMN password_reset_admissions.admission_id; Type: ACL; Schema: public; Owner: -
 --
 
@@ -28287,6 +28454,20 @@ GRANT SELECT(encryption_key_reference) ON TABLE public.provisioning_operations T
 --
 
 GRANT SELECT(delivery_status) ON TABLE public.provisioning_operations TO iot_dbeaver_reader;
+
+
+--
+-- Name: COLUMN provisioning_operations.retry_count; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(retry_count) ON TABLE public.provisioning_operations TO iot_dbeaver_reader;
+
+
+--
+-- Name: COLUMN provisioning_operations.error_code; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT(error_code) ON TABLE public.provisioning_operations TO iot_dbeaver_reader;
 
 
 --
@@ -31079,7 +31260,7 @@ GRANT SELECT(archived_at) ON TABLE public.workspaces TO iot_dbeaver_reader;
 -- PostgreSQL database dump complete
 --
 
-\unrestrict n3XRCjpJ7DbGk9sAnX5leXOl2Cg57XsefwZs1IAUxHNUgRV3hvmeoFrjN3lUlGt
+\unrestrict X4V7aSGo0IxvXY3uth3NhnG10B37auMQefvqEpHo4v9jXuyItjAKtfSEbfgCayN
 
 
 /* Khôi phục ACL mặc định public mà pg_dump có thể lược bỏ. */

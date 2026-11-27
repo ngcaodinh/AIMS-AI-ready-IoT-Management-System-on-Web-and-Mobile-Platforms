@@ -31,6 +31,7 @@ SOURCE_NAMES = (
     "0019_device_registration.sql",
     "0020_auth_ios_client.sql",
     "0021_password_change_attempt_buckets.sql",
+    "0023_provisioning_poll_metadata.sql",
 )
 # Các view/check dùng cùng search_path để regclass/regprocedure không drift do pg_dump reset.
 FINGERPRINT = "SET search_path=public,pg_catalog;\n" + (
@@ -148,6 +149,42 @@ def verify_sql():
     return results
 
 
+def read_catalog_grains():
+    """Đọc bản chiếu grain từ checkout và trả provenance cho manifest/evidence.
+
+    Output: cặp mapping table→grain và thông tin đường dẫn, SHA-256 của bản chiếu
+    theo LF cùng SHA-256 của catalog thiết kế nguồn.
+    Errors: lỗi đọc/parse hoặc ValueError nếu metadata thiếu provenance hay grain.
+    """
+    relative_path = "ops/database/schema-catalog-grains.json"
+    content = (ROOT / relative_path).read_bytes()
+    metadata = json.loads(content)
+    if not isinstance(metadata, dict) or set(metadata) != {"source", "grains"}:
+        raise ValueError("Invalid catalog projection metadata")
+    source = metadata["source"]
+    if (
+        not isinstance(source, dict)
+        or set(source) != {"path", "sha256"}
+        or source["path"] != "docs/plan/database/schema-catalog.md"
+        or not isinstance(source["sha256"], str)
+        or not re.fullmatch(r"[0-9a-f]{64}", source["sha256"])
+    ):
+        raise ValueError("Invalid catalog source provenance")
+    grains = metadata["grains"]
+    if not isinstance(grains, dict) or not grains or any(
+        not re.fullmatch(r"[a-z_]+", table) or not isinstance(grain, str) or not grain.strip()
+        for table, grain in grains.items()
+    ):
+        raise ValueError("Invalid catalog table or grain")
+
+    # Chuẩn hóa EOL của bản chiếu để hash không phụ thuộc cấu hình checkout Git.
+    return grains, {
+        "path": relative_path,
+        "sha256": hashlib.sha256(content.replace(b"\r\n", b"\n")).hexdigest(),
+        "source": source,
+    }
+
+
 # Chỉ metadata schema, không SELECT row ứng dụng, snapshot không chứa khóa hoặc dữ liệu.
 def schema_manifest():
     """Output: data dictionary cột/constraint/index và coverage catalog. Errors: RuntimeError khi thiếu bảng."""
@@ -178,14 +215,13 @@ def schema_manifest():
     actual = {table["name"] for table in manifest["tables"]}
     declared = set()
     for path in sources():
-        declared.update(re.findall(r"CREATE TABLE ([a-z_]+)\s*\(", path.read_text(encoding="utf-8")))
-    catalog = (ROOT / "docs/plan/database/schema-catalog.md").read_text(encoding="utf-8")
-    expected = set(re.findall(r"^\| ([a-z_]+) —", catalog, flags=re.MULTILINE)) | {"rule_draft_references"}
+        declared.update(re.findall(r"CREATE TABLE (?:public\.)?([a-z_]+)\s*\(", path.read_text(encoding="utf-8")))
+    grains, catalog_input = read_catalog_grains()
+    expected = set(grains) | {"rule_draft_references"}
     if actual != declared or expected - actual:
         raise RuntimeError(f"Schema coverage mismatch: catalog missing={sorted(expected-actual)}, DDL drift={sorted(actual^declared)}")
     manifest.update(database=DATABASE, table_count=len(actual), catalog_table_count=len(expected),
-                    catalog_missing=[], extra_relations=sorted(actual-expected))
-    grains = dict(re.findall(r"^\| ([a-z_]+) — ([^|]+)\|", catalog, flags=re.MULTILINE))
+                    catalog_missing=[], extra_relations=sorted(actual-expected), catalog_input=catalog_input)
     for table in manifest["tables"]:
         table["grain"] = grains.get(table["name"], {
             "rule_draft_references": "một resource reference trong AST/trigger/action draft",
@@ -402,6 +438,7 @@ def main():
     report = {"timestamp_utc": datetime.now(timezone.utc).isoformat(), "database": DATABASE,
               "server_version": sql("SHOW server_version;").stdout.strip(), "migrations": migrations,
               "table_count": manifest["table_count"], "catalog_table_count": manifest["catalog_table_count"],
+              "catalog_input": manifest["catalog_input"],
               "function_count": manifest["function_count"], "trigger_count": manifest["trigger_count"],
               "documentation_coverage": documentation_coverage,
               "fingerprint": fingerprint.splitlines(), "sql_checks": checks, "sql_pass_count": len(checks),

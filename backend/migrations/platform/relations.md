@@ -381,6 +381,14 @@ Thuộc tính: outbox_event_id, workspace_id, event_key, event_type, payload_sch
 FD/ngoại lệ: các candidate key→thuộc tính còn lại; business FD bổ sung phải review trước đổi schema.
 Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE và CHECK shape khi cần, chi tiết từng constraint ở manifest. Không cascade lifecycle thành xóa lịch sử.
 
+## password_change_attempt_buckets
+
+Grain: một bucket giới hạn đổi mật khẩu theo user.
+Khóa tối thiểu theo constraints: (user_id).
+Thuộc tính: user_id, failure_count, window_started_at.
+FD/ngoại lệ: các candidate key→thuộc tính còn lại; business FD bổ sung phải review trước đổi schema.
+Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE và CHECK shape khi cần, chi tiết từng constraint ở manifest. Không cascade lifecycle thành xóa lịch sử.
+
 ## password_reset_admissions
 
 Grain: một reset thành công.
@@ -393,7 +401,7 @@ Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE v�
 
 Grain: một credential intent.
 Khóa tối thiểu theo constraints: (workspace_id, provisioning_operation_id); (workspace_id, device_id, credential_generation).
-Thuộc tính: workspace_id, provisioning_operation_id, device_id, credential_generation, delivery_channel, state, actor_user_id, intent_at, expires_at, broker_receipt_at, claimed_at, secret_ciphertext, encryption_key_reference, delivery_status.
+Thuộc tính: workspace_id, provisioning_operation_id, device_id, credential_generation, delivery_channel, state, actor_user_id, intent_at, expires_at, broker_receipt_at, claimed_at, secret_ciphertext, encryption_key_reference, delivery_status, retry_count, error_code.
 FD/ngoại lệ: device_id→workspace_id theo global device registry; workspace lặp có chủ đích để composite FK bảo vệ tenant; expires_at là deadline lưu bền vững theo policy của aggregate; TTL cố định được CHECK, expiry theo clock vẫn phải kiểm tại admission.
 Delete/NULL: mặc định NO ACTION/RESTRICT; optional FK dùng MATCH SIMPLE và CHECK shape khi cần, chi tiết từng constraint ở manifest. Không cascade lifecycle thành xóa lịch sử.
 

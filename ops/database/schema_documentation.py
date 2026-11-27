@@ -12,6 +12,7 @@ TABLE_DESCRIPTIONS = {
     "user_preferences": "Tùy chọn hiển thị của từng tài khoản, hiện gồm múi giờ. Tách khỏi hồ sơ xác thực để đổi giao diện không làm thay đổi thông tin đăng nhập.",
     "sessions": "Mỗi hàng là một phiên đăng nhập Web hoặc Android, có chế độ full/limited và hạn 24 giờ. Lưu digest để xác minh, thu hồi phiên; không lưu raw session token.",
     "login_attempt_buckets": "Bộ đếm đăng nhập sai theo digest email chuẩn hóa. Ghi mốc cửa sổ thất bại để backend thực thi giới hạn đăng nhập đồng nhất giữa các tiến trình.",
+    "password_change_attempt_buckets": "Bộ đếm sai currentPassword riêng theo User ID; PostgreSQL khóa nguyên tử để chia sẻ giới hạn đổi mật khẩu giữa session và instance.",
     "workspaces": "Đơn vị cô lập dữ liệu và quyền của dự án. Quản lý tên, múi giờ mặc định, trạng thái hoạt động và phiên bản quyền; mọi tài nguyên nghiệp vụ đều thuộc một workspace.",
     "memberships": "Quan hệ hiện hành giữa tài khoản và workspace: vai trò ADMIN/USER, trạng thái và grant đang sử dụng. Đây là nguồn xác định tư cách thành viên, không sao chép vai trò vào từng thiết bị.",
     "membership_grants": "Lịch sử từng lần cấp quyền thành viên. Giữ identity theo generation để lời mời, API key hoặc tác vụ dùng grant cũ không tự có quyền lại khi tài khoản tham gia lại.",
@@ -455,6 +456,11 @@ COLUMN_DESCRIPTIONS = {
 
 # Override cho các tên xuất hiện nhiều nhưng khác nghĩa hoặc có TTL/NULL riêng quan trọng.
 COLUMN_OVERRIDES = {
+    "password_change_attempt_buckets": {
+        "user_id": "User sở hữu limiter đổi mật khẩu; khóa ngoại giữ bucket gắn đúng account và không dùng email, session hoặc IP làm định danh.",
+        "failure_count": "Số lần currentPassword sai trong fixed window hiện hành, miền 0..5; count 0 đi cùng window_started_at NULL.",
+        "window_started_at": "Thời điểm failure đầu tiên mở fixed window 15 phút; không trượt khi retry hoặc nhận 429, NULL khi bucket rỗng.",
+    },
     "devices": {"hardware_revision": "Revision phần cứng từ authenticated hello/status; NULL khi registry chưa có observation, không lấy từ input đăng ký. Dùng kiểm tương thích firmware, không thuộc identity cloud bất biến."},
     'audit_retention_batches': {'batch_id': 'Identity UUID không nil của intent batch, primary key không NULL/không trùng; retry cùng ID phải giữ run và batch limit gốc.', 'run_id': 'Run/cutoff mà batch tham chiếu bằng khóa ngoại; không cascade xóa result và không sao chép cutoff vào từng batch gây lặp phụ thuộc hàm.', 'batch_limit': 'Số audit tối đa một transaction được xóa, bắt buộc trong1…1000 để giới hạn lock/runtime; là một phần body identity của batch replay.', 'removed_count': 'Số audit thực đã xóa cùng commit với result, trong0…batch_limit;0 không chứng nhận run drain nếu audit đang bị transaction khác khóa.', 'completed_at': 'Thời điểm server ghi batch result đã hoàn tất; row chỉ xuất hiện sau commit DELETE cùng metadata, không dùng làm cutoff retention của audit.'},
     'audit_retention_runs': {'run_id': 'Identity UUID không nil của một run retention do coordinator cấp; primary key không NULL và không trùng, dùng giữ cutoff cố định qua restart.', 'cutoff': 'Cutoff ingestion UTC đã đóng cho run; mặc định serverNow trừ720 giờ, chỉ audit có created_at nhỏ hơn cutoff mới đủ điều kiện purge; đúng cutoff vẫn giữ.'},
@@ -471,7 +477,12 @@ COLUMN_OVERRIDES = {
     "global_idempotency_records": {"user_id": "Tài khoản principal của request global; không đưa workspace đang chọn vào namespace replay.", "expires_at": "Hết cửa sổ replay sau admitted_at + 24 giờ; không replay one-time secret, chỉ sanitized_result.", "state": "Receipt đang IN_PROGRESS hoặc COMPLETED; lỗi mất ACK không cho tự kết luận transaction chưa commit."},
     "workspace_idempotency_records": {"user_id": "Principal user trong workspace; NULL nếu request do API key, CHECK yêu cầu đúng một nhánh principal.", "api_key_id": "Principal API key của request; NULL nếu dùng user session, FK buộc key thuộc đúng workspace.", "expires_at": "Cửa sổ replay admitted_at + 24 giờ; vẫn phải recheck current authorization trước trả receipt.", "state": "Receipt đang IN_PROGRESS hoặc COMPLETED; request_digest phân biệt retry cùng body với conflict cùng key khác body."},
     "rate_limit_admissions": {"workspace_id": "Workspace của policy scoped; NULL khi policy được phép ở namespace global, API key luôn phải có scope workspace.", "user_id": "Principal user tiêu hao rate admission; chỉ có đúng một nhánh user_id hoặc api_key_id.", "api_key_id": "Principal API key tiêu hao rate admission, luôn gắn với workspace resolve từ key."},
-    "provisioning_operations": {"state": "Kết quả cấu hình broker PENDING/READY/FAILED, tách khỏi delivery_status của secret để không báo board đã nhận credential chỉ vì broker READY.", "expires_at": "Hạn escrow intent_at + 10 phút; broker ACK/retry/poll không kéo dài deadline, cleanup intent có thể sống lâu hơn escrow."},
+    "provisioning_operations": {
+        "state": "Kết quả cấu hình broker PENDING/READY/FAILED, tách khỏi delivery_status của secret để không báo board đã nhận credential chỉ vì broker READY.",
+        "expires_at": "Hạn escrow intent_at + 10 phút; broker ACK/retry/poll không kéo dài deadline, cleanup intent có thể sống lâu hơn escrow.",
+        "retry_count": "Số lần adapter retry đã ghi bền vững; không gồm attempt đầu và không chứa raw diagnostics.",
+        "error_code": "Mã lỗi public đã lọc cho status poll; không dùng lỗi broker hoặc giá trị credential làm nội dung.",
+    },
     "device_runtime": {"ingestion_sequence": "Bộ đếm server đã tiếp nhận cho device, ban đầu 0; tăng theo ingest commit, không lấy wire seq thay thế."},
     "device_boot_sessions": {"started_at": "Thời điểm backend xác minh boot/kết nối theo credential generation; không chỉ tin boot_id trong payload."},
     "telemetry_envelopes": {"observed_at": "Timestamp do thiết bị khai chung cho envelope; NULL khi thiết bị chưa có clock, không nhận timestamp khác nhau cho từng point.", "received_at": "Server first-received time phải khớp receipt, không thay thành thời gian nhận lại khi retry."},

@@ -4193,3 +4193,54 @@ DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
 \endif
 \endif
 COMMIT;
+
+\set migration_version platform-0023-provisioning-poll-metadata
+\set migration_checksum fd9ef0e457fa39119af7fe49ac5d85707d7425887f27fc28d7386b4a58ff78b6
+
+/* Template psql của runner; hai marker chỉ được thay bằng file SQL nguồn trong repo.
+ * migration_version/checksum là literal qua :'name', không chèn input vào SQL.
+ * DDL và ledger commit cùng nhau; advisory lock dùng chung cho mọi version/runner.
+ */
+BEGIN;
+SET LOCAL lock_timeout='5s';
+SET LOCAL statement_timeout='30s';
+SELECT pg_advisory_xact_lock(17001,1);
+/* Lịch sử runner lab: lưu checksum và thời điểm áp thật, không chứa credential.
+ * Phải chạy trong transaction đã lấy advisory lock; không thay SQLx production history.
+ */
+CREATE SCHEMA IF NOT EXISTS migration_control;
+CREATE TABLE IF NOT EXISTS migration_control.applied_migrations (
+    version text PRIMARY KEY,
+    checksum text NOT NULL CHECK(checksum ~ '^[0-9a-f]{64}$'),
+    applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+SELECT NOT EXISTS(
+    SELECT 1 FROM migration_control.applied_migrations WHERE version=:'migration_version'
+) AS should_apply \gset
+\if :should_apply
+/* Lưu bộ đếm retry và mã lỗi public tách khỏi ciphertext/receipt broker của operation.
+ * ALTER TABLE có khóa metadata; default 0 cho baseline chưa có worker retry, không đổi trạng thái operation.
+ */
+ALTER TABLE public.provisioning_operations ADD COLUMN retry_count integer NOT NULL DEFAULT 0
+ CONSTRAINT ck_provisioning_retry_count CHECK(retry_count>=0);
+ALTER TABLE public.provisioning_operations ADD COLUMN error_code text
+ CONSTRAINT ck_provisioning_public_error CHECK(error_code IN ('CREDENTIAL_ESCROW_EXPIRED','BROKER_UNAVAILABLE','BROKER_ACK_REJECTED'));
+
+COMMENT ON COLUMN public.provisioning_operations.retry_count IS 'Số lần adapter retry đã ghi bền vững; không gồm attempt đầu và không chứa raw diagnostics.';
+COMMENT ON COLUMN public.provisioning_operations.error_code IS 'Mã lỗi public đã lọc cho status poll; không dùng lỗi broker hoặc giá trị credential làm nội dung.';
+
+INSERT INTO migration_control.applied_migrations(version,checksum)
+    VALUES(:'migration_version',:'migration_checksum');
+\echo APPLIED
+\else
+SELECT checksum=:'migration_checksum' AS checksum_matches
+    FROM migration_control.applied_migrations WHERE version=:'migration_version' \gset
+\if :checksum_matches
+\echo ALREADY_APPLIED
+\else
+/* Drift phải rollback, không UPDATE checksum để hợp thức hóa lịch sử bị thay đổi. */
+DO $$ BEGIN RAISE EXCEPTION 'migration checksum drift'; END $$;
+\endif
+\endif
+COMMIT;

@@ -106,9 +106,22 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         {
             return Err(ApplicationError::DeviceOwnerInvalid);
         }
-        let schema = transaction
+        let schema = match transaction
             .registration_schema(workspace_id, draft.template_version_id)
-            .await?;
+            .await
+        {
+            Ok(schema) => schema,
+            Err(failure) => {
+                // Lỗi schema (draft nội tenant, not-found) cũng có thể đến sau lúc chờ khóa root;
+                // session hết hạn trong lúc chờ phải thắng. Lỗi đọc clock không che lỗi gốc.
+                if let Ok(now) = transaction.device_now().await {
+                    locked
+                        .session
+                        .authorize_actor(&locked.account, proof, now, false)?;
+                }
+                return Err(failure);
+            }
+        };
         self.verify_digest(&schema)?;
         self.models
             .validate(&draft.model, &schema.content.draft().model)?;

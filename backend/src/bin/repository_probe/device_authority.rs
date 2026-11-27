@@ -113,6 +113,7 @@ impl DeviceProbe<'_> {
         expected: ApplicationError,
     ) -> Result<Output, ApplicationError> {
         let serial = draft.serial_number.clone();
+        // Attempt bị từ chối không ghi audit; correlation riêng để kiểm chứng không có bản ghi, không cần cleanup.
         let correlation_id = Uuid::new_v4();
         let register = self
             .second
@@ -158,7 +159,7 @@ impl DeviceProbe<'_> {
             admin,
             revision,
             &demote,
-            Uuid::new_v4(),
+            self.config.run_id,
         );
         let changed = self
             .denial_after(
@@ -183,7 +184,7 @@ impl DeviceProbe<'_> {
                 admin,
                 changed.revision,
                 &restore,
-                Uuid::new_v4(),
+                self.config.run_id,
             )
             .await?;
         Ok(())
@@ -206,7 +207,7 @@ impl DeviceProbe<'_> {
             owner,
             revision,
             &suspend,
-            Uuid::new_v4(),
+            self.config.run_id,
         );
         let changed = self
             .denial_after(
@@ -232,7 +233,7 @@ impl DeviceProbe<'_> {
                 owner,
                 changed.revision,
                 &resume,
-                Uuid::new_v4(),
+                self.config.run_id,
             )
             .await?
             .revision)
@@ -266,7 +267,7 @@ impl DeviceProbe<'_> {
         );
         let register = self
             .second
-            .register(self.admin, self.workspace, draft, Uuid::new_v4());
+            .register(self.admin, self.workspace, draft, self.config.run_id);
         let remove = MembershipPatch {
             status: Some(MembershipStatus::Removed),
             ..MembershipPatch::default()
@@ -277,7 +278,7 @@ impl DeviceProbe<'_> {
             owner,
             revision,
             &remove,
-            Uuid::new_v4(),
+            self.config.run_id,
         );
         let (registered, removed) = self.commit_in_order(gate, register, producer).await?;
         let registered = registered?;
@@ -324,7 +325,7 @@ impl DeviceProbe<'_> {
             .map_err(|_| ApplicationError::Unavailable)?;
         self.denial_after(
             gate,
-            self.identity.logout(&proof, Uuid::new_v4()),
+            self.identity.logout(&proof, self.config.run_id),
             &proof,
             input(admin, version, format!("D2-LOGOUT-{}", self.config.run_id)),
             ApplicationError::SessionRevoked,
@@ -355,7 +356,7 @@ impl DeviceProbe<'_> {
                 self.admin,
                 self.workspace,
                 template(format!("D2-DRAFT-{}", self.config.run_id), true),
-                Uuid::new_v4(),
+                self.config.run_id,
             )
             .await?;
         let rejected = self
@@ -368,7 +369,7 @@ impl DeviceProbe<'_> {
                     draft.template_id,
                     format!("D2-DRAFT-{}", self.config.run_id),
                 ),
-                Uuid::new_v4(),
+                self.config.run_id,
             )
             .await;
         if !matches!(rejected, Err(ApplicationError::DeviceTemplateNotPublished)) {
@@ -380,10 +381,11 @@ impl DeviceProbe<'_> {
                 self.foreign,
                 self.foreign_workspace,
                 template(format!("D2-FOREIGN-ROOT-{}", self.config.run_id), true),
-                Uuid::new_v4(),
+                self.config.run_id,
             )
             .await?;
         let serial = format!("D2-FOREIGN-DRAFT-{}", self.config.run_id);
+        // Attempt bị từ chối không ghi audit; correlation riêng để kiểm chứng không có bản ghi, không cần cleanup.
         let correlation_id = Uuid::new_v4();
         let rejected = self
             .first
@@ -429,7 +431,7 @@ impl DeviceProbe<'_> {
                 owner,
                 self.member_revision(owner).await?,
                 &promote,
-                Uuid::new_v4(),
+                self.config.run_id,
             )
             .await?;
         self.demote_registering_admin(admin, owner, version.template_version_id)

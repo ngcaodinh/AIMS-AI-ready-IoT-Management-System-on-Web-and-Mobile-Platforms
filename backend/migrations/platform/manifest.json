@@ -6040,6 +6040,67 @@
       ]
     },
     {
+      "name": "password_change_attempt_buckets",
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "default": null,
+          "nullable": "NO",
+          "description": "User sở hữu limiter đổi mật khẩu; khóa ngoại giữ bucket gắn đúng account và không dùng email, session hoặc IP làm định danh."
+        },
+        {
+          "name": "failure_count",
+          "type": "integer",
+          "default": "0",
+          "nullable": "NO",
+          "description": "Số lần currentPassword sai trong fixed window hiện hành, miền 0..5; count 0 đi cùng window_started_at NULL."
+        },
+        {
+          "name": "window_started_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "nullable": "YES",
+          "description": "Thời điểm failure đầu tiên mở fixed window 15 phút; không trượt khi retry hoặc nhận 429, NULL khi bucket rỗng."
+        }
+      ],
+      "indexes": [
+        {
+          "name": "password_change_attempt_buckets_pkey",
+          "definition": "CREATE UNIQUE INDEX password_change_attempt_buckets_pkey ON public.password_change_attempt_buckets USING btree (user_id)"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "password_change_attempt_buckets_coherence",
+          "type": "c",
+          "definition": "CHECK ((((failure_count = 0) AND (window_started_at IS NULL)) OR ((failure_count > 0) AND (window_started_at IS NOT NULL))))"
+        },
+        {
+          "name": "password_change_attempt_buckets_failure_count_check",
+          "type": "c",
+          "definition": "CHECK (((failure_count >= 0) AND (failure_count <= 5)))"
+        },
+        {
+          "name": "password_change_attempt_buckets_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (user_id)"
+        },
+        {
+          "name": "password_change_attempt_buckets_user_id_fkey",
+          "type": "f",
+          "definition": "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE"
+        }
+      ],
+      "description": "Bộ đếm sai currentPassword riêng theo User ID; PostgreSQL khóa nguyên tử để chia sẻ giới hạn đổi mật khẩu giữa session và instance.",
+      "grain": "một bucket giới hạn đổi mật khẩu theo user",
+      "candidate_keys_under_declared_constraints": [
+        [
+          "user_id"
+        ]
+      ]
+    },
+    {
       "name": "password_reset_admissions",
       "columns": [
         {
@@ -6217,6 +6278,20 @@
           "default": "'PENDING'::text",
           "nullable": "NO",
           "description": "Tiến độ phát credential PENDING/AVAILABLE/CLAIMED/EXPIRED/UNAVAILABLE, tách khỏi state PENDING/READY/FAILED của operation."
+        },
+        {
+          "name": "retry_count",
+          "type": "integer",
+          "default": "0",
+          "nullable": "NO",
+          "description": "Số lần adapter retry đã ghi bền vững; không gồm attempt đầu và không chứa raw diagnostics."
+        },
+        {
+          "name": "error_code",
+          "type": "text",
+          "default": null,
+          "nullable": "YES",
+          "description": "Mã lỗi public đã lọc cho status poll; không dùng lỗi broker hoặc giá trị credential làm nội dung."
         }
       ],
       "indexes": [
@@ -6242,6 +6317,16 @@
           "name": "ck_provisioning_escrow_expiry",
           "type": "c",
           "definition": "CHECK ((expires_at = (intent_at + '00:10:00'::interval)))"
+        },
+        {
+          "name": "ck_provisioning_public_error",
+          "type": "c",
+          "definition": "CHECK ((error_code = ANY (ARRAY['CREDENTIAL_ESCROW_EXPIRED'::text, 'BROKER_UNAVAILABLE'::text, 'BROKER_ACK_REJECTED'::text])))"
+        },
+        {
+          "name": "ck_provisioning_retry_count",
+          "type": "c",
+          "definition": "CHECK ((retry_count >= 0))"
         },
         {
           "name": "ck_provisioning_state",
@@ -11639,7 +11724,7 @@
       ]
     }
   ],
-  "trigger_count": 270,
+  "trigger_count": 271,
   "function_count": 40,
   "internal_tables": [
     {
@@ -11683,13 +11768,21 @@
     }
   ],
   "database": "iot_platform_lab",
-  "table_count": 91,
-  "catalog_table_count": 87,
+  "table_count": 92,
+  "catalog_table_count": 88,
   "catalog_missing": [],
   "extra_relations": [
     "datastream_capabilities",
     "datastream_enum_values",
     "template_draft_capabilities",
     "template_draft_enum_values"
-  ]
+  ],
+  "catalog_input": {
+    "path": "ops/database/schema-catalog-grains.json",
+    "sha256": "3b656866f1970c40d3b8a57422e39b06ef5043bf92d0f7eef489ebb46ae26d87",
+    "source": {
+      "path": "docs/plan/database/schema-catalog.md",
+      "sha256": "3ec39926a389728b460d768915c6f7a491581b2b8821e82760f08dea0c180f99"
+    }
+  }
 }

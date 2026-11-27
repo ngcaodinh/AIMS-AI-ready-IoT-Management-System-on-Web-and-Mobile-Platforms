@@ -11,6 +11,10 @@
 | [schema.sql](schema.sql) | Schema-only snapshot có mục đích tiếng Việt trước từng bảng và công dụng từng cột; không chứa row/credential hoặc ledger history; chỉ dựng DB trống thay cho numbered migration |
 | [manifest.json](manifest.json) |91 bảng public, description bảng/cột và mọi null/default/PK/UK/FK/CHECK/index lấy từ engine, phủ87 relation catalog và4 bảng enum/capability chuẩn hóa |
 
+Verifier đọc [bản chiếu catalog](../../../ops/database/schema-catalog-grains.json) từ Git để lấy tên bảng và grain. Catalog thiết kế `docs/plan/database/schema-catalog.md` là nguồn để reviewer đối chiếu. Checkout chạy verifier chỉ cần bản chiếu. `source.sha256` ghi SHA-256 byte gốc của catalog, còn manifest và evidence ghi thêm SHA-256 bản chiếu sau khi chuẩn hóa LF.
+
+Khi catalog thay đổi, cập nhật cặp tên bảng và grain từ các dòng dạng `| table — grain |`, ghi SHA-256 của đúng catalog nguồn rồi đưa cả hai vào cùng lượt review. Verifier vẫn đối chiếu tập bảng PostgreSQL với DDL numbered và kiểm grain, candidate key, native comments. Manifest sinh từ engine là đầu ra của phép kiểm này.
+
 Không dùng snapshot auth ở thư mục cha làm baseline này. `platform.sql` là artifact sinh từ source, không sửa tay. Snapshot không có các hàng applied_migrations; không đưa DB dựng từ snapshot vào runner apply nếu chưa có adoption ledger được kiểm chứng.
 
 Ngày13/11/2026,0020 đã áp forward trên DB canonical sau khi đối chiếu19version/checksum trước. Migration mở CHECK sessions/audit_events cho IOS và cập nhật metadata comment, không sửa row. Bundle giữ target/transaction/ledger/advisory-lock guards. Snapshot/manifest/relations đã refresh từ catalog20versions, exact native comments đạt92tables/5views. Lượt này không chạy empty-database rebuild suite của CLI verify. [Evidence và giới hạn](../../../docs/test-reports/FEAT-TN-001-ios-provider-and-policy-2026-11-13.md).

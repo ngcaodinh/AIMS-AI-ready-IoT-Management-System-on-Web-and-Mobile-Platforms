@@ -28,6 +28,15 @@ class SchemaDocumentationTests(unittest.TestCase):
             with self.subTest(table=name):
                 self.assertEqual(relations["public." + name]["columns"]["client_type"], description)
 
+    def test_provisioning_poll_comments_match_forward_migration(self):
+        """Khóa chú thích hai cột poll với migration 0023 để phát hiện lệch trước khi chạy PostgreSQL."""
+        source = (ROOT / "backend/migrations/platform/0023_provisioning_poll_metadata.sql").read_text(encoding="utf-8")
+        expected = dict(re.findall(r"COMMENT ON COLUMN public\.provisioning_operations\.(\w+) IS '([^']*)';", source))
+        self.assertEqual(set(expected), {"retry_count", "error_code"})
+        manifest = {"tables": [{"name": "provisioning_operations", "columns": [{"name": name} for name in expected]}]}
+        relations = documentation.documented_relations(manifest)
+        self.assertEqual(relations["public.provisioning_operations"]["columns"], expected)
+
     # Phủ schema thật và ledger, giữ description cho cả view projection.
     def test_covers_every_canonical_table_and_attribute(self):
         """Output: đầy đủ91 bảng public, ledger và5 history view, không mô tả rỗng."""

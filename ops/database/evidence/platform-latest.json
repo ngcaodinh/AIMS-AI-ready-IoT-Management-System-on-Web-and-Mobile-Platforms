@@ -1,107 +1,128 @@
 {
-  "timestamp_utc": "2026-10-24T10:36:16.573152+00:00",
+  "timestamp_utc": "2026-11-27T08:35:37.688415+00:00",
   "database": "iot_platform_lab",
   "server_version": "17.11 (Debian 17.11-1.pgdg12+2)",
   "migrations": {
     "0001_identity.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "0c217b8dd006c1ec0c8066a00ab1ca7b2765cb76bda8dd9eb349e88199571b8e"
     },
     "0002_devices.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "2b5d5300200de6d10b7ef08a1d8dbeb4f93aeb695145418a761285ef027f821b"
     },
     "0003_automation.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "b39d2c6a9abdb6f2875ce0bb60fa148ef3a38620662157a05c02001c0c284925"
     },
     "0004_events.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "5f3882ec086b8723d4f85c486fb68d7d09b63482469d1912db4eac4392635575"
     },
     "0005_mobile.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "67f8542935246e78a87a83893b897eb46e43b58e6dc957a765d4d83e629c31ec"
     },
     "0006_integrations.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "ca28b152e93cc00b90448fadd63a207ba2b4d3063d8821a348768f2d6279b0f8"
     },
     "0007_guards.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "17ee3e4d783e5860e8b12b581da7999c33998b6c545ca2d3beee3a4ab2523351"
     },
     "0008_delivery_integrity.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "ad72ec33f804365c79266edb36e687ddb2a2dcac1aae833817f5cc8f73dc2c3c"
     },
     "0009_operations.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "f0806d7963c94737bfb80242891c1a6ba7619affac5e2674054660fc541a3e61"
     },
     "0010_operation_boundaries.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "9ae2830bc4c8e1fb654fbfe7671ffbcb01e4420199da845dd133947ed3410913"
     },
     "0011_final_integrity.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "a3cc62d76433b7e430541aaaa05ae26baeae7b43be770d4698163c221304047b"
     },
     "0012_schema_comments.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "0bbdd5c18d2133c390bab09c92000efb40069dd1ea86daf19b25154a80e9e7ae"
     },
     "0013_publication_integrity.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "6c23b8ec92991b9b88e9e4f6f6214b517b1de25836155dc4e08a9a6559deafac"
     },
     "0014_audit_ingestion.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "93aec6c0b544231827391f5b613145e5c11e2b42ca9f20ca39de2a7125169413"
     },
     "0015_audit_retention.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "a6169becd5abd7b2280f6f78c7fca9692000d6f7e257d9dd06198c27c53b9f37"
     },
     "0016_invitation_revision.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "2e2bd08fab854a39e494044fd075e43d6c634060c36b7c8cd596fc61ba1b3bce"
     },
     "0017_outbox_lease_clock.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "837b5c55b905f6617ce7fd8961d39f98e781cea800c8f9d0600374266680e152"
     },
     "0018_channel_kind.sql": {
-      "status": "ALREADY_APPLIED",
+      "status": "APPLIED",
       "sha256": "0911d47647999ec1b5919d89fd26c60c9d38792ee0a0b51477403214954e3d12"
     },
     "0019_device_registration.sql": {
       "status": "APPLIED",
       "sha256": "591d2289a6f6d11e50ce936864e0cac64c936555ea08e2b4b074f956c68920b4"
+    },
+    "0020_auth_ios_client.sql": {
+      "status": "APPLIED",
+      "sha256": "c2a7670b78bb967d986e1ea92635affd3b9485f2f149c3688a3e2ecc887dac22"
+    },
+    "0021_password_change_attempt_buckets.sql": {
+      "status": "APPLIED",
+      "sha256": "c254a30066c2b7420465d181df523f4621d8afc1aed33260420a5fa5b3fcf4e8"
+    },
+    "0023_provisioning_poll_metadata.sql": {
+      "status": "APPLIED",
+      "sha256": "fd9ef0e457fa39119af7fe49ac5d85707d7425887f27fc28d7386b4a58ff78b6"
     }
   },
-  "table_count": 91,
-  "catalog_table_count": 87,
+  "table_count": 92,
+  "catalog_table_count": 88,
+  "catalog_input": {
+    "path": "ops/database/schema-catalog-grains.json",
+    "sha256": "3b656866f1970c40d3b8a57422e39b06ef5043bf92d0f7eef489ebb46ae26d87",
+    "source": {
+      "path": "docs/plan/database/schema-catalog.md",
+      "sha256": "3ec39926a389728b460d768915c6f7a491581b2b8821e82760f08dea0c180f99"
+    }
+  },
   "function_count": 40,
-  "trigger_count": 270,
+  "trigger_count": 271,
   "documentation_coverage": {
-    "table_count": 92,
+    "table_count": 93,
     "view_count": 5,
-    "table_column_count": 822,
+    "table_column_count": 827,
     "view_column_count": 69
   },
   "fingerprint": [
-    "f5f6c46de410ad1cf75447542f4f9e49",
+    "9bde28759faa20da4a2ebfb919561656",
     "1ff91c37668eb344e5fc9429cd88cf95",
-    "56e7b2f18362f98521ef371680e9f660",
-    "85a3f8dc48eb0a5ad6979bdd3c005441"
+    "0d76e537a24a0e061c13ce25296a65b4",
+    "d076bd26d18a774c3e82735545e68645"
   ],
   "sql_checks": [
     "PASS:identity_two_workspaces",
     "PASS:identity_bucket_missing_window",
     "PASS:identity_cross_workspace_reset",
     "PASS:identity_grant_generation_unique",
-    "PASS:identity_no_ios_scope",
+    "PASS:identity_unknown_client_rejected",
+    "PASS:identity_ios_bearer_client",
     "PASS:devices_two_workspaces",
     "PASS:device_cross_workspace_owner",
     "PASS:stream_numeric_bound_on_boolean",
@@ -252,8 +273,8 @@
     "PASS:aggregate_sql_rerun_verified",
     "PASS:canonical_schema_and_empty_data_preserved"
   ],
-  "sql_pass_count": 154,
-  "aggregate_sha256": "5898f7a54de6b5bd64bc034984b2016b789ca8a3acbd819c7ab7c7c6fa810829",
+  "sql_pass_count": 155,
+  "aggregate_sha256": "4b1af1aae694940a59755a3b5e073ef91aba58981eab17b76aee2762087e4b3b",
   "scope": "CANONICAL_DATABASE_DDL_VERIFIED",
   "additional_databases_created": 0,
   "remaining_gates": [

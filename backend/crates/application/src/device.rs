@@ -112,12 +112,23 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         {
             Ok(schema) => schema,
             Err(failure) => {
-                // Lỗi schema (draft nội tenant, not-found) cũng có thể đến sau lúc chờ khóa root;
-                // session hết hạn trong lúc chờ phải thắng. Lỗi đọc clock không che lỗi gốc.
-                if let Ok(now) = transaction.device_now().await {
-                    locked
-                        .session
-                        .authorize_actor(&locked.account, proof, now, false)?;
+                // Lỗi schema (draft nội tenant, not-found) có thể đến sau lúc chờ khóa root;
+                // lỗi đọc clock trên kết quả không thuộc storage phải fail-closed để tránh lộ draft cho phiên hết hạn.
+                match transaction.device_now().await {
+                    Ok(now) => {
+                        locked
+                            .session
+                            .authorize_actor(&locked.account, proof, now, false)?;
+                    }
+                    Err(clock_error)
+                        if !matches!(
+                            failure,
+                            ApplicationError::Unavailable | ApplicationError::Conflict
+                        ) =>
+                    {
+                        return Err(clock_error);
+                    }
+                    Err(_) => {}
                 }
                 return Err(failure);
             }

@@ -103,7 +103,26 @@ impl DeviceProbe<'_> {
         Ok((first, second?))
     }
 
-    /// Producer thắng phải commit thật, còn attempt register phải trả lỗi hiện hành và không ghi audit thành công.
+    /**
+     * Đếm số audit `DEVICE_REGISTERED` trong workspace gắn với `run_id` hiện tại để đối chiếu trước và sau thử nghiệm.
+     *
+     * # Output
+     * Số bản ghi `DEVICE_REGISTERED` thuộc `self.workspace` và `self.config.run_id`, hoặc lỗi lưu trữ.
+     */
+    async fn scoped_registered_audit_count(&self) -> Result<i64, ApplicationError> {
+        // Chỉ đếm theo workspace và correlation run_id đã bind để giữ cleanup khi commit ngoài dự kiến xảy ra.
+        sqlx::query_scalar(
+            "SELECT count(*) FROM audit_events
+             WHERE workspace_id=$1 AND correlation_id=$2 AND event_type='DEVICE_REGISTERED'",
+        )
+        .bind(self.workspace)
+        .bind(self.config.run_id)
+        .fetch_one(self.pool)
+        .await
+        .map_err(|_| ApplicationError::Unavailable)
+    }
+
+    /// Producer thắng phải commit thật, còn attempt register phải trả lỗi hiện hành và không làm tăng audit đăng ký.
     async fn denial_after<Output>(
         &self,
         gate: Transaction<'static, Postgres>,
@@ -113,29 +132,27 @@ impl DeviceProbe<'_> {
         expected: ApplicationError,
     ) -> Result<Output, ApplicationError> {
         let serial = draft.serial_number.clone();
-        // Attempt bị từ chối không ghi audit; correlation riêng để kiểm chứng không có bản ghi, không cần cleanup.
-        let correlation_id = Uuid::new_v4();
+        // Dùng run_id cho attempt từ chối để nếu commit xảy ra khi producer quá giờ vẫn nằm trong phạm vi cleanup_probe.
+        let before_registered_audits = self.scoped_registered_audit_count().await?;
         let register = self
             .second
-            .register(proof, self.workspace, draft, correlation_id);
+            .register(proof, self.workspace, draft, self.config.run_id);
         let (committed, denied) = self.commit_in_order(gate, producer, register).await?;
         let result = committed?;
         if !matches!(denied, Err(ref failure) if *failure == expected) {
             return Err(ApplicationError::Conflict);
         }
-        // Tra scope/serial và correlation đã bind; FK của child ngăn runtime/actuator mồ côi.
-        let unchanged: bool = sqlx::query_scalar(
-            "SELECT NOT EXISTS(SELECT 1 FROM devices WHERE workspace_id=$1 AND serial_number=$2)
-             AND NOT EXISTS(SELECT 1 FROM audit_events WHERE workspace_id=$1
-                 AND correlation_id=$3 AND event_type='DEVICE_REGISTERED')",
+        // Kiểm thiết bị không tồn tại theo serial và số audit DEVICE_REGISTERED thuộc run_id không tăng thêm.
+        let device_absent: bool = sqlx::query_scalar(
+            "SELECT NOT EXISTS(SELECT 1 FROM devices WHERE workspace_id=$1 AND serial_number=$2)",
         )
         .bind(self.workspace)
         .bind(serial)
-        .bind(correlation_id)
         .fetch_one(self.pool)
         .await
         .map_err(|_| ApplicationError::Unavailable)?;
-        if !unchanged {
+        let after_registered_audits = self.scoped_registered_audit_count().await?;
+        if !device_absent || after_registered_audits != before_registered_audits {
             return Err(ApplicationError::Conflict);
         }
         Ok(result)

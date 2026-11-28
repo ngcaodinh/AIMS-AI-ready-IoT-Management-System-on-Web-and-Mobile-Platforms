@@ -45,7 +45,7 @@ fn locked_at() -> DateTime<Utc> {
 #[derive(Clone)]
 struct SpyStore {
     schema_error: fn() -> ApplicationError,
-    clock_after_wait: DateTime<Utc>,
+    clock_after_wait: Result<DateTime<Utc>, fn() -> ApplicationError>,
     calls: Arc<Mutex<Vec<&'static str>>>,
 }
 
@@ -158,10 +158,10 @@ impl DeviceTransaction for SpyTransaction {
         panic!("unexpected pinned schema lookup")
     }
 
-    /// Trả clock sau lúc chờ khóa, ghi nhận lần đọc để chứng minh session được kiểm lại.
+    /// Trả clock sau lúc chờ khóa hoặc lỗi đọc clock giả lập, ghi nhận lần đọc để chứng minh session được kiểm lại.
     async fn device_now(&mut self) -> Result<DateTime<Utc>, ApplicationError> {
         self.0.calls.lock().unwrap().push("clock");
-        Ok(self.0.clock_after_wait)
+        self.0.clock_after_wait.map_err(|failure| failure())
     }
 
     /// Lỗi schema phải dừng trước insert; panic báo registry đã ghi sau lỗi.
@@ -186,15 +186,19 @@ impl DeviceTransaction for SpyTransaction {
     }
 }
 
-/** Gọi register thật với schema lỗi cấu hình và clock sau lúc chờ.
- * Input
+/**
+ * Gọi register thật với schema lỗi cấu hình và kết quả đọc clock sau lúc chờ.
+ *
+ * # Input
  * Param: schema_error — hàm tạo kết quả nghiệp vụ mà registry port trả sau lúc chờ khóa root.
- * Param: clock_after_wait — clock mới đọc sau lúc chờ, quyết định session còn hạn hay không.
- * Output: lỗi cuối của register cùng thứ tự port đã được gọi.
+ * Param: clock_after_wait — clock mới đọc hoặc lỗi đọc clock sau lúc chờ, quyết định session còn hạn hay fail-closed.
+ *
+ * # Output
+ * Trả cặp lỗi cuối của register cùng thứ tự port đã được gọi.
  */
-fn register_after_wait(
+fn register_after_wait_with_clock(
     schema_error: fn() -> ApplicationError,
-    clock_after_wait: DateTime<Utc>,
+    clock_after_wait: Result<DateTime<Utc>, fn() -> ApplicationError>,
 ) -> (ApplicationError, Vec<&'static str>) {
     let store = SpyStore {
         schema_error,
@@ -222,6 +226,23 @@ fn register_after_wait(
         .expect("failed schema lookup must reject registration");
     let calls = store.calls.lock().unwrap().clone();
     (error, calls)
+}
+
+/**
+ * Gọi register thật với schema lỗi cấu hình và clock hợp lệ sau lúc chờ.
+ *
+ * # Input
+ * Param: schema_error — hàm tạo kết quả nghiệp vụ mà registry port trả sau lúc chờ khóa root.
+ * Param: clock_after_wait — clock mới đọc sau lúc chờ, quyết định session còn hạn hay không.
+ *
+ * # Output
+ * Trả cặp lỗi cuối của register cùng thứ tự port đã được gọi.
+ */
+fn register_after_wait(
+    schema_error: fn() -> ApplicationError,
+    clock_after_wait: DateTime<Utc>,
+) -> (ApplicationError, Vec<&'static str>) {
+    register_after_wait_with_clock(schema_error, Ok(clock_after_wait))
 }
 
 /// Session hết hạn trong lúc chờ root phải thắng phân loại draft nội tenant.
@@ -256,6 +277,43 @@ fn live_session_preserves_schema_failure() {
     ];
     for schema_error in schema_errors {
         let (error, calls) = register_after_wait(schema_error, locked_at());
+        assert_eq!(error, schema_error());
+        assert_eq!(calls, ["schema", "clock"]);
+    }
+}
+
+/// Lỗi đọc clock sau lúc chờ trên kết quả draft nội tenant phải fail-closed và truyền lỗi clock.
+#[test]
+fn clock_failure_overrides_draft_template_status() {
+    let clock_errors: [fn() -> ApplicationError; 2] = [
+        || ApplicationError::Unavailable,
+        || ApplicationError::Conflict,
+    ];
+    for clock_error in clock_errors {
+        let (error, calls) = register_after_wait_with_clock(
+            || ApplicationError::DeviceTemplateNotPublished,
+            Err(clock_error),
+        );
+        assert_eq!(error, clock_error());
+        assert_eq!(calls, ["schema", "clock"]);
+    }
+}
+
+/// Lỗi đọc clock sau lúc chờ vẫn giữ nguyên phân loại của lỗi storage chung từ schema lookup.
+#[test]
+fn clock_failure_preserves_generic_storage_error() {
+    let cases: [(fn() -> ApplicationError, fn() -> ApplicationError); 2] = [
+        (
+            || ApplicationError::Conflict,
+            || ApplicationError::Unavailable,
+        ),
+        (
+            || ApplicationError::Unavailable,
+            || ApplicationError::Conflict,
+        ),
+    ];
+    for (schema_error, clock_error) in cases {
+        let (error, calls) = register_after_wait_with_clock(schema_error, Err(clock_error));
         assert_eq!(error, schema_error());
         assert_eq!(calls, ["schema", "clock"]);
     }

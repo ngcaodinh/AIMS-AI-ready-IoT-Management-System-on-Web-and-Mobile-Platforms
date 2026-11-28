@@ -193,18 +193,59 @@
             }
           }
         ],
-        "deliveryArrivalRevisions": [3, 2]
+        "snapshotRefetchResponse": {
+          "workspaceId": "00000000-0000-4000-8000-000000000101",
+          "deviceId": "00000000-0000-4000-8000-000000000201",
+          "lifecycle": "ACTIVE",
+          "connectivity": "ONLINE",
+          "lastSeen": "2026-11-28T09:01:05Z",
+          "presenceVersion": 3,
+          "snapshotTime": "2026-11-28T09:01:06Z"
+        },
+        "deliveryArrivalRevisions": [3, 2],
+        "deliveryTimeline": [
+          {
+            "step": 1,
+            "kind": "WS_EVENT",
+            "eventRevision": 3,
+            "clientRevisionBefore": 1,
+            "outcome": "GAP_DETECTED_REFETCH_SNAPSHOT",
+            "clientRevisionAfter": 1
+          },
+          {
+            "step": 2,
+            "kind": "SNAPSHOT_REFETCH",
+            "snapshotPresenceVersion": 3,
+            "snapshotTime": "2026-11-28T09:01:06Z",
+            "clientRevisionBefore": 1,
+            "outcome": "SNAPSHOT_APPLIED",
+            "clientRevisionAfter": 3,
+            "connectivityAfter": "ONLINE"
+          },
+          {
+            "step": 3,
+            "kind": "WS_EVENT",
+            "eventRevision": 2,
+            "clientRevisionBefore": 3,
+            "outcome": "STALE_DROPPED_NO_DOWNGRADE",
+            "clientRevisionAfter": 3,
+            "connectivityAfter": "ONLINE"
+          }
+        ]
       },
       "expected": {
         "onArrivalRevision3From1": "GAP_DETECTED_REFETCH_SNAPSHOT",
+        "onSnapshotRefetchRevision3": "SNAPSHOT_APPLIED",
         "onArrivalRevision2After3": "STALE_DROPPED_NO_DOWNGRADE",
         "finalAppliedRevision": 3,
-        "finalConnectivity": "ONLINE"
+        "finalConnectivity": "ONLINE",
+        "finalLastSeen": "2026-11-28T09:01:05Z"
       },
       "assertions": [
         "strictly-increasing-revision-and-occurred-at",
-        "stale-revision-never-rolls-back-state",
-        "revision-gap-requires-snapshot-refetch"
+        "revision-gap-requires-snapshot-refetch",
+        "snapshot-revision-3-applied-before-stale-drop",
+        "stale-revision-never-rolls-back-state"
       ]
     },
     {
@@ -375,6 +416,66 @@
           "to": "OFFLINE",
           "reason": "NORMAL",
           "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-TRAILING-NEWLINE-EVENT-ID",
+      "reason": "UUID fields must reject trailing newline characters under strict absolute-end pattern matching.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301\n",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-TRAILING-NEWLINE-OCCURRED-AT",
+      "reason": "UTC timestamp fields must reject trailing newline characters under strict absolute-end pattern matching.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z\n",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-TRAILING-NEWLINE-LAST-SEEN",
+      "reason": "Nested data.lastSeen must reject trailing newline characters under strict absolute-end pattern matching.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z\n",
           "maintenanceJobId": null
         }
       }

@@ -130,8 +130,76 @@ class DevicePresenceEventContractTests(unittest.TestCase):
             parse_utc_timestamp(frames[1]["occurredAt"]),
             parse_utc_timestamp(frames[0]["occurredAt"]),
         )
+        snapshot = ordering["given"]["snapshotRefetchResponse"]
+        self.assertTrue(matches_schema(snapshot, self.defs["DevicePresenceSnapshot"], SCHEMA_PATH))
+        self.assertEqual(snapshot["workspaceId"], frames[1]["workspaceId"])
+        self.assertEqual(snapshot["deviceId"], frames[1]["resourceId"])
+        self.assertEqual(snapshot["presenceVersion"], 3)
+        self.assertEqual(snapshot["connectivity"], frames[1]["data"]["to"])
+        self.assertEqual(snapshot["lastSeen"], frames[1]["data"]["lastSeen"])
+        self.assertGreaterEqual(
+            parse_utc_timestamp(snapshot["snapshotTime"]),
+            parse_utc_timestamp(frames[1]["occurredAt"]),
+        )
+
+        # Dòng thời gian phải áp dụng snapshot revision 3 trước khi loại event revision 2 đến muộn.
+        timeline = ordering["given"]["deliveryTimeline"]
+        self.assertEqual(len(timeline), 3)
+        self.assertEqual(timeline[0]["kind"], "WS_EVENT")
+        self.assertEqual(timeline[0]["eventRevision"], 3)
+        self.assertEqual(timeline[0]["clientRevisionBefore"], ordering["given"]["clientInitialRevision"])
+        self.assertEqual(timeline[0]["outcome"], "GAP_DETECTED_REFETCH_SNAPSHOT")
+        self.assertEqual(timeline[0]["clientRevisionAfter"], 1)
+
+        self.assertEqual(timeline[1]["kind"], "SNAPSHOT_REFETCH")
+        self.assertEqual(timeline[1]["snapshotPresenceVersion"], 3)
+        self.assertEqual(timeline[1]["snapshotTime"], snapshot["snapshotTime"])
+        self.assertEqual(timeline[1]["clientRevisionBefore"], timeline[0]["clientRevisionAfter"])
+        self.assertEqual(timeline[1]["outcome"], "SNAPSHOT_APPLIED")
+        self.assertEqual(timeline[1]["clientRevisionAfter"], 3)
+        self.assertEqual(timeline[1]["connectivityAfter"], snapshot["connectivity"])
+
+        self.assertEqual(timeline[2]["kind"], "WS_EVENT")
+        self.assertEqual(timeline[2]["eventRevision"], 2)
+        self.assertEqual(timeline[2]["clientRevisionBefore"], timeline[1]["clientRevisionAfter"])
+        self.assertEqual(timeline[2]["outcome"], "STALE_DROPPED_NO_DOWNGRADE")
+        self.assertEqual(timeline[2]["clientRevisionAfter"], 3)
+        self.assertEqual(timeline[2]["connectivityAfter"], "ONLINE")
+
         self.assertEqual(ordering["given"]["deliveryArrivalRevisions"], [3, 2])
+        self.assertEqual(ordering["expected"]["onSnapshotRefetchRevision3"], "SNAPSHOT_APPLIED")
         self.assertEqual(ordering["expected"]["finalAppliedRevision"], 3)
+        self.assertEqual(ordering["expected"]["finalConnectivity"], "ONLINE")
+        self.assertEqual(ordering["expected"]["finalLastSeen"], snapshot["lastSeen"])
+
+    def test_trailing_newline_rejected_by_strict_end_patterns(self):
+        """
+        Pattern UUID và UtcTimestamp phải dùng kết thúc tuyệt đối để re.search không lọt ký tự xuống dòng cuối chuỗi.
+        """
+        for suffix in ("\n", "\r\n"):
+            self.assertFalse(
+                matches_schema(
+                    "00000000-0000-4000-8000-000000000301" + suffix,
+                    self.defs["Uuid"],
+                    SCHEMA_PATH,
+                )
+            )
+            self.assertFalse(
+                matches_schema(
+                    "2026-11-28T09:00:00Z" + suffix,
+                    self.defs["UtcTimestamp"],
+                    SCHEMA_PATH,
+                )
+            )
+
+        for case_id in (
+            "REJECT-TRAILING-NEWLINE-EVENT-ID",
+            "REJECT-TRAILING-NEWLINE-OCCURRED-AT",
+            "REJECT-TRAILING-NEWLINE-LAST-SEEN",
+        ):
+            with self.subTest(trailing_newline_case=case_id):
+                self.assertIn(case_id, self.rejected)
+                self.assertFalse(matches_schema(self.rejected[case_id]["frame"], self.schema_doc, SCHEMA_PATH))
 
     def test_workspace_isolation_and_rejected_ws_frames(self):
         """

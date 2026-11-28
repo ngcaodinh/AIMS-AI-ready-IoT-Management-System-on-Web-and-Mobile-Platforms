@@ -1861,6 +1861,24 @@
         ],
         "compatible": false
       }
+    ],
+    "invalidCases": [
+      {
+        "name": "number",
+        "supportedTemplateVersions": [1]
+      },
+      {
+        "name": "numeric-string",
+        "supportedTemplateVersions": ["1"]
+      },
+      {
+        "name": "non-uuid",
+        "supportedTemplateVersions": ["not-a-uuid"]
+      },
+      {
+        "name": "uuid-with-trailing-line-feed",
+        "supportedTemplateVersions": ["00000000-0000-4000-8000-000000000003\n"]
+      }
     ]
   }
 }

@@ -39,6 +39,9 @@ fn snapshot(row: &PgRow, draft: ValidatedTemplate) -> Result<TemplateSnapshot, A
         template_id: row.try_get("template_id").map_err(storage_error)?,
         revision: row.try_get("revision").map_err(storage_error)?,
         status,
+        latest_published_version_id: row
+            .try_get("latest_published_version_id")
+            .map_err(storage_error)?,
         draft,
         created_at: row.try_get("created_at").map_err(storage_error)?,
         updated_at: row.try_get("updated_at").map_err(storage_error)?,
@@ -63,6 +66,34 @@ impl TemplateStore for PgIdentityStore {
 }
 
 impl TemplateTransaction for PgUnitOfWork {
+    /// Liệt kê UUID giới hạn bằng tenant/status/keyset; không lookup resource theo actor tự khai.
+    async fn list_template_ids(
+        &mut self,
+        workspace_id: Uuid,
+        status: Option<TemplateStatus>,
+        after: Option<Uuid>,
+        limit: i64,
+    ) -> Result<Vec<Uuid>, ApplicationError> {
+        // Tất cả selector/filter được bind; thứ tự UUID dùng cùng PK scoped qua các trang.
+        sqlx::query_scalar("SELECT template_id FROM templates WHERE workspace_id=$1 AND ($2::text IS NULL OR lifecycle_status=$2) AND ($3::uuid IS NULL OR template_id>$3) ORDER BY template_id LIMIT $4")
+            .bind(workspace_id).bind(status.map(TemplateStatus::code)).bind(after).bind(limit)
+            .fetch_all(&mut *self.transaction).await.map_err(storage_error)
+    }
+
+    /// Liệt kê UUID snapshot thuộc đúng family, với filter tùy chọn theo revision nguồn đã ghi.
+    async fn list_version_ids(
+        &mut self,
+        workspace_id: Uuid,
+        template_id: Uuid,
+        after: Option<Uuid>,
+        limit: i64,
+    ) -> Result<Vec<Uuid>, ApplicationError> {
+        // ID/keyset được bind để không lẫn serial/revision của template khác.
+        sqlx::query_scalar("SELECT template_version_id FROM template_versions WHERE workspace_id=$1 AND template_id=$2 AND ($3::uuid IS NULL OR template_version_id>$3) ORDER BY template_version_id LIMIT $4")
+            .bind(workspace_id).bind(template_id).bind(after).bind(limit)
+            .fetch_all(&mut *self.transaction).await.map_err(storage_error)
+    }
+
     /// Đọc immutable snapshot scoped; header/name/model lấy từ version, không join root metadata hiện hành.
     async fn load_published_version(
         &mut self,
@@ -99,7 +130,7 @@ impl TemplateTransaction for PgUnitOfWork {
         workspace_id: Uuid,
         template_id: Uuid,
     ) -> Result<TemplateSnapshot, ApplicationError> {
-        let row=sqlx::query("SELECT workspace_id,template_id,name,model,description,lifecycle_status,revision,created_at,updated_at FROM templates WHERE workspace_id=$1 AND template_id=$2 FOR UPDATE")
+        let row=sqlx::query("SELECT workspace_id,template_id,name,model,description,lifecycle_status,revision,created_at,updated_at,(SELECT v.template_version_id FROM template_versions v WHERE (v.workspace_id,v.template_id)=(t.workspace_id,t.template_id) ORDER BY v.version_number DESC LIMIT 1) AS latest_published_version_id FROM templates t WHERE workspace_id=$1 AND template_id=$2 FOR UPDATE")
             .bind(workspace_id).bind(template_id).fetch_optional(&mut *self.transaction).await.map_err(storage_error)?.ok_or(ApplicationError::ResourceNotFound)?;
         let draft = TemplateDraft {
             name: row.try_get("name").map_err(storage_error)?,

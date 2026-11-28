@@ -7,17 +7,22 @@ use crate::{
 };
 use iot_domain::{
     audit_write::AuditDetail,
-    device::{ApprovedDeviceModels, DeviceDraft, DeviceValidation, RegisteredDevice},
+    device::{
+        ApprovedDeviceModels, DeviceDraft, DeviceRecord, DeviceValidation, RegisteredDevice,
+        valid_device_serial,
+    },
     identity::{AuditRecord, SessionProof},
+    template::ValidatedTemplate,
     template_snapshot::TemplateVersionSnapshot,
 };
 use uuid::Uuid;
 
 /// Composition phải truyền policy model đã duyệt; không cho template tự quyết model phần cứng hợp lệ.
+#[derive(Clone)]
 pub struct DeviceService<S, C> {
     store: S,
     digest: C,
-    models: ApprovedDeviceModels,
+    models: Option<ApprovedDeviceModels>,
 }
 
 impl From<DeviceValidation> for ApplicationError {
@@ -45,8 +50,41 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         Self {
             store,
             digest,
-            models,
+            models: Some(models),
         }
+    }
+
+    /**
+     * Dựng service chỉ cho các đường đọc khi composition chưa có allowlist model được duyệt.
+     *
+     * # Input
+     * Param: store — factory transaction dùng chung để kiểm session, workspace và pin.
+     * Param: digest — bộ kiểm nội dung published immutable.
+     *
+     * # Output
+     * Service giữ được read path; đăng ký fail-closed với `Unavailable` khi thiếu model policy.
+     */
+    pub const fn without_models(store: S, digest: C) -> Self {
+        Self {
+            store,
+            digest,
+            models: None,
+        }
+    }
+
+    /**
+     * Gắn allowlist model có nguồn từ composition để mutation không lấy approval từ request.
+     *
+     * # Input
+     * Param: models — tập model exact đã được phê duyệt ngoài luồng HTTP.
+     *
+     * # Output
+     * Service dùng cùng store/digest với policy mới.
+     */
+    #[must_use]
+    pub fn with_models(mut self, models: ApprovedDeviceModels) -> Self {
+        self.models = Some(models);
+        self
     }
 
     /**
@@ -82,9 +120,36 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         &self,
         proof: &SessionProof,
         workspace_id: Uuid,
-        mut draft: DeviceDraft,
+        draft: DeviceDraft,
         correlation_id: Uuid,
     ) -> Result<RegisteredDevice, ApplicationError> {
+        self.register_with_schema(proof, workspace_id, draft, correlation_id)
+            .await
+            .map(|(receipt, _)| receipt)
+    }
+
+    /**
+     * Đăng ký registry và trả capability từ published pin trong cùng unit of work.
+     *
+     * # Input
+     * Param: proof — session/context phải còn hiệu lực sau tất cả lock wait.
+     * Param: workspace_id — tenant cần current Admin admission.
+     * Param: draft — serial/name/model/owner/version từ request đã parse, chưa mang quyền.
+     * Param: correlation_id — trace cho required audit, không chứa dữ liệu đầu vào.
+     *
+     * # Output
+     * Receipt đã commit cùng cấu hình từ đúng version UUID; không phát credential.
+     *
+     * # Errors
+     * Quyền, input/model, owner, duplicate, storage hoặc `CommitUnknown`; không tự replay mutation.
+     */
+    pub async fn register_with_schema(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        mut draft: DeviceDraft,
+        correlation_id: Uuid,
+    ) -> Result<(RegisteredDevice, ValidatedTemplate), ApplicationError> {
         let mut transaction = self.store.begin_device().await?;
         let locked = transaction
             .lock_device_actor(proof, Some(draft.owner_user_id))
@@ -135,6 +200,8 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         };
         self.verify_digest(&schema)?;
         self.models
+            .as_ref()
+            .ok_or(ApplicationError::Unavailable)?
             .validate(&draft.model, &schema.content.draft().model)?;
         // User/Workspace/root fences giữ quyền ổn định; clock phải mới sau khi đã chờ toàn bộ khóa.
         let now = transaction.device_now().await?;
@@ -166,7 +233,57 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
             })
             .await?;
         transaction.commit_device().await?;
-        Ok(receipt)
+        Ok((receipt, schema.content))
+    }
+
+    /**
+     * Tìm serial exact trong tenant dưới current Admin và dựng cấu hình từ version UUID đã pin.
+     *
+     * # Input
+     * Param: proof — session/context cần được kiểm lại dưới actor lock.
+     * Param: workspace_id — tenant selector; không tra cứu serial ở workspace khác.
+     * Param: serial — natural key opaque, không trim hoặc case-fold.
+     *
+     * # Output
+     * `Some` metadata và capability khi tìm thấy trong tenant, `None` khi không có.
+     *
+     * # Errors
+     * Serial sai dạng, authority, snapshot/digest hoặc storage; selector foreign không bị tiết lộ.
+     */
+    pub async fn recover(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        serial: &str,
+    ) -> Result<Option<(DeviceRecord, ValidatedTemplate)>, ApplicationError> {
+        if !valid_device_serial(serial) {
+            return Err(ApplicationError::InvalidInput);
+        }
+        let mut transaction = self.store.begin_device().await?;
+        let locked = transaction.lock_device_actor(proof, None).await?;
+        let principal =
+            locked
+                .session
+                .authorize_actor(&locked.account, proof, locked.observed_at, false)?;
+        transaction
+            .lock_device_scope(workspace_id, principal.user_id())
+            .await?
+            .authorize(&principal, true)?;
+        let result = if let Some(device) = transaction.recover_device(workspace_id, serial).await? {
+            let schema = transaction
+                .pinned_schema(workspace_id, device.pin.template_version_id)
+                .await?;
+            self.verify_digest(&schema)?;
+            Some((device, schema.content))
+        } else {
+            None
+        };
+        let now = transaction.device_now().await?;
+        locked
+            .session
+            .authorize_actor(&locked.account, proof, now, false)?;
+        transaction.commit_device().await?;
+        Ok(result)
     }
 
     /**

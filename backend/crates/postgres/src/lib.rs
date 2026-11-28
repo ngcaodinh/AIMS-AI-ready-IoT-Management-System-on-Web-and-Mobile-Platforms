@@ -19,6 +19,7 @@ mod observability;
 mod outbox;
 mod password_reset;
 mod preferences;
+mod provisioning;
 mod realtime;
 mod session;
 mod subjects;

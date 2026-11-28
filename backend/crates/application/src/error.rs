@@ -25,6 +25,7 @@ pub enum ApplicationError {
     DeviceModelUnsupported,
     DeviceTemplateNotPublished,
     DeviceExists,
+    TemplateDraftExists,
     ResourceNotFound,
     ImmutableSchema,
     Unavailable,

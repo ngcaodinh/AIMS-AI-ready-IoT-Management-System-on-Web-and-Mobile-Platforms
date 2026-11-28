@@ -562,9 +562,10 @@ function useWorkspaceTemplateList(
       const outcome = await store.listTemplates(workspaceId, scenarioRef.current, nextCursor, controller.signal);
       if (generation !== contextGenerationRef.current || controller.signal.aborted) return;
       if (outcome.ok) {
+        const nextItems = outcome.items;
         /** Gộp thêm phần tử trang mới vào danh sách đang hiển thị. */
         function appendNextPage(prev: TemplateDto[]): TemplateDto[] {
-          return mergeTemplatePage(prev, outcome.items);
+          return mergeTemplatePage(prev, nextItems);
         }
         setTemplates(appendNextPage);
         setNextCursor(outcome.nextCursor);

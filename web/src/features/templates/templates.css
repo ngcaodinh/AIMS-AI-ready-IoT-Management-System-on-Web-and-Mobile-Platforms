@@ -955,3 +955,54 @@
     transition: none !important;
   }
 }
+
+.tpl-workbench {
+  display: grid;
+  gap: 20px;
+}
+
+.tpl-publish-card {
+  display: grid;
+  gap: 16px;
+}
+
+.tpl-publish-box {
+  display: grid;
+  gap: 12px;
+}
+
+.tpl-publish-summary {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.tpl-version-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.tpl-diff-box {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.tpl-diff-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.tpl-diff-item {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}

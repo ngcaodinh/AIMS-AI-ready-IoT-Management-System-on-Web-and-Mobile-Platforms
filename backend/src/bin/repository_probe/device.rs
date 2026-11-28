@@ -56,6 +56,7 @@ fn template(name: String, writable: bool) -> TemplateDraft {
         maximum: None,
         string_max_length: None,
         enum_values: vec![],
+        default_value: None,
         safe_value: None,
     }];
     if writable {
@@ -70,6 +71,7 @@ fn template(name: String, writable: bool) -> TemplateDraft {
             maximum: None,
             string_max_length: None,
             enum_values: vec![],
+            default_value: None,
             safe_value: Some(StreamValue::Boolean(false)),
         });
     }

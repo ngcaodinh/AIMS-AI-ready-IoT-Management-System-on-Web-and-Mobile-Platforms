@@ -8,7 +8,7 @@ use iot_application::{
     template_ports::TemplateDigest,
 };
 use iot_domain::{
-    device::{ApprovedDeviceModels, DeviceDraft, DevicePin, RegisteredDevice},
+    device::{ApprovedDeviceModels, DeviceDraft, DevicePin, DeviceRecord, RegisteredDevice},
     identity::{
         AccountStatus, ActorAccountSnapshot, AuditRecord, ClientType, SessionProof,
         SessionSnapshot,
@@ -71,6 +71,15 @@ impl DeviceStore for SpyStore {
 }
 
 impl DeviceTransaction for SpyTransaction {
+    /// Registration expiry cases must stop before serial recovery.
+    async fn recover_device(
+        &mut self,
+        _workspace_id: Uuid,
+        _serial: &str,
+    ) -> Result<Option<DeviceRecord>, ApplicationError> {
+        panic!("unexpected serial recovery lookup")
+    }
+
     /// Cấp session Android ACTIVE còn hạn tại thời điểm khóa để chỉ cô lập kiểm tra sau lúc chờ.
     async fn lock_device_actor(
         &mut self,

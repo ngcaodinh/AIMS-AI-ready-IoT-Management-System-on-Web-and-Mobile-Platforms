@@ -63,6 +63,7 @@
 .auth-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 40px 24px 56px; }
 .auth-main:focus { outline: none; }
 .auth-layout { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; align-items: center; width: min(100%, 480px); }
+.auth-layout-wide { width: min(100%, 1200px); }
 
 /* Card kính */
 .auth-card {
@@ -238,6 +239,10 @@
 .auth-session-summary > div + div { border-top: 1px solid var(--line); }
 .auth-session-summary dt { color: var(--muted); font-size: .75rem; letter-spacing: .02em; }
 .auth-session-summary dd { margin: 4px 0 0; font-size: .9375rem; font-weight: 600; overflow-wrap: anywhere; }
+.auth-workbench-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.auth-workbench-nav .auth-secondary { flex: 1 1 auto; min-height: 44px; padding: .55rem 1rem; font-size: .85rem; }
+.auth-tab-active { border-color: var(--teal); background: var(--teal-soft); }
+.auth-workbench-stage { width: min(1200px, 100%); margin-top: 20px; }
 
 /* Footer */
 .auth-footer { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; padding: 16px 24px max(28px, env(safe-area-inset-bottom)); color: var(--muted); font-size: .75rem; text-align: center; }

@@ -14,6 +14,7 @@ pub enum DeviceValidation {
 }
 
 /// Model đã qua bootstrap `PoC`, truyền tường minh từ composition; không có default cho phép tất cả.
+#[derive(Clone)]
 pub struct ApprovedDeviceModels(Vec<String>);
 
 impl ApprovedDeviceModels {
@@ -72,13 +73,7 @@ impl DeviceDraft {
      * `SerialInvalid`/`NameInvalid`, không phản chiếu nội dung đầu vào.
      */
     pub fn validate(mut self) -> Result<Self, DeviceValidation> {
-        let serial = self.serial_number.as_bytes();
-        if !(1..=64).contains(&serial.len())
-            || !serial[0].is_ascii_alphanumeric()
-            || !serial
-                .iter()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(byte))
-        {
+        if !valid_device_serial(&self.serial_number) {
             return Err(DeviceValidation::SerialInvalid);
         }
         self.name = self.name.trim().to_owned();
@@ -87,6 +82,17 @@ impl DeviceDraft {
         }
         Ok(self)
     }
+}
+
+/// Kiểm serial opaque ASCII; cùng rule cho registry và recovery, không trim hoặc case-fold.
+#[must_use]
+pub fn valid_device_serial(value: &str) -> bool {
+    let serial = value.as_bytes();
+    (1..=64).contains(&serial.len())
+        && serial[0].is_ascii_alphanumeric()
+        && serial
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(byte))
 }
 
 /// Projection identity tối thiểu để resolve schema; không đưa verifier hoặc provisioning escrow ra ngoài.
@@ -120,4 +126,46 @@ pub struct RegisteredDevice {
     pub model: String,
     pub created_at: DateTime<Utc>,
     pub actuator_count: u64,
+}
+
+/// Projection registry phục vụ recovery, giữ identity/presence riêng và không mang dữ liệu credential.
+pub struct DeviceRecord {
+    pub pin: DevicePin,
+    pub serial_number: String,
+    pub name: String,
+    pub model: String,
+    pub lifecycle: String,
+    pub connectivity: String,
+    pub last_seen: Option<DateTime<Utc>>,
+    pub firmware_version: Option<String>,
+    pub firmware_digest: Option<String>,
+    pub hardware_revision: Option<String>,
+    pub credential_status: String,
+    pub maintenance: String,
+    pub revision: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<RegisteredDevice> for DeviceRecord {
+    /// Dựng projection ban đầu từ receipt đã commit; registry chưa có observations hoặc secret.
+    fn from(device: RegisteredDevice) -> Self {
+        Self {
+            pin: device.pin,
+            serial_number: device.serial_number,
+            name: device.name,
+            model: device.model,
+            lifecycle: "REGISTERED".to_owned(),
+            connectivity: "UNKNOWN".to_owned(),
+            last_seen: None,
+            firmware_version: None,
+            firmware_digest: None,
+            hardware_revision: None,
+            credential_status: "PROVISIONING".to_owned(),
+            maintenance: "NONE".to_owned(),
+            revision: 1,
+            created_at: device.created_at,
+            updated_at: device.created_at,
+        }
+    }
 }

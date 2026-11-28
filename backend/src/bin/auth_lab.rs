@@ -9,11 +9,17 @@ use axum::{
     routing::post,
 };
 use hmac::{Hmac, Mac};
+#[cfg(feature = "integrated-lab")]
+use iot_platform_backend::domain::device::ApprovedDeviceModels;
+#[cfg(not(feature = "integrated-lab"))]
+use iot_platform_backend::http::auth_router;
+#[cfg(feature = "integrated-lab")]
+use iot_platform_backend::http::integrated_lab_router;
 use iot_platform_backend::{
     adapters::{auth_diagnostics::AuthTimingRecorder, security::PasswordService},
     application::{error::ApplicationError, identity::IdentityService},
     domain::{idempotency::IdempotencyKey, identity::ClientType},
-    http::{HttpState, auth_router},
+    http::HttpState,
     postgres::connection::connect_local_probe,
 };
 use serde::Deserialize;
@@ -38,6 +44,45 @@ const MEASUREMENT_LABEL: &[u8] = b"auth-lab-measurement-v1";
 struct MeasurementControl {
     recorder: Arc<AuthTimingRecorder>,
     key: Arc<[u8; 32]>,
+}
+
+/**
+ * Chọn router của Auth Lab theo feature compile-time để chỉ bật API 005–008 sau opt-in.
+ *
+ * # Input
+ * Param: state — state auth và các dịch vụ lab đã được dựng từ pool/origin của launcher.
+ *
+ * # Output
+ * Router auth hiện hành; chỉ feature integrated-lab ghép thêm template, device và poll metadata.
+ *
+ * # Side effects
+ * Router ở cả hai chế độ dùng reconciler bounded hiện hành thông qua auth_router.
+ */
+fn auth_lab_router(state: HttpState) -> Router {
+    #[cfg(feature = "integrated-lab")]
+    {
+        integrated_lab_router(state)
+    }
+    #[cfg(not(feature = "integrated-lab"))]
+    {
+        auth_router(state)
+    }
+}
+
+/**
+ * Apply the single synthetic model fixture only to the explicitly enabled integrated lab.
+ *
+ * # Input
+ * Param: state - loopback state with fail-closed mutation policy by default.
+ *
+ * # Output
+ * State allowing only the G1 model fixture used by the lab workbench tests.
+ */
+#[cfg(feature = "integrated-lab")]
+fn integrated_lab_state(state: HttpState) -> Result<HttpState, ApplicationError> {
+    let models = ApprovedDeviceModels::new(vec!["G1_TEST_MODEL".to_owned()])
+        .map_err(|_| ApplicationError::Unavailable)?;
+    Ok(state.with_approved_device_models(models))
 }
 
 /**
@@ -362,11 +407,13 @@ async fn run() -> Result<(), ApplicationError> {
         diagnostics,
     )
     .await?;
+    #[cfg(feature = "integrated-lab")]
+    let state = integrated_lab_state(state)?;
     if !config.skip_fixture_seed {
         seed_workspaces(&pool, &config).await?;
     }
     println!("AUTH_LAB_READY");
-    let router = attach_measurements(auth_router(state), control);
+    let router = attach_measurements(auth_lab_router(state), control);
     if let Some(input) = pool_input {
         return pool_budget::serve(listener, router, pool, input).await;
     }
@@ -383,6 +430,106 @@ async fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod lab_router_tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode},
+    };
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+    use tower::ServiceExt;
+
+    /**
+     * Verify the explicit lab feature mounts registry and poll routes while fallback remains auth-first.
+     *
+     * GET remains protected in both modes; DELETE distinguishes a mounted path without calling its handler.
+     */
+    #[tokio::test]
+    async fn workbench_routes_follow_explicit_integrated_lab_feature() {
+        let pool = PgPoolOptions::new().connect_lazy_with(
+            PgConnectOptions::new()
+                .host("127.0.0.1")
+                .port(1)
+                .username("lab_router_test")
+                .database("lab_router_test"),
+        );
+        let state = HttpState::new(pool, [17; 32], "http://localhost:5173")
+            .await
+            .expect("synthetic router state");
+        let app = attach_measurements(auth_lab_router(state), None);
+
+        for path in [
+            "/api/v1/templates?limit=1",
+            "/api/v1/devices?serial=runtime-availability-probe",
+            "/api/v1/provisioning-operations/00000000-0000-0000-0000-000000000001",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::get(path)
+                        .header("x-workspace-id", "00000000-0000-0000-0000-000000000001")
+                        .body(Body::empty())
+                        .expect("valid synthetic request"),
+                )
+                .await
+                .expect("in-process router response");
+
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "GET {path}");
+        }
+
+        let expected_mounted_method = if cfg!(feature = "integrated-lab") {
+            StatusCode::METHOD_NOT_ALLOWED
+        } else {
+            StatusCode::UNAUTHORIZED
+        };
+        for path in [
+            "/api/v1/templates",
+            "/api/v1/devices",
+            "/api/v1/provisioning-operations/00000000-0000-0000-0000-000000000001",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("valid synthetic request"),
+                )
+                .await
+                .expect("in-process router response");
+
+            assert_eq!(response.status(), expected_mounted_method, "DELETE {path}");
+        }
+
+        // These writer paths are out of scope; DELETE detects registration without credentials.
+        for path in [
+            "/api/v1/templates/00000000-0000-0000-0000-000000000001/publish",
+            "/api/v1/devices/00000000-0000-0000-0000-000000000001/credentials",
+            "/api/v1/provisioning-operations/00000000-0000-0000-0000-000000000001/claim-credential",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("valid synthetic request"),
+                )
+                .await
+                .expect("in-process router response");
+
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "DELETE {path}");
+        }
+    }
+}
+
+#[cfg(all(test, feature = "integrated-lab"))]
+#[path = "auth_lab/integrated_policy_tests.rs"]
+mod integrated_policy_tests;
 
 #[cfg(test)]
 mod measurement_tests {

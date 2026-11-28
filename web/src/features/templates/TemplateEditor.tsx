@@ -5,6 +5,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   type MouseEvent,
+  type ReactNode,
   type RefObject,
 } from 'react';
 import {
@@ -44,6 +45,10 @@ interface TemplateEditorProps {
   onApplyServerRevision: (serverTemplate: TemplateDto, keepLocalChanges: boolean) => void;
   onSelectCandidate: (candidate: TemplateDto) => void;
   onCreateNewAfterUnknown: () => void;
+  mode?: 'preview' | 'live';
+  publishPanel?: ReactNode;
+  streamDefaults?: Readonly<Record<string, string>>;
+  onChangeStreamDefault?: (localId: string, value: string) => void;
 }
 
 const MAX_ENUM_VALUES_PER_STREAM = 64;
@@ -295,6 +300,10 @@ function UnknownPostCandidatesNotice({
   isSubmitting: boolean;
   onSelectCandidate: (candidate: TemplateDto) => void;
   onCreateNewAfterUnknown: () => void;
+  mode?: 'preview' | 'live';
+  publishPanel?: ReactNode;
+  streamDefaults?: Readonly<Record<string, string>>;
+  onChangeStreamDefault?: (localId: string, value: string) => void;
 }) {
   /** Mở đúng draft ứng viên được chọn theo ID, không tự đoán theo tên trùng. */
   function handlePickCandidateClick(event: MouseEvent<HTMLButtonElement>): void {
@@ -374,6 +383,7 @@ function SaveStateNotice({
   isSubmitting,
   form,
   pendingCandidates,
+  mode = 'preview',
   onApplyServerRevision,
   onSelectCandidate,
   onRetryManualSave,
@@ -386,6 +396,7 @@ function SaveStateNotice({
   isSubmitting: boolean;
   form: TemplateDraftForm;
   pendingCandidates: TemplateDto[];
+  mode?: 'preview' | 'live';
   onApplyServerRevision: (serverTemplate: TemplateDto, keepLocalChanges: boolean) => void;
   onSelectCandidate: (candidate: TemplateDto) => void;
   onRetryManualSave: () => void;
@@ -398,7 +409,11 @@ function SaveStateNotice({
         <EditorIcon name="check" />
         <div className="tpl-notice-body">
           <p>
-            <strong>Đã cập nhật bản xem trước trong bộ nhớ tab (chưa lưu trên máy chủ).</strong>{' '}
+            <strong>
+              {mode === 'live'
+                ? 'Đã lưu bản nháp trên máy chủ.'
+                : 'Đã cập nhật bản xem trước trong bộ nhớ tab (chưa lưu trên máy chủ).'}
+            </strong>{' '}
             ID: <span className="tpl-mono">{saveOutcome.template.id}</span> · Revision #{saveOutcome.template.revision} · Schema v{saveOutcome.template.schemaVersion}.
           </p>
         </div>
@@ -478,14 +493,20 @@ function SaveStateNotice({
         <EditorIcon name="lock" />
         <div className="tpl-notice-body">
           <p>
-            <strong>Template đã công bố (PUBLISHED · v{form.publishedVersion ?? 1}) ở chế độ chỉ đọc.</strong>{' '}
-            Schema đã pin là bất biến; để chỉnh sửa cần tạo draft mới qua luồng FEAT-TN-006 khi route sẵn sàng.
+            <strong>
+              {mode === 'live'
+                ? 'Template hiện ở trạng thái PUBLISHED (chỉ đọc).'
+                : `Template đã công bố (PUBLISHED · v${form.publishedVersion ?? 1}) ở chế độ chỉ đọc.`}
+            </strong>{' '}
+            Schema đã pin là bất biến; để chỉnh sửa cần mở bản nháp mới từ một phiên bản đã công bố.
           </p>
-          <div className="tpl-actions-row">
-            <button type="button" className="tpl-btn" disabled={isSubmitting} onClick={onSimulatePublishedPatch}>
-              Mô phỏng gửi PATCH để kiểm tra lỗi 409
-            </button>
-          </div>
+          {mode === 'preview' ? (
+            <div className="tpl-actions-row">
+              <button type="button" className="tpl-btn" disabled={isSubmitting} onClick={onSimulatePublishedPatch}>
+                Mô phỏng gửi PATCH để kiểm tra lỗi 409
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -905,6 +926,8 @@ function StreamNumberConstraintsFields({
  * Param: stream — dữ liệu kênh đang chỉnh sửa.
  * Param: isReadOnly — khóa thay đổi khi xem bản PUBLISHED.
  * Param: errorMap — bảng ánh xạ path lỗi sang thông báo.
+ * Param: streamDefaults — bảng giá trị mặc định scalar tùy chọn theo `localId` (chế độ live).
+ * Param: onChangeStreamDefault — callback cập nhật giá trị mặc định scalar của kênh.
  * Param: onUpdateStream — cập nhật trường thay đổi của kênh theo index.
  * Param: onRemoveStream — xóa kênh khỏi danh sách.
  * Output: thẻ article nhóm các trường nhập của một kênh.
@@ -914,6 +937,8 @@ function StreamDefinitionFields({
   stream,
   isReadOnly,
   errorMap,
+  streamDefaults,
+  onChangeStreamDefault,
   onUpdateStream,
   onRemoveStream,
 }: {
@@ -921,6 +946,8 @@ function StreamDefinitionFields({
   stream: TemplateStreamDraft;
   isReadOnly: boolean;
   errorMap: ReadonlyMap<string, string>;
+  streamDefaults?: Readonly<Record<string, string>>;
+  onChangeStreamDefault?: (localId: string, value: string) => void;
   onUpdateStream: (index: number, patch: Partial<TemplateStreamDraft>) => void;
   onRemoveStream: (index: number) => void;
 }) {
@@ -929,11 +956,13 @@ function StreamDefinitionFields({
   const typeError = errorMap.get(`${prefix}/type`);
   const channelKindError = errorMap.get(`${prefix}/channelKind`);
   const directionError = errorMap.get(`${prefix}/direction`);
+  const defaultError = errorMap.get(`${prefix}/default`);
 
   const keyId = `tpl-stream-${index}-key`;
   const typeId = `tpl-stream-${index}-type`;
   const kindId = `tpl-stream-${index}-channelKind`;
   const dirId = `tpl-stream-${index}-direction`;
+  const defaultId = `tpl-stream-${index}-default`;
   const isRangeRequired =
     stream.type === 'NUMBER' && (stream.direction === 'WRITE' || stream.direction === 'READ_WRITE');
 
@@ -967,6 +996,11 @@ function StreamDefinitionFields({
   /** Cập nhật danh sách giá trị ENUM từ component con. */
   function handleEnumValuesChange(nextValues: string[]): void {
     onUpdateStream(index, { enumValues: nextValues });
+  }
+
+  /** Cập nhật giá trị mặc định scalar tùy chọn của datastream trên biểu mẫu live. */
+  function handleDefaultChange(event: ChangeEvent<HTMLInputElement>): void {
+    onChangeStreamDefault?.(stream.localId, event.target.value);
   }
 
   /** Xóa kênh hiện tại khỏi danh sách draft. */
@@ -1113,6 +1147,38 @@ function StreamDefinitionFields({
               : 'Kiểu STRING chỉ phục vụ hiển thị (READ); không dùng min/max và không gắn lệnh điều khiển SET_VALUE.'}
           </p>
         ) : null}
+
+        {streamDefaults !== undefined && onChangeStreamDefault ? (
+          <div className="tpl-field tpl-field-full">
+            <label htmlFor={defaultId}>Giá trị mặc định (`default`, tùy chọn)</label>
+            <input
+              id={defaultId}
+              name={`streams[${index}].default`}
+              type="text"
+              autoComplete="off"
+              className="tpl-input"
+              value={streamDefaults[stream.localId] ?? ''}
+              disabled={isReadOnly}
+              aria-disabled={isReadOnly}
+              aria-invalid={Boolean(defaultError)}
+              aria-describedby={defaultError ? `${defaultId}-hint ${defaultId}-error` : `${defaultId}-hint`}
+              placeholder={
+                stream.type === 'NUMBER'
+                  ? 'VD: 25'
+                  : stream.type === 'BOOLEAN'
+                    ? 'true hoặc false'
+                    : stream.type === 'ENUM'
+                      ? 'VD: OFF'
+                      : 'Chuỗi mặc định (tối đa 256 ký tự)'
+              }
+              onChange={handleDefaultChange}
+            />
+            <p id={`${defaultId}-hint`} className="tpl-hint">
+              Giá trị mặc định scalar tương thích kiểu {stream.type} và ràng buộc của kênh.
+            </p>
+            {defaultError ? <p id={`${defaultId}-error`} className="tpl-field-error">{defaultError}</p> : null}
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -1124,6 +1190,8 @@ function StreamDefinitionFields({
  * Param: streams — mảng datastream hiện tại của form.
  * Param: isReadOnly — khóa thêm/sửa/xóa khi ở trạng thái PUBLISHED.
  * Param: errorMap — bảng lỗi validation theo JSON Pointer.
+ * Param: streamDefaults — bảng giá trị mặc định scalar tùy chọn theo `localId`.
+ * Param: onChangeStreamDefault — callback cập nhật giá trị mặc định scalar cho kênh.
  * Param: onAddStream — thêm một kênh rỗng mới vào danh sách.
  * Param: onUpdateStream — cập nhật trường của kênh tại index.
  * Param: onRemoveStream — xóa kênh tại index.
@@ -1133,6 +1201,8 @@ function StreamDefinitionList({
   streams,
   isReadOnly,
   errorMap,
+  streamDefaults,
+  onChangeStreamDefault,
   onAddStream,
   onUpdateStream,
   onRemoveStream,
@@ -1140,6 +1210,8 @@ function StreamDefinitionList({
   streams: TemplateStreamDraft[];
   isReadOnly: boolean;
   errorMap: ReadonlyMap<string, string>;
+  streamDefaults?: Readonly<Record<string, string>>;
+  onChangeStreamDefault?: (localId: string, value: string) => void;
   onAddStream: () => void;
   onUpdateStream: (index: number, patch: Partial<TemplateStreamDraft>) => void;
   onRemoveStream: (index: number) => void;
@@ -1156,6 +1228,8 @@ function StreamDefinitionList({
         stream={stream}
         isReadOnly={isReadOnly}
         errorMap={errorMap}
+        streamDefaults={streamDefaults}
+        onChangeStreamDefault={onChangeStreamDefault}
         onUpdateStream={onUpdateStream}
         onRemoveStream={onRemoveStream}
       />
@@ -1552,11 +1626,13 @@ function SchemaPreview({
   form,
   lastServerTemplate,
   isDirty,
+  streamDefaults,
 }: {
   workspaceId: string;
   form: TemplateDraftForm;
   lastServerTemplate: TemplateDto | null;
   isDirty: boolean;
+  streamDefaults?: Readonly<Record<string, string>>;
 }) {
   /** Tuần tự hóa payload JSON preview chỉ khi dữ liệu biểu mẫu hoặc workspaceId thay đổi. */
   function computePreviewJson(): string {
@@ -1601,6 +1677,9 @@ function SchemaPreview({
           ) : null}
           {stream.type === 'ENUM' ? (
             <span>Enum: [{stream.enumValues.join(', ')}]</span>
+          ) : null}
+          {streamDefaults && streamDefaults[stream.localId] && streamDefaults[stream.localId].trim() !== '' ? (
+            <span>default: <code className="tpl-mono">{streamDefaults[stream.localId]}</code></span>
           ) : null}
           {matchingCmd ? (
             <span>safeValue: <code className="tpl-mono">{matchingCmd.safeValueText || '(chưa chọn)'}</code></span>
@@ -1664,24 +1743,28 @@ function SchemaPreview({
 function EditorSubmitCard({
   isExistingDraft,
   isSubmitting,
+  mode = 'preview',
 }: {
   isExistingDraft: boolean;
   isSubmitting: boolean;
+  mode?: 'preview' | 'live';
 }) {
   return (
     <div className="tpl-card">
       <div className="tpl-section-head tpl-section-head-flush">
         <p className="tpl-hint">
-          Mọi thao tác chỉ kiểm tra và mô phỏng trong bộ nhớ tab; không có nút publish, đăng ký thiết bị hay gửi lệnh thật ở WB-03.
+          {mode === 'live'
+            ? 'Lưu bản nháp bằng kiểm tra toàn schema phía máy chủ trước khi công bố phiên bản.'
+            : 'Mọi thao tác chỉ kiểm tra và mô phỏng trong bộ nhớ tab; không có nút publish, đăng ký thiết bị hay gửi lệnh thật ở WB-03.'}
         </p>
         <button type="submit" className="tpl-btn tpl-btn-primary" disabled={isSubmitting}>
           <EditorIcon name="check" />
           <span>
             {isSubmitting
-              ? 'Đang kiểm tra schema…'
-              : isExistingDraft
-                ? 'Lưu cập nhật nháp (chỉ preview)'
-                : 'Tạo bản nháp (chỉ preview)'}
+              ? (mode === 'live' ? 'Đang lưu bản nháp…' : 'Đang kiểm tra schema…')
+              : mode === 'live'
+                ? (isExistingDraft ? 'Lưu cập nhật nháp' : 'Tạo bản nháp')
+                : (isExistingDraft ? 'Lưu cập nhật nháp (chỉ preview)' : 'Tạo bản nháp (chỉ preview)')}
           </span>
         </button>
       </div>
@@ -1712,6 +1795,10 @@ export function TemplateEditor({
   onApplyServerRevision,
   onSelectCandidate,
   onCreateNewAfterUnknown,
+  mode = 'preview',
+  publishPanel,
+  streamDefaults,
+  onChangeStreamDefault,
 }: TemplateEditorProps) {
   const errorSummaryRef = useRef<HTMLDivElement>(null);
   const localCounterRef = useRef(0);
@@ -1845,6 +1932,7 @@ export function TemplateEditor({
         isSubmitting={isSubmitting}
         form={form}
         pendingCandidates={pendingCandidates}
+        mode={mode}
         onApplyServerRevision={onApplyServerRevision}
         onSelectCandidate={onSelectCandidate}
         onRetryManualSave={onSubmit}
@@ -1869,6 +1957,8 @@ export function TemplateEditor({
             streams={form.streams}
             isReadOnly={isPublished}
             errorMap={errorMap}
+            streamDefaults={streamDefaults}
+            onChangeStreamDefault={onChangeStreamDefault}
             onAddStream={handleAddStream}
             onUpdateStream={handleUpdateStream}
             onRemoveStream={handleRemoveStream}
@@ -1885,7 +1975,7 @@ export function TemplateEditor({
           />
 
           {!isPublished ? (
-            <EditorSubmitCard isExistingDraft={Boolean(form.id)} isSubmitting={isSubmitting} />
+            <EditorSubmitCard isExistingDraft={Boolean(form.id)} isSubmitting={isSubmitting} mode={mode} />
           ) : null}
         </form>
 
@@ -1894,8 +1984,11 @@ export function TemplateEditor({
           form={form}
           lastServerTemplate={lastServerTemplate}
           isDirty={isDirty}
+          streamDefaults={streamDefaults}
         />
       </div>
+
+      {publishPanel}
     </div>
   );
 }

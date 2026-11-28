@@ -42,6 +42,14 @@ export class AuthCoordinator {
   constructor(private publish: (state: AuthState) => void) {}
 
   /**
+   * Trả bản sao metadata phiên (contextId và CSRF) đang giữ trong RAM để gọi API cùng workspace đã chọn.
+   * Output: đối tượng SessionMetadata hoặc undefined khi phiên chưa sẵn sàng/đã bị hủy.
+   */
+  getSessionMetadata(): SessionMetadata | undefined {
+    return this.session ? { ...this.session } : undefined;
+  }
+
+  /**
    * Tuần tự hóa auth giữa các tab và bỏ tác vụ bị invalidate trong lúc chờ Web Lock.
    * Input
    * Param: operation — tác vụ thuộc generation lúc xếp hàng, chỉ chạy khi generation còn hiện hành.

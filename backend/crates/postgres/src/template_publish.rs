@@ -22,10 +22,13 @@ impl PgUnitOfWork {
             .bind(before.workspace_id).bind(version.template_version_id).bind(before.template_id).bind(version.version_number).bind(&before.draft.draft().name).bind(&before.draft.draft().model).bind(version.published_at).bind(version.published_by_user_id).bind(version.content_digest.as_slice())
             .execute(&mut *self.transaction).await.map_err(storage_error)?;
         for stream in &before.draft.draft().streams {
+            let (default_kind, default_text) =
+                template_values::optional_scalar_parts(stream.default_value.as_ref());
             // Snapshot từ validated memory dưới root fence, gồm cả loại kênh/direction, không lấy scope từ payload.
-            sqlx::query("INSERT INTO datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+            sqlx::query("INSERT INTO datastream_definitions(workspace_id,template_version_id,stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length,default_value) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,CASE $12::text WHEN 'NUMBER' THEN $13::jsonb WHEN 'BOOLEAN' THEN to_jsonb($13::boolean) WHEN 'STRING' THEN to_jsonb($13::text) END)")
                 .bind(before.workspace_id).bind(version.template_version_id).bind(&stream.key).bind(&stream.display_name).bind(template_values::stream_type_code(stream.data_type)).bind(template_values::direction_code(stream.direction)).bind(template_values::channel_kind_code(stream.channel_kind))
-                .bind(&stream.unit).bind(stream.minimum).bind(stream.maximum).bind(stream.string_max_length).execute(&mut *self.transaction).await.map_err(storage_error)?;
+                .bind(&stream.unit).bind(stream.minimum).bind(stream.maximum).bind(stream.string_max_length)
+                .bind(default_kind).bind(default_text).execute(&mut *self.transaction).await.map_err(storage_error)?;
             for value in &stream.enum_values {
                 let (kind, text) = template_values::scalar_parts(value);
                 sqlx::query("INSERT INTO datastream_enum_values(workspace_id,template_version_id,stream_key,enum_value) VALUES($1,$2,$3,CASE $4::text WHEN 'NUMBER' THEN $5::jsonb ELSE to_jsonb($5::text) END)")

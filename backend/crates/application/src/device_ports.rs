@@ -3,7 +3,7 @@
 use crate::error::ApplicationError;
 use chrono::{DateTime, Utc};
 use iot_domain::{
-    device::{DeviceDraft, DevicePin, RegisteredDevice},
+    device::{DeviceDraft, DevicePin, DeviceRecord, RegisteredDevice},
     identity::{ActorAccountSnapshot, AuditRecord, SessionProof, SessionSnapshot},
     template_snapshot::TemplateVersionSnapshot,
     workspace::WorkspaceSnapshot,
@@ -20,6 +20,24 @@ pub struct LockedActorSession {
 
 /// Boundary riêng cho registry, không nhận pool, password, broker hoặc handle transaction vật lý.
 pub trait DeviceTransaction: Send {
+    /**
+     * Tìm serial exact trong tenant đã được authorize để hỗ trợ recovery sau response bị mất.
+     *
+     * # Input
+     * Param: workspace_id — scope current Admin đã khóa.
+     * Param: serial — natural key opaque, so sánh chính xác như lúc đăng ký.
+     *
+     * # Output
+     * Device metadata hoặc `None`; port không trả material credential.
+     *
+     * # Errors
+     * Storage được lọc theo lỗi application.
+     */
+    fn recover_device(
+        &mut self,
+        workspace_id: Uuid,
+        serial: &str,
+    ) -> impl Future<Output = Result<Option<DeviceRecord>, ApplicationError>> + Send;
     /**
      * Khóa User actor và owner theo UUID tăng dần trước Workspace, rồi load session hiện hành.
      * Input

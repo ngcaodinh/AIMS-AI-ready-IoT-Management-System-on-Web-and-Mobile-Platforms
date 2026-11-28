@@ -2,6 +2,7 @@
 
 use crate::template_value::DecimalLiteral;
 use std::collections::BTreeSet;
+use unicode_normalization::UnicodeNormalization;
 
 /// Phân loại ý nghĩa dữ liệu, không cấp quyền điều khiển hoặc thay reported evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +49,7 @@ pub struct StreamDraft {
     pub maximum: Option<f64>,
     pub string_max_length: Option<i32>,
     pub enum_values: Vec<StreamValue>,
+    pub default_value: Option<StreamValue>,
     pub safe_value: Option<StreamValue>,
 }
 
@@ -65,6 +67,7 @@ pub enum TemplateField {
     StringMaxLength,
     EnumValues,
     Direction,
+    DefaultValue,
     SafeValue,
 }
 
@@ -85,6 +88,19 @@ pub struct TemplateValidation {
     pub stream_index: Option<usize>,
     pub field: TemplateField,
     pub reason: TemplateIssueReason,
+}
+
+/// Chuẩn hóa display name NFC/trim theo OQ-TEMPLATE-001 và kiểm 1–100 Unicode code points.
+pub fn normalize_template_name(input: &str) -> Result<String, TemplateValidation> {
+    let name: String = input.trim().nfc().collect();
+    if !(1..=100).contains(&name.chars().count()) || name.contains('\0') {
+        return Err(TemplateValidation {
+            stream_index: None,
+            field: TemplateField::Name,
+            reason: TemplateIssueReason::InvalidValue,
+        });
+    }
+    Ok(name)
 }
 
 impl StreamDraft {
@@ -140,6 +156,16 @@ impl StreamDraft {
             ));
         }
         self.validate_enum(index)?;
+        if self
+            .default_value
+            .as_ref()
+            .is_some_and(|value| !self.accepts_value(value))
+        {
+            return Err(issue(
+                TemplateField::DefaultValue,
+                TemplateIssueReason::InvalidValue,
+            ));
+        }
         self.validate_safe_value(index)
     }
 
@@ -211,8 +237,16 @@ impl StreamDraft {
             .safe_value
             .as_ref()
             .ok_or_else(|| issue(TemplateIssueReason::Required))?;
-        // NUMBER chỉ dùng float projection cho bounds; ENUM tiếp tục so literal exact, không mất precision.
-        let valid = match (self.data_type, value) {
+        if self.accepts_value(value) {
+            Ok(())
+        } else {
+            Err(issue(TemplateIssueReason::InvalidValue))
+        }
+    }
+
+    /// Kiểm scalar theo datatype, bound và tập ENUM; giữ decimal identity khi so thành viên.
+    fn accepts_value(&self, value: &StreamValue) -> bool {
+        match (self.data_type, value) {
             (StreamType::Number, StreamValue::Number(number)) => {
                 number.finite_float().is_some_and(|number| {
                     self.minimum.is_none_or(|minimum| number >= minimum)
@@ -220,13 +254,12 @@ impl StreamDraft {
                 })
             }
             (StreamType::Boolean, StreamValue::Boolean(_)) => true,
+            (StreamType::String, StreamValue::Text(text)) => {
+                let limit = self.string_max_length.unwrap_or(256).min(256);
+                !text.contains('\0') && text.chars().count() <= limit as usize
+            }
             (StreamType::Enum, value) => self.enum_values.contains(value),
             _ => false,
-        };
-        if valid {
-            Ok(())
-        } else {
-            Err(issue(TemplateIssueReason::InvalidValue))
         }
     }
 }

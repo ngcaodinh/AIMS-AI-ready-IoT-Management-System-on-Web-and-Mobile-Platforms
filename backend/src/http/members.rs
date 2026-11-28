@@ -172,7 +172,7 @@ async fn patch_member_request(
  * Errors
  * Thiếu trả428; header lặp, sai pattern hoặc tràn miền trả400 FORMAT.
  */
-fn member_if_match(headers: &HeaderMap) -> Result<i64, HttpError> {
+pub(super) fn member_if_match(headers: &HeaderMap) -> Result<i64, HttpError> {
     let value = security::single_header(headers, "if-match")?
         .ok_or_else(|| HttpError::code(428, "PRECONDITION_REQUIRED"))?;
     let revision = value

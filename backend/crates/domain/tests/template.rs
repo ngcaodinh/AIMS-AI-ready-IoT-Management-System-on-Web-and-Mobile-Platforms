@@ -21,6 +21,7 @@ fn temperature() -> StreamDraft {
         maximum: Some(100.0),
         string_max_length: None,
         enum_values: vec![],
+        default_value: None,
         safe_value: None,
     }
 }
@@ -231,6 +232,7 @@ fn template_transitions_preserve_revision_and_publication_state() {
         template_id: uuid::Uuid::new_v4(),
         revision: 1,
         status: TemplateStatus::Draft,
+        latest_published_version_id: None,
         draft: draft(vec![temperature()]).validate().unwrap(),
         created_at: now,
         updated_at: now,

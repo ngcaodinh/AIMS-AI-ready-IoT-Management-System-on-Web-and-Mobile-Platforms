@@ -33,12 +33,12 @@ impl PgUnitOfWork {
         // Ba projection đều bind scope/key; FK và root lock giữ schema read nhất quán với controlled writers.
         let (stream_sql, enum_sql, capability_sql) = match source {
             TemplateContentSource::Draft => (
-                "SELECT stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length FROM template_draft_streams WHERE workspace_id=$1 AND template_id=$2 ORDER BY stream_key",
+                "SELECT stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length,jsonb_typeof(default_value) AS default_type,default_value#>>'{}' AS default_text FROM template_draft_streams WHERE workspace_id=$1 AND template_id=$2 ORDER BY stream_key",
                 "SELECT stream_key,jsonb_typeof(enum_value) AS value_type,enum_value#>>'{}' AS value_text FROM template_draft_enum_values WHERE workspace_id=$1 AND template_id=$2 ORDER BY stream_key,enum_value",
                 "SELECT stream_key,jsonb_typeof(safe_value) AS value_type,safe_value#>>'{}' AS value_text FROM template_draft_capabilities WHERE workspace_id=$1 AND template_id=$2 AND command_type='SET_VALUE'",
             ),
             TemplateContentSource::Published => (
-                "SELECT stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length FROM datastream_definitions WHERE workspace_id=$1 AND template_version_id=$2 ORDER BY stream_key",
+                "SELECT stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length,jsonb_typeof(default_value) AS default_type,default_value#>>'{}' AS default_text FROM datastream_definitions WHERE workspace_id=$1 AND template_version_id=$2 ORDER BY stream_key",
                 "SELECT stream_key,jsonb_typeof(enum_value) AS value_type,enum_value#>>'{}' AS value_text FROM datastream_enum_values WHERE workspace_id=$1 AND template_version_id=$2 ORDER BY stream_key,enum_value",
                 "SELECT stream_key,jsonb_typeof(safe_value) AS value_type,safe_value#>>'{}' AS value_text FROM datastream_capabilities WHERE workspace_id=$1 AND template_version_id=$2 AND command_type='SET_VALUE'",
             ),
@@ -99,6 +99,7 @@ impl PgUnitOfWork {
                 minimum: row.try_get("min_value").map_err(storage_error)?,
                 maximum: row.try_get("max_value").map_err(storage_error)?,
                 string_max_length: row.try_get("string_max_length").map_err(storage_error)?,
+                default_value: template_values::default_scalar(&row)?,
             });
         }
         draft.validate().map_err(|_| ApplicationError::Unavailable)
@@ -143,10 +144,13 @@ impl PgUnitOfWork {
             .collect::<Vec<_>>();
         sqlx::query("DELETE FROM template_draft_streams WHERE workspace_id=$1 AND template_id=$2 AND NOT(stream_key=ANY($3::text[]))").bind(workspace_id).bind(template_id).bind(keys).execute(&mut *self.transaction).await.map_err(storage_error)?;
         for stream in &draft.draft().streams {
+            let (default_kind, default_text) =
+                template_values::optional_scalar_parts(stream.default_value.as_ref());
             // Chỉ value được bind; ON CONFLICT giữ identity scoped và tăng child revision dưới parent fence.
-            sqlx::query("INSERT INTO template_draft_streams(workspace_id,template_id,stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(workspace_id,template_id,stream_key) DO UPDATE SET display_name=excluded.display_name,data_type=excluded.data_type,direction=excluded.direction,channel_kind=excluded.channel_kind,unit=excluded.unit,min_value=excluded.min_value,max_value=excluded.max_value,string_max_length=excluded.string_max_length,revision=template_draft_streams.revision+1")
+            sqlx::query("INSERT INTO template_draft_streams(workspace_id,template_id,stream_key,display_name,data_type,direction,channel_kind,unit,min_value,max_value,string_max_length,default_value) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,CASE $12::text WHEN 'NUMBER' THEN $13::jsonb WHEN 'BOOLEAN' THEN to_jsonb($13::boolean) WHEN 'STRING' THEN to_jsonb($13::text) END) ON CONFLICT(workspace_id,template_id,stream_key) DO UPDATE SET display_name=excluded.display_name,data_type=excluded.data_type,direction=excluded.direction,channel_kind=excluded.channel_kind,unit=excluded.unit,min_value=excluded.min_value,max_value=excluded.max_value,string_max_length=excluded.string_max_length,default_value=excluded.default_value,revision=template_draft_streams.revision+1")
                 .bind(workspace_id).bind(template_id).bind(&stream.key).bind(&stream.display_name).bind(template_values::stream_type_code(stream.data_type)).bind(template_values::direction_code(stream.direction)).bind(template_values::channel_kind_code(stream.channel_kind))
-                .bind(&stream.unit).bind(stream.minimum).bind(stream.maximum).bind(stream.string_max_length).execute(&mut *self.transaction).await.map_err(storage_error)?;
+                .bind(&stream.unit).bind(stream.minimum).bind(stream.maximum).bind(stream.string_max_length)
+                .bind(default_kind).bind(default_text).execute(&mut *self.transaction).await.map_err(storage_error)?;
             for value in &stream.enum_values {
                 let (kind, text) = template_values::scalar_parts(value);
                 sqlx::query("INSERT INTO template_draft_enum_values(workspace_id,template_id,stream_key,enum_value) VALUES($1,$2,$3,CASE $4::text WHEN 'NUMBER' THEN $5::jsonb ELSE to_jsonb($5::text) END)")

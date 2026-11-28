@@ -38,6 +38,7 @@ fn schema(name: String) -> TemplateDraft {
         maximum: Some(100.0),
         string_max_length: None,
         enum_values: vec![],
+        default_value: None,
         safe_value: None,
     };
     let mut fan = temperature.clone();

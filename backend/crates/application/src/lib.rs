@@ -18,6 +18,7 @@ pub mod outbox;
 pub mod password_reset;
 pub mod ports;
 pub mod preferences;
+pub mod provisioning;
 pub mod realtime;
 pub mod session;
 pub mod template;

@@ -31,7 +31,32 @@ pub(super) fn scalar_parts(value: &StreamValue) -> (&'static str, String) {
 pub(super) fn scalar(row: &PgRow) -> Result<StreamValue, ApplicationError> {
     let kind: String = row.try_get("value_type").map_err(storage_error)?;
     let text: String = row.try_get("value_text").map_err(storage_error)?;
-    match kind.as_str() {
+    decode_scalar(&kind, text)
+}
+
+/// Đọc optional default từ JSONB typed; NULL SQL khác với scalar có giá trị false hoặc 0.
+pub(super) fn default_scalar(row: &PgRow) -> Result<Option<StreamValue>, ApplicationError> {
+    let kind: Option<String> = row.try_get("default_type").map_err(storage_error)?;
+    kind.map(|kind| {
+        let text = row.try_get("default_text").map_err(storage_error)?;
+        decode_scalar(&kind, text)
+    })
+    .transpose()
+}
+
+/// Bind default qua cả tag và literal để PostgreSQL giữ đúng datatype và precision.
+pub(super) fn optional_scalar_parts(
+    value: Option<&StreamValue>,
+) -> (Option<&'static str>, Option<String>) {
+    value.map_or((None, None), |value| {
+        let (kind, text) = scalar_parts(value);
+        (Some(kind), Some(text))
+    })
+}
+
+/// Tái dựng scalar đã lưu từ hai projection kiểu/giá trị mà không coerce numeric qua float.
+fn decode_scalar(kind: &str, text: String) -> Result<StreamValue, ApplicationError> {
+    match kind {
         "number" => DecimalLiteral::new(&text)
             .map(StreamValue::Number)
             .ok_or(ApplicationError::Unavailable),

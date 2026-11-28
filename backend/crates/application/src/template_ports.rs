@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use iot_domain::{
     identity::{AuditRecord, SessionProof},
     template::ValidatedTemplate,
-    template_snapshot::{PublishedTemplate, TemplateSnapshot},
+    template_snapshot::{PublishedTemplate, TemplateSnapshot, TemplateStatus},
     workspace::WorkspaceSnapshot,
 };
 use std::future::Future;
@@ -29,6 +29,22 @@ pub struct NewTemplateVersion {
 
 /// Một unit of work sở hữu mọi lock/draft/version/audit đến commit, không callback network.
 pub trait TemplateTransaction: Send {
+    /// Trang root dùng UUID keyset theo tenant/filter; chỉ nhận page size đã kiểm cận.
+    fn list_template_ids(
+        &mut self,
+        workspace_id: Uuid,
+        status: Option<TemplateStatus>,
+        after: Option<Uuid>,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<Uuid>, ApplicationError>> + Send;
+    /// Trang versions chỉ trong family đã authorize, dùng UUID keyset của trang lịch sử.
+    fn list_version_ids(
+        &mut self,
+        workspace_id: Uuid,
+        template_id: Uuid,
+        after: Option<Uuid>,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<Uuid>, ApplicationError>> + Send;
     /// Load immutable content chỉ bằng tenant/version ID, không lấy name/model từ root đã có thể đổi.
     fn load_published_version(
         &mut self,

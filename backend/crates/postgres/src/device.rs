@@ -8,7 +8,7 @@ use iot_application::{
     ports::{IdentityTransaction, WorkspaceTransaction},
 };
 use iot_domain::{
-    device::{DeviceDraft, DevicePin, RegisteredDevice},
+    device::{DeviceDraft, DevicePin, DeviceRecord, RegisteredDevice},
     identity::{AuditRecord, SessionProof},
     template_snapshot::TemplateVersionSnapshot,
     workspace::WorkspaceSnapshot,
@@ -34,6 +34,71 @@ impl DeviceStore for PgIdentityStore {
 }
 
 impl DeviceTransaction for PgUnitOfWork {
+    /**
+     * Đọc registry cho recovery bằng natural key exact trong workspace đã authorize.
+     *
+     * # Input
+     * Param: workspace_id — tenant từ session admission, luôn có trong predicate SQL.
+     * Param: serial — serial opaque được bind làm tham số, không nối vào câu truy vấn.
+     *
+     * # Output
+     * Projection registry/runtime và trạng thái credential công khai, hoặc `None`.
+     *
+     * # Errors
+     * Storage được lọc; projection cố ý không đọc verifier, escrow, principal hay ciphertext.
+     */
+    async fn recover_device(
+        &mut self,
+        workspace_id: Uuid,
+        serial: &str,
+    ) -> Result<Option<DeviceRecord>, ApplicationError> {
+        // Bind serial và scope tenant; projection loại verifier, escrow, principal broker và ciphertext.
+        let row = sqlx::query(
+            "SELECT d.device_id,d.owner_user_id,d.template_version_id,d.serial_number,d.name,d.model,d.lifecycle_status,
+             d.hardware_revision,d.firmware_version,encode(d.firmware_digest,'hex') AS firmware_digest,
+             d.revision,d.created_at,d.updated_at,coalesce(r.presence_state,'UNKNOWN') AS connectivity,
+             r.last_seen_at,coalesce(r.maintenance,'NONE') AS maintenance,
+             CASE c.credential_state WHEN 'ACTIVE' THEN 'ACTIVE' WHEN 'REVOCATION_PENDING' THEN 'REVOCATION_PENDING'
+                  WHEN 'REVOKED' THEN 'REVOKED' ELSE 'PROVISIONING' END AS credential_status
+             FROM devices d LEFT JOIN device_runtime r USING(workspace_id,device_id)
+             LEFT JOIN LATERAL (SELECT credential_state FROM device_credentials cr
+                 WHERE (cr.workspace_id,cr.device_id)=(d.workspace_id,d.device_id)
+                 ORDER BY cr.credential_generation DESC LIMIT 1) c ON true
+             WHERE d.workspace_id=$1 AND d.serial_number=$2",
+        )
+        .bind(workspace_id)
+        .bind(serial)
+        .fetch_optional(&mut *self.transaction)
+        .await
+        .map_err(storage_error)?;
+        row.map(|row| {
+            Ok(DeviceRecord {
+                pin: DevicePin {
+                    workspace_id,
+                    device_id: row.try_get("device_id")?,
+                    owner_user_id: row.try_get("owner_user_id")?,
+                    template_version_id: row.try_get("template_version_id")?,
+                },
+                serial_number: row.try_get("serial_number")?,
+                name: row.try_get("name")?,
+                model: row.try_get("model")?,
+                lifecycle: row.try_get("lifecycle_status")?,
+                connectivity: row.try_get("connectivity")?,
+                last_seen: row.try_get("last_seen_at")?,
+                firmware_version: row.try_get("firmware_version")?,
+                firmware_digest: row.try_get("firmware_digest")?,
+                hardware_revision: row.try_get("hardware_revision")?,
+                credential_status: row.try_get("credential_status")?,
+                maintenance: row.try_get("maintenance")?,
+                revision: row.try_get("revision")?,
+                created_at: row.try_get("created_at")?,
+                updated_at: row.try_get("updated_at")?,
+            })
+        })
+        .transpose()
+        .map_err(storage_error)
+    }
+
     /**
      * Khóa actor/owner theo protocol IAM, tránh lock owner sau Workspace tạo cycle với member mutation.
      * Input

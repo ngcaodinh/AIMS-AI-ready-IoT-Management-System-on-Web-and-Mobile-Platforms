@@ -14,6 +14,7 @@ pub mod membership;
 pub mod outbox;
 pub mod password_reset;
 pub mod preferences;
+pub mod provisioning;
 pub mod realtime;
 pub mod template;
 pub mod template_snapshot;

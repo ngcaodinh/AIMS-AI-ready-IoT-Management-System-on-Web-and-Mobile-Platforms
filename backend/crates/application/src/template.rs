@@ -8,14 +8,18 @@ use crate::{
 use iot_domain::{
     audit_write::AuditDetail,
     identity::{AuditRecord, Principal, SessionProof},
-    template::TemplateDraft,
+    template::{
+        TemplateDraft, TemplateField, TemplateIssueReason, TemplateValidation, ValidatedTemplate,
+    },
     template_snapshot::{
-        PublishedTemplate, TemplateMutation, TemplateSnapshot, TemplateTransitionFailure,
+        PublishedTemplate, TemplateMutation, TemplateSnapshot, TemplateStatus,
+        TemplateTransitionFailure, TemplateVersionSnapshot,
     },
 };
 use uuid::Uuid;
 
 /// Use case không có SQL/crypto implementation và không sửa schema pin của device khi publish.
+#[derive(Clone)]
 pub struct TemplateService<S, C> {
     store: S,
     digest: C,
@@ -61,20 +65,170 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
         workspace_id: Uuid,
         version_id: Uuid,
     ) -> Result<iot_domain::template_snapshot::TemplateVersionSnapshot, ApplicationError> {
+        self.read_version(proof, workspace_id, None, version_id)
+            .await
+    }
+
+    /**
+     * Đọc pin bất biến và kiểm family trước khi xác minh nội dung trả cho Admin.
+     * Input
+     * Param: proof — phiên hiện hành.
+     * Param: workspace_id — workspace đích phải ACTIVE và có grant Admin.
+     * Param: template_id — family bắt buộc nếu đọc qua route version có parent.
+     * Param: version_id — UUID snapshot bất biến.
+     * Output: snapshot scoped có digest đúng hoặc lỗi quyền, not-found, storage.
+     */
+    async fn read_version(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        template_id: Option<Uuid>,
+        version_id: Uuid,
+    ) -> Result<TemplateVersionSnapshot, ApplicationError> {
         let (mut transaction, locked) = self.open(proof, workspace_id).await?;
         let result = transaction
             .load_published_version(workspace_id, version_id)
             .await?;
         Self::current(&mut transaction, &locked, proof).await?;
+        if template_id.is_some_and(|parent| parent != result.template_id) {
+            return Err(ApplicationError::ResourceNotFound);
+        }
+        self.verify_version(&result)?;
+        transaction.commit_template().await?;
+        Ok(result)
+    }
+
+    /**
+     * Từ chối snapshot có digest sai trước khi trả cho API hoặc dùng để clone/pin.
+     *
+     * # Input
+     * Param: snapshot — immutable content và digest do repository resolve theo tenant.
+     *
+     * # Output
+     * Thành công khi digest canonical khớp.
+     *
+     * # Errors
+     * `Unavailable` khi dữ liệu persisted không khớp integrity check.
+     */
+    fn verify_version(&self, snapshot: &TemplateVersionSnapshot) -> Result<(), ApplicationError> {
         if self
             .digest
-            .content_digest(&result.content.canonical_bytes())
-            != result.content_digest
+            .content_digest(&snapshot.content.canonical_bytes())
+            != snapshot.content_digest
         {
             return Err(ApplicationError::Unavailable);
         }
+        Ok(())
+    }
+
+    /**
+     * Đọc một trang root của current Admin bằng keyset giới hạn và recheck session trước commit.
+     *
+     * # Input
+     * Param: proof — session/context đã parse, phải còn hiệu lực sau database wait.
+     * Param: workspace_id — tenant cần current Admin admission.
+     * Param: status — bộ lọc trạng thái tùy chọn.
+     * Param: after — UUID keyset cuối trang trước.
+     * Param: page_size — số hàng bounded do adapter tính sentinel.
+     *
+     * # Output
+     * Root snapshots trong đúng workspace.
+     *
+     * # Errors
+     * Authority, not-found/inconsistent rows hoặc storage.
+     */
+    pub async fn list(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        status: Option<TemplateStatus>,
+        after: Option<Uuid>,
+        page_size: i64,
+    ) -> Result<Vec<TemplateSnapshot>, ApplicationError> {
+        let (mut transaction, locked) = self.open(proof, workspace_id).await?;
+        let ids = transaction
+            .list_template_ids(workspace_id, status, after, page_size)
+            .await?;
+        let mut results = Vec::with_capacity(ids.len());
+        for template_id in ids {
+            results.push(transaction.lock_template(workspace_id, template_id).await?);
+        }
+        Self::current(&mut transaction, &locked, proof).await?;
         transaction.commit_template().await?;
-        Ok(result)
+        Ok(results)
+    }
+
+    /**
+     * Đọc exact version UUID và kiểm nó thuộc family mà current Admin yêu cầu.
+     *
+     * # Input
+     * Param: proof — session/context hiện hành.
+     * Param: workspace_id — tenant cần current Admin admission.
+     * Param: template_id — family root đã được chỉ định.
+     * Param: version_id — immutable snapshot selector, không phải authority.
+     *
+     * # Output
+     * Snapshot đúng family sau kiểm digest.
+     *
+     * # Errors
+     * Foreign/missing family/version cùng not-found, authority hoặc integrity/storage.
+     */
+    pub async fn version_in_family(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        template_id: Uuid,
+        version_id: Uuid,
+    ) -> Result<TemplateVersionSnapshot, ApplicationError> {
+        self.read_version(proof, workspace_id, Some(template_id), version_id)
+            .await
+    }
+
+    /**
+     * Liệt kê immutable versions trong family, không giả kết quả provenance chưa được lưu.
+     *
+     * # Input
+     * Param: proof — session/context hiện hành.
+     * Param: workspace_id — tenant cần current Admin admission.
+     * Param: template_id — family root đã được resolve scoped.
+     * Param: source_revision — provenance filter; chỉ hỗ trợ khi schema có nguồn đó.
+     * Param: after — UUID keyset cuối trang trước.
+     * Param: page_size — giới hạn lấy thêm sentinel.
+     *
+     * # Output
+     * Trang immutable snapshots đúng family; legacy source revision giữ null.
+     *
+     * # Errors
+     * `Unavailable` cho provenance chưa hỗ trợ, authority, integrity hoặc storage.
+     */
+    pub async fn versions(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        template_id: Uuid,
+        source_revision: Option<i64>,
+        after: Option<Uuid>,
+        page_size: i64,
+    ) -> Result<Vec<TemplateVersionSnapshot>, ApplicationError> {
+        let (mut transaction, locked) = self.open(proof, workspace_id).await?;
+        transaction.lock_template(workspace_id, template_id).await?;
+        // Schema hiện hành chưa có provenance, trả unavailable thay vì giả kết quả lookup rỗng.
+        if source_revision.is_some() {
+            Self::current(&mut transaction, &locked, proof).await?;
+            return Err(ApplicationError::Unavailable);
+        }
+        let ids = transaction
+            .list_version_ids(workspace_id, template_id, after, page_size)
+            .await?;
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
+            let result = transaction.load_published_version(workspace_id, id).await?;
+            self.verify_version(&result)?;
+            results.push(result);
+        }
+        Self::current(&mut transaction, &locked, proof).await?;
+        transaction.commit_template().await?;
+        Ok(results)
     }
 
     /**
@@ -174,8 +328,37 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
         let draft = draft
             .validate()
             .map_err(ApplicationError::TemplateInvalid)?;
+        self.create_checked(proof, workspace_id, draft, correlation_id, |_| Ok(()))
+            .await
+    }
+
+    /**
+     * Tạo draft sau current Admin admission và policy callback từ composition.
+     *
+     * # Input
+     * Param: proof — session/context cần kiểm lại dưới lock.
+     * Param: workspace_id — tenant đích.
+     * Param: draft — aggregate đã validate toàn bộ.
+     * Param: correlation_id — trace required audit.
+     * Param: approve — policy external chỉ chạy sau current Admin admission.
+     *
+     * # Output
+     * Root draft sau insert, audit và commit xác nhận.
+     *
+     * # Errors
+     * Authority, policy, storage hoặc `CommitUnknown`; lỗi audit rollback insert.
+     */
+    pub async fn create_checked(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        draft: ValidatedTemplate,
+        correlation_id: Uuid,
+        approve: impl FnOnce(&ValidatedTemplate) -> Result<(), ApplicationError> + Send,
+    ) -> Result<TemplateSnapshot, ApplicationError> {
         let (mut transaction, locked) = self.open(proof, workspace_id).await?;
         let (principal, now) = Self::current(&mut transaction, &locked, proof).await?;
+        approve(&draft)?;
         let template_id = Uuid::new_v4();
         let result = transaction
             .insert_template(workspace_id, template_id, principal.user_id(), &draft, now)
@@ -216,6 +399,29 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
     }
 
     /**
+     * Chặn đổi model của family sau publication dù writer mở draft bằng đường cũ hay HTTP PATCH.
+     * Input
+     * Param: before — root đã khóa cùng thông tin latest published.
+     * Param: draft — candidate đã validate.
+     * Output: lỗi model scoped khi candidate đổi model đã được pin theo family.
+     */
+    fn require_family_model(
+        before: &TemplateSnapshot,
+        draft: &ValidatedTemplate,
+    ) -> Result<(), ApplicationError> {
+        if before.latest_published_version_id.is_some()
+            && draft.draft().model != before.draft.draft().model
+        {
+            return Err(ApplicationError::TemplateInvalid(TemplateValidation {
+                stream_index: None,
+                field: TemplateField::Model,
+                reason: TemplateIssueReason::Incompatible,
+            }));
+        }
+        Ok(())
+    }
+
+    /**
      * Thay toàn bộ draft atomically theo revision; published snapshots và device pin giữ nguyên.
      * Input
      * Param: proof — full session/context của current Admin.
@@ -247,8 +453,120 @@ impl<S: TemplateStore, C: TemplateDigest> TemplateService<S, C> {
         let before = transaction.lock_template(workspace_id, template_id).await?;
         let (principal, now) = Self::current(&mut transaction, &locked, proof).await?;
         let revision = before.next_revision(expected_revision, TemplateMutation::ReplaceDraft)?;
+        Self::require_family_model(&before, &draft)?;
         let result = transaction
             .replace_draft(&before, &draft, revision, now)
+            .await?;
+        Self::audit(
+            &mut transaction,
+            &principal,
+            workspace_id,
+            correlation_id,
+            AuditDetail::TemplateDraftChanged {
+                template_id,
+                revision_before: before.revision,
+                revision_after: revision,
+            },
+        )
+        .await?;
+        transaction.commit_template().await?;
+        Ok(result)
+    }
+
+    /**
+     * Áp PATCH lên draft dưới current Admin/CAS fence để candidate không dựa vào snapshot đã cũ.
+     * Input
+     * Param: proof — session/context hiện hành cần giữ tới commit.
+     * Param: workspace_id — tenant đã chọn và phải còn active.
+     * Param: template_id — root draft dưới lock.
+     * Param: expected_revision — CAS revision từ `If-Match`; stale không tự refresh.
+     * Param: correlation_id — trace cho audit change.
+     * Param: candidate — phép biến đổi thuần đã lọc wire, không I/O hoặc dùng authority từ body.
+     * Output: draft revision mới sau required audit và commit xác nhận.
+     * Errors: precondition/CAS, validation, quyền, storage hoặc `CommitUnknown`; audit failure rollback.
+     */
+    pub async fn patch<E: From<ApplicationError>>(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        template_id: Uuid,
+        expected_revision: i64,
+        correlation_id: Uuid,
+        candidate: impl FnOnce(&TemplateSnapshot) -> Result<ValidatedTemplate, E> + Send,
+    ) -> Result<TemplateSnapshot, E> {
+        let (mut transaction, locked) = self.open(proof, workspace_id).await?;
+        let before = transaction.lock_template(workspace_id, template_id).await?;
+        let (principal, now) = Self::current(&mut transaction, &locked, proof).await?;
+        let revision = before
+            .next_revision(expected_revision, TemplateMutation::PatchDraft)
+            .map_err(ApplicationError::from)?;
+        let draft = candidate(&before)?;
+        Self::require_family_model(&before, &draft)?;
+        let result = transaction
+            .replace_draft(&before, &draft, revision, now)
+            .await?;
+        Self::audit(
+            &mut transaction,
+            &principal,
+            workspace_id,
+            correlation_id,
+            AuditDetail::TemplateDraftChanged {
+                template_id,
+                revision_before: before.revision,
+                revision_after: revision,
+            },
+        )
+        .await?;
+        transaction.commit_template().await?;
+        Ok(result)
+    }
+
+    /**
+     * Clone một version đúng family thành draft dưới CAS mà không sửa snapshot hay device pin cũ.
+     *
+     * # Input
+     * Param: proof — session/context hiện hành của current Admin.
+     * Param: workspace_id — tenant đích.
+     * Param: template_id — family root đã authorize.
+     * Param: expected_revision — CAS revision của root hiện hành.
+     * Param: source_version_id — exact published UUID trong chính family đó.
+     * Param: correlation_id — trace required audit.
+     *
+     * # Output
+     * Draft root mới từ content version sau audit/commit xác nhận.
+     *
+     * # Errors
+     * Draft đã tồn tại, stale, foreign version, immutable model, quyền hoặc storage.
+     */
+    pub async fn clone_draft(
+        &self,
+        proof: &SessionProof,
+        workspace_id: Uuid,
+        template_id: Uuid,
+        expected_revision: i64,
+        source_version_id: Uuid,
+        correlation_id: Uuid,
+    ) -> Result<TemplateSnapshot, ApplicationError> {
+        let (mut transaction, locked) = self.open(proof, workspace_id).await?;
+        let before = transaction.lock_template(workspace_id, template_id).await?;
+        Self::current(&mut transaction, &locked, proof).await?;
+        let revision = before.next_revision(expected_revision, TemplateMutation::ReplaceDraft)?;
+        if before.status == TemplateStatus::Draft {
+            return Err(ApplicationError::TemplateDraftExists);
+        }
+        let source = transaction
+            .load_published_version(workspace_id, source_version_id)
+            .await?;
+        if source.template_id != template_id {
+            return Err(ApplicationError::ResourceNotFound);
+        }
+        self.verify_version(&source)?;
+        if source.content.draft().model != before.draft.draft().model {
+            return Err(ApplicationError::ImmutableSchema);
+        }
+        let (principal, now) = Self::current(&mut transaction, &locked, proof).await?;
+        let result = transaction
+            .replace_draft(&before, &source.content, revision, now)
             .await?;
         Self::audit(
             &mut transaction,

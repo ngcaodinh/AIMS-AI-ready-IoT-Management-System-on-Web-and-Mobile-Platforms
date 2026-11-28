@@ -1,10 +1,18 @@
 //! HTTP adapter cho IAM; business rule vẫn thuộc application/domain, không mở CORS ambient.
 
+#[cfg(feature = "integrated-lab")]
+mod devices;
 mod input;
 mod members;
+#[cfg(feature = "integrated-lab")]
+mod provisioning;
 mod realtime;
 mod security;
 mod sessions;
+#[cfg(feature = "integrated-lab")]
+mod template_wire;
+#[cfg(feature = "integrated-lab")]
+mod templates;
 
 use crate::adapters::security::{CryptoService, PasswordService};
 use axum::{
@@ -18,6 +26,8 @@ use axum::{
 use iot_application::{
     auth_diagnostics::AuthDiagnostics, error::ApplicationError, identity::IdentityService,
 };
+#[cfg(feature = "integrated-lab")]
+use iot_domain::device::ApprovedDeviceModels;
 use iot_domain::{
     identity::ClientType,
     input::{normalize_email, validate_password},
@@ -29,11 +39,26 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub(super) type AuthService = IdentityService<PgIdentityStore, CryptoService>;
+#[cfg(feature = "integrated-lab")]
+type TemplateService = iot_application::template::TemplateService<PgIdentityStore, CryptoService>;
+#[cfg(feature = "integrated-lab")]
+type DeviceService = iot_application::device::DeviceService<PgIdentityStore, CryptoService>;
+#[cfg(feature = "integrated-lab")]
+type ProvisioningPollService =
+    iot_application::provisioning::ProvisioningPollService<PgIdentityStore>;
 
 /// State composition có key chỉ trong memory; không derive Debug hoặc đọc environment.
 #[derive(Clone)]
 pub struct HttpState {
     pub(super) auth: AuthService,
+    #[cfg(feature = "integrated-lab")]
+    templates: TemplateService,
+    #[cfg(feature = "integrated-lab")]
+    devices: DeviceService,
+    #[cfg(feature = "integrated-lab")]
+    provisioning: ProvisioningPollService,
+    #[cfg(feature = "integrated-lab")]
+    device_models: Option<ApprovedDeviceModels>,
     realtime: realtime::RealtimeHub,
     pub(super) signing_key: Arc<[u8; 32]>,
     pub(super) origin: Arc<str>,
@@ -87,11 +112,33 @@ impl HttpState {
         }
         let crypto = CryptoService::new(passwords, signing_key).await?;
         Ok(Self {
+            #[cfg(feature = "integrated-lab")]
+            templates: TemplateService::new(store.clone(), crypto.clone()),
+            #[cfg(feature = "integrated-lab")]
+            devices: DeviceService::without_models(store.clone(), crypto.clone()),
+            #[cfg(feature = "integrated-lab")]
+            provisioning: ProvisioningPollService::new(store.clone()),
+            #[cfg(feature = "integrated-lab")]
+            device_models: None,
             auth: IdentityService::new(store, crypto),
             realtime: realtime::RealtimeHub::with_handshake_db_capacity(handshake_db_capacity),
             signing_key: Arc::new(signing_key),
             origin: Arc::from(origin),
         })
+    }
+
+    /**
+     * Gắn chính sách model đã được composition phê duyệt cho template draft và đăng ký Device.
+     * Input
+     * Param: models — exact model IDs có nguồn ngoài request.
+     * Output: state dùng cùng principal/pool. Mặc định thiếu policy thì mutation cần model bị chặn.
+     */
+    #[cfg(feature = "integrated-lab")]
+    #[must_use]
+    pub fn with_approved_device_models(mut self, models: ApprovedDeviceModels) -> Self {
+        self.devices = self.devices.with_models(models.clone());
+        self.device_models = Some(models);
+        self
     }
 }
 
@@ -396,4 +443,24 @@ pub fn auth_router(state: HttpState) -> Router {
         .merge(realtime::routes())
         .route("/api/v1/auth/login", post(login))
         .with_state(state)
+}
+
+/**
+ * Ghép các endpoint draft/history/registry/poll chỉ trong composition lab tách khỏi router mặc định.
+ *
+ * # Input
+ * Param: state — auth principal, pool và policy model do composition cung cấp; thiếu policy sẽ chặn mutation.
+ *
+ * # Output
+ * Router có cùng IAM/session boundary cộng các route gated của integrated lab.
+ *
+ * # Side effects
+ * Dùng auth_router nên khởi chạy reconciler socket bounded hiện hành của instance.
+ */
+#[cfg(feature = "integrated-lab")]
+pub fn integrated_lab_router(state: HttpState) -> Router {
+    auth_router(state.clone())
+        .merge(templates::routes().with_state(state.clone()))
+        .merge(devices::routes().with_state(state.clone()))
+        .merge(provisioning::routes().with_state(state))
 }

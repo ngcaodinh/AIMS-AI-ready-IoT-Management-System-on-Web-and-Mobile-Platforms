@@ -8,7 +8,7 @@ use iot_application::{
     template_ports::TemplateDigest,
 };
 use iot_domain::{
-    device::{ApprovedDeviceModels, DeviceDraft, DevicePin, RegisteredDevice},
+    device::{ApprovedDeviceModels, DeviceDraft, DevicePin, DeviceRecord, RegisteredDevice},
     identity::{
         AccessFailure, AccountStatus, ActorAccountSnapshot, AuditRecord, ClientType, SessionProof,
         SessionSnapshot,
@@ -155,6 +155,20 @@ impl DeviceStore for SpyStore {
 }
 
 impl DeviceTransaction for SpyTransaction {
+    /**
+     * Giữ test admission tách khỏi recovery; panic nếu use case vô tình gọi port này.
+     *
+     * # Panics
+     * Luôn panic vì mọi test trong module này phải kiểm tra scope admission, không tra serial.
+     */
+    async fn recover_device(
+        &mut self,
+        _workspace_id: Uuid,
+        _serial: &str,
+    ) -> Result<Option<DeviceRecord>, ApplicationError> {
+        panic!("unexpected serial lookup")
+    }
+
     /// Cấp full Android session ACTIVE còn hạn cho actor cố định để chỉ cô lập workspace admission.
     async fn lock_device_actor(
         &mut self,

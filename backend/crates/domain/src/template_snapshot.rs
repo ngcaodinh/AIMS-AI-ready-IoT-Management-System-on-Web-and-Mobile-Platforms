@@ -12,10 +12,23 @@ pub enum TemplateStatus {
     Archived,
 }
 
+impl TemplateStatus {
+    /// Trả trạng thái canonical cho persistence và wire, giữ riêng trạng thái snapshot bất biến.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Draft => "DRAFT",
+            Self::Published => "PUBLISHED",
+            Self::Archived => "ARCHIVED",
+        }
+    }
+}
+
 /// Ý định thay draft hoặc publish quyết định state guard; không dùng bool khó phân biệt ở caller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TemplateMutation {
     ReplaceDraft,
+    PatchDraft,
     Publish,
 }
 
@@ -34,6 +47,7 @@ pub struct TemplateSnapshot {
     pub template_id: Uuid,
     pub revision: i64,
     pub status: TemplateStatus,
+    pub latest_published_version_id: Option<Uuid>,
     pub draft: ValidatedTemplate,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -58,7 +72,10 @@ impl TemplateSnapshot {
             return Err(TemplateTransitionFailure::StaleRevision);
         }
         if self.status == TemplateStatus::Archived
-            || (mutation == TemplateMutation::Publish && self.status != TemplateStatus::Draft)
+            || (matches!(
+                mutation,
+                TemplateMutation::PatchDraft | TemplateMutation::Publish
+            ) && self.status != TemplateStatus::Draft)
         {
             return Err(TemplateTransitionFailure::Immutable);
         }
@@ -102,7 +119,16 @@ impl ValidatedTemplate {
     #[must_use]
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let draft = self.draft();
-        let mut writer = CanonicalWriter(b"TEMPLATE_SNAPSHOT_V1:".to_vec());
+        // Giữ byte V1 cho snapshot cũ không có default; prefix mới tách encoding có field mới.
+        let has_defaults = draft
+            .streams
+            .iter()
+            .any(|stream| stream.default_value.is_some());
+        let mut writer = CanonicalWriter(if has_defaults {
+            b"TEMPLATE_SNAPSHOT_V2:".to_vec()
+        } else {
+            b"TEMPLATE_SNAPSHOT_V1:".to_vec()
+        });
         writer.field(&draft.name);
         writer.field(&draft.model);
         // Description không được snapshot trong template_versions; không hash dữ liệu chỉ còn ở root mutable.
@@ -145,6 +171,12 @@ impl ValidatedTemplate {
             writer.0.push(u8::from(stream.safe_value.is_some()));
             if let Some(value) = &stream.safe_value {
                 writer.value(value);
+            }
+            if has_defaults {
+                writer.0.push(u8::from(stream.default_value.is_some()));
+                if let Some(value) = &stream.default_value {
+                    writer.value(value);
+                }
             }
         }
         writer.0

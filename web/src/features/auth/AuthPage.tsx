@@ -1,9 +1,24 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { AuthCoordinator, type AuthState } from './coordinator';
 import { IconSprite } from '../../IconSprite';
 import { BrandLink } from '../../BrandLink';
 import { newPasswordHint, validatePassword } from './passwordPolicy';
+import { WorkspaceApiError } from '../workspace/workspaceApi';
+import { listTemplatesApi } from '../templates/templateApi';
+import { recoverDeviceBySerialApi } from '../devices/deviceApi';
 import './auth.css';
+
+/** Nạp lười workbench Templates WB-03 khi phiên đã chọn workspace hợp lệ. */
+const LazyTemplatesWorkbench = lazy(
+  /** Tải module TemplatesWorkbench chỉ sau khi workspace được xác minh. */
+  async () => ({ default: (await import('../templates/TemplatesWorkbench')).TemplatesWorkbench }),
+);
+
+/** Nạp lười workbench Devices/USB WB-04 khi phiên đã chọn workspace hợp lệ. */
+const LazyDevicesPage = lazy(
+  /** Tải module DevicesPage chỉ sau khi workspace được xác minh. */
+  async () => ({ default: (await import('../devices/DevicesPage')).DevicesPage }),
+);
 
 const ERROR_MESSAGES: Record<string, string> = {
   AUTH_INVALID: 'Thông tin đăng nhập không hợp lệ.',
@@ -80,6 +95,11 @@ export function AuthPage() {
   const [now, setNow] = useState(Date.now());
   const [dark, setDark] = useState(getInitialDark);
   const [logoutSuccess, setLogoutSuccess] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<'summary' | 'templates' | 'devices'>('summary');
+  const [runtimeAvailability, setRuntimeAvailability] = useState<{ templates: boolean; devices: boolean }>({
+    templates: false,
+    devices: false,
+  });
   const wasLogoutPendingRef = useRef(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -116,6 +136,9 @@ export function AuthPage() {
     setNewPassword('');
     setConfirmation('');
     setShowPassword(false);
+    if (state.phase !== 'selected') {
+      setWorkspaceTab('summary');
+    }
   }, [state.phase]);
 
   /**
@@ -143,8 +166,72 @@ export function AuthPage() {
     }
   }, [state.phase, state.busy, state.logoutPending, state.error]);
 
-  /** Đồng bộ theme lúc mở trực tiếp /login; token gốc áp cho cả native form control sáng/tối. */
+  // Đồng bộ theme lúc mở trực tiếp /login; token gốc áp cho cả native form control sáng/tối.
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
+
+  const selectedWorkspaceId = state.selected?.id ?? '';
+  const selectedWorkspaceRole = state.selected?.role;
+  const sessionSnapshot = state.phase === 'selected' ? coordinator.getSessionMetadata() : undefined;
+  const activeContextId = sessionSnapshot?.contextId ?? '';
+  const activeCsrfToken = sessionSnapshot?.csrfToken ?? '';
+  const activeSession = useMemo(
+    /** Ổn định tham chiếu `SessionMetadata` theo giá trị thực để không reset workbench khi re-render AuthPage. */
+    () => (activeContextId && activeCsrfToken
+      ? { contextId: activeContextId, csrfToken: activeCsrfToken }
+      : undefined),
+    [activeContextId, activeCsrfToken],
+  );
+
+  /**
+   * Thăm dò read-only khi mở workspace của ADMIN để chỉ hiển thị WB-03/WB-04 khi runtime cung cấp endpoint tương ứng.
+   * Side effects: cập nhật `runtimeAvailability`, giữ UI tối giản khi route trả 404 và khóa phiên nếu gặp 401/409.
+   */
+  useEffect(() => {
+    setRuntimeAvailability({ templates: false, devices: false });
+    if (state.phase !== 'selected' || selectedWorkspaceRole !== 'ADMIN' || !selectedWorkspaceId || !activeSession) {
+      return;
+    }
+
+    const controller = new AbortController();
+    let active = true;
+    const ctx = { workspaceId: selectedWorkspaceId, session: activeSession };
+
+    /** Chạy cặp GET thăm dò chỉ đọc cho template và device recovery trong phạm vi workspace hiện hành. */
+    async function probeRuntimeWorkbenches(): Promise<void> {
+      const [templatesResult, devicesResult] = await Promise.allSettled([
+        listTemplatesApi(ctx, { limit: 1, signal: controller.signal }),
+        recoverDeviceBySerialApi(ctx, 'runtime-availability-probe', controller.signal),
+      ]);
+      if (!active || controller.signal.aborted) return;
+
+      const results = [templatesResult, devicesResult];
+      for (const result of results) {
+        if (result.status === 'rejected' && result.reason instanceof WorkspaceApiError
+          && [401, 409].includes(result.reason.status)
+          && ['SESSION_EXPIRED', 'SESSION_REVOKED', 'AUTH_CONTEXT_MISMATCH', 'CSRF_INVALID'].includes(result.reason.code)) {
+          coordinator.invalidate();
+          void coordinator.restore();
+          return;
+        }
+      }
+
+      const templatesReady = templatesResult.status === 'fulfilled';
+      const devicesReady = devicesResult.status === 'fulfilled';
+      setRuntimeAvailability({ templates: templatesReady, devices: devicesReady });
+      setWorkspaceTab((prev) => {
+        if (prev === 'templates' && !templatesReady) return 'summary';
+        if (prev === 'devices' && !devicesReady) return 'summary';
+        return prev;
+      });
+    }
+
+    void probeRuntimeWorkbenches();
+    /** Hủy thăm dò runtime ngay khi đổi workspace, rời phase selected hoặc unmount. */
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [coordinator, state.phase, selectedWorkspaceId, selectedWorkspaceRole, activeSession]);
 
   // Restore qua guard thật; cleanup ngăn callback của instance đã unmount mở lại protected UI.
   useEffect(() => {
@@ -274,7 +361,7 @@ export function AuthPage() {
         </div>
       </header>
       <main className="auth-main" id="main" tabIndex={-1}>
-        <div className="auth-layout">
+        <div className={`auth-layout${state.phase === 'selected' && workspaceTab !== 'summary' ? ' auth-layout-wide' : ''}`}>
         <div className="auth-card" data-state={state.phase}>
           <div className="auth-card-heading"><span className="auth-state-icon"><AuthIcon name={stateIcon} /></span><span className="auth-eyebrow">NEXA WORKSPACE</span></div>
           {state.phase === 'selected' && <nav className="auth-breadcrumb" aria-label="Đường dẫn"><span>Workspaces</span><span aria-hidden="true">/</span><span aria-current="page">{state.selected?.name}</span></nav>}
@@ -380,11 +467,72 @@ export function AuthPage() {
                 }>Tải lại danh sách</button>
             </>
           )}
-          {state.phase === 'selected' && <div className="auth-success-panel"><p className="auth-access-status" role="status">Đã xác minh quyền {state.selected?.role === 'ADMIN' ? 'quản trị viên' : 'thành viên'} của bạn.</p><dl className="auth-session-summary"><div><dt>Tài khoản đang sử dụng</dt><dd>{state.profile?.email}</dd></div><div><dt>Workspace hiện tại</dt><dd>{state.selected?.name}</dd></div></dl><p className="auth-hint">Bạn có thể chuyển workspace hoặc đăng xuất tại đây.</p><button className="auth-secondary" type="button" disabled={state.busy || offline}
-            onClick={
-              /** Quay về picker qua guard thật, xóa nội dung scope trước trước khi nhận danh sách mới. */
-              () => void coordinator.restore()
-            }>Chuyển workspace</button></div>}
+          {state.phase === 'selected' && (
+            <div className="auth-success-panel">
+              <p className="auth-access-status" role="status">
+                Đã xác minh quyền {state.selected?.role === 'ADMIN' ? 'quản trị viên' : 'thành viên'} của bạn.
+              </p>
+              <dl className="auth-session-summary">
+                <div><dt>Tài khoản đang sử dụng</dt><dd>{state.profile?.email}</dd></div>
+                <div><dt>Workspace hiện tại</dt><dd>{state.selected?.name}</dd></div>
+              </dl>
+
+              {state.selected?.role === 'ADMIN' && activeSession && (runtimeAvailability.templates || runtimeAvailability.devices) ? (
+                <div className="auth-workbench-nav" role="navigation" aria-label="Chức năng quản trị workspace">
+                  <button
+                    type="button"
+                    className={`auth-secondary ${workspaceTab === 'summary' ? 'auth-tab-active' : ''}`}
+                    aria-pressed={workspaceTab === 'summary'}
+                    onClick={
+                      /** Hiển thị lại thẻ tổng quan phiên xác thực của workspace. */
+                      () => setWorkspaceTab('summary')
+                    }
+                  >
+                    Tổng quan phiên
+                  </button>
+                  {runtimeAvailability.templates ? (
+                    <button
+                      type="button"
+                      className={`auth-secondary ${workspaceTab === 'templates' ? 'auth-tab-active' : ''}`}
+                      aria-pressed={workspaceTab === 'templates'}
+                      onClick={
+                        /** Mở workbench WB-03 (005 T4 + 006 V4) cho workspace hiện hành. */
+                        () => setWorkspaceTab('templates')
+                      }
+                    >
+                      Templates (WB-03)
+                    </button>
+                  ) : null}
+                  {runtimeAvailability.devices ? (
+                    <button
+                      type="button"
+                      className={`auth-secondary ${workspaceTab === 'devices' ? 'auth-tab-active' : ''}`}
+                      aria-pressed={workspaceTab === 'devices'}
+                      onClick={
+                        /** Mở workbench WB-04 (007 D4 + 008 metadata-only poll) cho workspace hiện hành. */
+                        () => setWorkspaceTab('devices')
+                      }
+                    >
+                      Thiết bị &amp; USB (WB-04)
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <p className="auth-hint">Bạn có thể chuyển workspace hoặc đăng xuất tại đây.</p>
+              <button
+                className="auth-secondary"
+                type="button"
+                disabled={state.busy || offline}
+                onClick={
+                  /** Quay về picker qua guard thật, xóa nội dung scope trước khi nhận danh sách mới. */
+                  () => void coordinator.restore()
+                }
+              >
+                Chuyển workspace
+              </button>
+            </div>
+          )}
           {state.phase === 'recovery' && (
             <div className="auth-recovery">
               <p>{state.logoutPending ? 'Chưa xác nhận kết quả đăng xuất với máy chủ. Nội dung workspace đang được khóa trên trình duyệt.' : 'Chưa xác nhận trạng thái phiên. Nội dung workspace đang được khóa.'}</p>
@@ -411,6 +559,43 @@ export function AuthPage() {
             }>{state.busy && state.logoutPending ? 'Đang đăng xuất…' : 'Đăng xuất'}</button>}
           {state.busy && state.phase !== 'loading' && <p className="auth-progress" role="status"><span className="auth-spinner" aria-hidden="true" />{state.logoutPending ? 'Đang xử lý đăng xuất…' : 'Đang xử lý…'}</p>}
         </div>
+        {state.phase === 'selected' && state.selected && activeSession
+          && ((workspaceTab === 'templates' && runtimeAvailability.templates)
+            || (workspaceTab === 'devices' && runtimeAvailability.devices)) ? (
+          <div className="auth-workbench-stage">
+            <Suspense fallback={<p className="auth-hint" role="status">Đang tải màn hình quản trị workspace…</p>}>
+              {workspaceTab === 'templates' ? (
+                <LazyTemplatesWorkbench
+                  workspaceId={state.selected.id}
+                  workspaceName={state.selected.name}
+                  workspaceRole={state.selected.role}
+                  session={activeSession}
+                  onAuthError={
+                    /** Hủy quyền điều phối cũ và đối soát lại phiên khi gặp lỗi 401/409 từ API workspace. */
+                    () => {
+                      coordinator.invalidate();
+                      void coordinator.restore();
+                    }
+                  }
+                />
+              ) : (
+                <LazyDevicesPage
+                  workspaceId={state.selected.id}
+                  workspaceName={state.selected.name}
+                  workspaceRole={state.selected.role}
+                  session={activeSession}
+                  onAuthError={
+                    /** Hủy quyền điều phối cũ và đối soát lại phiên khi gặp lỗi 401/409 từ API thiết bị. */
+                    () => {
+                      coordinator.invalidate();
+                      void coordinator.restore();
+                    }
+                  }
+                />
+              )}
+            </Suspense>
+          </div>
+        ) : null}
         </div>
       </main>
       <footer className="auth-footer"><span translate="no">Nexa IoT</span><span className="auth-footer-dot" aria-hidden="true" /><span>Không gian làm việc kết nối</span></footer>

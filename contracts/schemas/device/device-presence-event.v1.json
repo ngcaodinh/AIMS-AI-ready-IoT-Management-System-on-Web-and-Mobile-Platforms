@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aims.local/contracts/schemas/device/device-presence-event.v1.json",
+  "title": "FEAT-TN-009 device.presence.changed WebSocket event contract",
+  "description": "Versioned G1 wire schema for the FEAT-TN-009 PRESENCE-1 synthetic WebSocket event slice (067 envelope, 009 internal domain payload, and 027 rule adapter input).",
+  "x-contract-version": "0.1.0",
+  "x-schema-version": 1,
+  "x-contract-status": "DRAFT_G1",
+  "$ref": "#/$defs/WsDevicePresenceChangedEvent",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+    },
+    "UtcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    },
+    "ConnectivityState": {
+      "type": "string",
+      "enum": [
+        "UNKNOWN",
+        "ONLINE",
+        "OFFLINE"
+      ]
+    },
+    "TargetConnectivityState": {
+      "type": "string",
+      "enum": [
+        "ONLINE",
+        "OFFLINE"
+      ]
+    },
+    "PresenceTransitionReason": {
+      "type": "string",
+      "enum": [
+        "NORMAL",
+        "OTA_MAINTENANCE"
+      ]
+    },
+    "PresenceVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic presence transition version per device; independent from FEAT-TN-011 device config revision."
+    },
+    "WsDevicePresenceChangedData": {
+      "type": "object",
+      "properties": {
+        "transitionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "from": {
+          "$ref": "#/$defs/ConnectivityState"
+        },
+        "to": {
+          "$ref": "#/$defs/TargetConnectivityState"
+        },
+        "reason": {
+          "$ref": "#/$defs/PresenceTransitionReason"
+        },
+        "lastSeen": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "maintenanceJobId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "transitionId",
+        "from",
+        "to",
+        "reason",
+        "lastSeen",
+        "maintenanceJobId"
+      ],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "from": {
+              "const": "ONLINE"
+            },
+            "to": {
+              "const": "OFFLINE"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from": {
+              "enum": [
+                "UNKNOWN",
+                "OFFLINE"
+              ]
+            },
+            "to": {
+              "const": "ONLINE"
+            }
+          }
+        }
+      ]
+    },
+    "WsDevicePresenceChangedEvent": {
+      "type": "object",
+      "description": "FEAT-TN-067 §8.4 common WebSocket envelope wrapping FEAT-TN-009 §8.5 device.presence.changed; rejects flat domain payloads.",
+      "properties": {
+        "eventId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "type": {
+          "const": "device.presence.changed"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "resourceId": {
+          "$ref": "#/$defs/Uuid",
+          "description": "Mapped from Device.id (deviceId)."
+        },
+        "revision": {
+          "$ref": "#/$defs/PresenceVersion",
+          "description": "Mapped from presenceVersion."
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "data": {
+          "$ref": "#/$defs/WsDevicePresenceChangedData"
+        }
+      },
+      "required": [
+        "eventId",
+        "type",
+        "workspaceId",
+        "resourceId",
+        "revision",
+        "occurredAt",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "InternalPresenceChangedDomainEvent": {
+      "type": "object",
+      "description": "FEAT-TN-009 §8.5 internal committed domain payload; must not be emitted directly as a WebSocket frame.",
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "transitionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "presenceVersion": {
+          "$ref": "#/$defs/PresenceVersion"
+        },
+        "from": {
+          "$ref": "#/$defs/ConnectivityState"
+        },
+        "to": {
+          "$ref": "#/$defs/TargetConnectivityState"
+        },
+        "reason": {
+          "$ref": "#/$defs/PresenceTransitionReason"
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "lastSeen": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "maintenanceJobId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "workspaceId",
+        "deviceId",
+        "transitionId",
+        "presenceVersion",
+        "from",
+        "to",
+        "reason",
+        "occurredAt",
+        "lastSeen",
+        "maintenanceJobId"
+      ],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "from": {
+              "const": "ONLINE"
+            },
+            "to": {
+              "const": "OFFLINE"
+            }
+          }
+        },
+        {
+          "properties": {
+            "from": {
+              "enum": [
+                "UNKNOWN",
+                "OFFLINE"
+              ]
+            },
+            "to": {
+              "const": "ONLINE"
+            }
+          }
+        }
+      ]
+    },
+    "ConnectivityRuleTriggerInput": {
+      "type": "object",
+      "description": "FEAT-TN-027 §8.3 semantic adapter input mapped from internal device.presence.changed.",
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "connectivityTransitionId": {
+          "$ref": "#/$defs/Uuid",
+          "description": "Mapped from transitionId."
+        },
+        "presenceVersion": {
+          "$ref": "#/$defs/PresenceVersion"
+        },
+        "previous": {
+          "$ref": "#/$defs/ConnectivityState",
+          "description": "Mapped from from."
+        },
+        "current": {
+          "$ref": "#/$defs/TargetConnectivityState",
+          "description": "Mapped from to."
+        },
+        "reason": {
+          "$ref": "#/$defs/PresenceTransitionReason"
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "maintenanceJobId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "workspaceId",
+        "deviceId",
+        "connectivityTransitionId",
+        "presenceVersion",
+        "previous",
+        "current",
+        "reason",
+        "occurredAt",
+        "maintenanceJobId"
+      ],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "previous": {
+              "const": "ONLINE"
+            },
+            "current": {
+              "const": "OFFLINE"
+            }
+          }
+        },
+        {
+          "properties": {
+            "previous": {
+              "enum": [
+                "UNKNOWN",
+                "OFFLINE"
+              ]
+            },
+            "current": {
+              "const": "ONLINE"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

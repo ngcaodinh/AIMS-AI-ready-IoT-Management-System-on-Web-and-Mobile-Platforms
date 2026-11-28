@@ -18,15 +18,18 @@ import type {
   StreamScalarValue,
   TemplateCommandDto,
   TemplateDto as LiveTemplateDto,
+  TemplatePatchInput,
   TemplateVersionDto,
 } from './templateContract.ts';
 import {
   createEmptyTemplateForm,
   serializeFormForDirtyCheck,
   type FieldErrorItem,
+  type TemplateCommandDraft,
   type TemplateDraftForm,
   type TemplateDto as EditorTemplateDto,
   type TemplateSaveOutcome,
+  type TemplateStreamDraft,
 } from './templateMockApi.ts';
 import './templates.css';
 
@@ -113,7 +116,10 @@ function editorFormToWirePayload(
         next.enumValues = [...stream.enumValues];
       }
       const rawDefault = streamDefaults[stream.localId] ?? '';
-      if (rawDefault.trim() !== '') {
+      const hasDefaultValue = (stream.type === 'STRING' || stream.type === 'ENUM')
+        ? rawDefault !== ''
+        : rawDefault.trim() !== '';
+      if (hasDefaultValue) {
         let parsedDefault: StreamScalarValue = rawDefault;
         if (stream.type === 'NUMBER') {
           const parsed = Number(rawDefault.trim());
@@ -123,8 +129,6 @@ function editorFormToWirePayload(
           if (normalizedBool === 'true') parsedDefault = true;
           else if (normalizedBool === 'false') parsedDefault = false;
           else parsedDefault = normalizedBool;
-        } else if (stream.type === 'ENUM') {
-          parsedDefault = rawDefault.trim();
         }
         next.default = parsedDefault;
       }
@@ -224,6 +228,95 @@ function extractStreamDefaults(dto: LiveTemplateDto): Record<string, string> {
     },
   );
   return next;
+}
+
+/**
+ * Tuần tự hóa trạng thái các kênh và giá trị `default` thô để phát hiện thay đổi phần `streams` khi lưu PATCH.
+ * Input
+ * Param: streams — mảng datastream trên form.
+ * Param: defaults — bảng chuỗi `default` theo `localId`.
+ * Output: chuỗi chuẩn phản ánh nguyên trạng các kênh hiện có.
+ */
+function serializeStreamsState(
+  streams: readonly TemplateStreamDraft[],
+  defaults: Readonly<Record<string, string>>,
+): string {
+  return JSON.stringify(
+    streams.map(
+      /** Gom toàn bộ thuộc tính cấu hình kênh kèm chuỗi `default` chưa bị trim. */
+      (stream) => ({
+        key: stream.key,
+        type: stream.type,
+        channelKind: stream.channelKind,
+        direction: stream.direction,
+        unit: stream.unit,
+        minText: stream.minText,
+        maxText: stream.maxText,
+        enumValues: stream.enumValues,
+        defaultText: defaults[stream.localId] ?? '',
+      }),
+    ),
+  );
+}
+
+/**
+ * Tuần tự hóa danh sách capability `SET_VALUE` để phát hiện thay đổi phần `commands` khi lưu PATCH.
+ * Input
+ * Param: commands — mảng lệnh an toàn trên form.
+ * Output: chuỗi phản ánh cấu hình `commands[]`.
+ */
+function serializeCommandsState(commands: readonly TemplateCommandDraft[]): string {
+  return JSON.stringify(
+    commands.map(
+      /** Giữ nguyên khóa kênh đích và giá trị `safeValueText` để so sánh thay đổi. */
+      (cmd) => ({
+        type: cmd.type,
+        stream: cmd.stream,
+        safeValueText: cmd.safeValueText,
+      }),
+    ),
+  );
+}
+
+/**
+ * Tạo payload PATCH tối thiểu cho bản nháp đã tồn tại trên máy chủ:
+ * chỉ gửi các phần (`name`, `model`, `streams`, `commands`) thực sự thay đổi so với `currentRoot`
+ * để thao tác đổi tên không ghi đè hoặc ép kiểu lại numeric ENUM hay `default` chỉ chứa khoảng trắng.
+ * Input
+ * Param: currentRoot — bản ghi template gốc đã tải từ server.
+ * Param: form — dữ liệu biểu mẫu đang sửa.
+ * Param: streamDefaults — bảng giá trị `default` theo `localId`.
+ * Output: `TemplatePatchInput` chỉ chứa trường thay đổi (tối thiểu `name` nếu chưa đổi trường nào).
+ */
+function buildLiveDraftPatchPayload(
+  currentRoot: LiveTemplateDto,
+  form: TemplateDraftForm,
+  streamDefaults: Readonly<Record<string, string>>,
+): TemplatePatchInput {
+  const full = editorFormToWirePayload(form, streamDefaults);
+  const baselineForm = liveDtoToForm(currentRoot);
+  const baselineDefaults = extractStreamDefaults(currentRoot);
+
+  const patch: TemplatePatchInput = {};
+  if (full.name !== currentRoot.name.normalize('NFC').trim()) {
+    patch.name = full.name;
+  }
+  if (full.model !== currentRoot.model.trim()) {
+    patch.model = full.model;
+  }
+  if (
+    serializeStreamsState(form.streams, streamDefaults)
+    !== serializeStreamsState(baselineForm.streams, baselineDefaults)
+  ) {
+    patch.streams = full.streams;
+  }
+  if (serializeCommandsState(form.commands) !== serializeCommandsState(baselineForm.commands)) {
+    patch.commands = full.commands;
+  }
+  if (Object.keys(patch).length === 0) {
+    patch.name = full.name;
+  }
+  return patch;
 }
 
 /**
@@ -486,11 +579,18 @@ export function TemplatesWorkbench({
     setIsSubmitting(true);
     setPublishOutcome(null);
 
-    const payload = editorFormToWirePayload(editorForm, streamDefaults);
     try {
       const saved = editorForm.id && editorForm.revision !== null
-        ? await patchTemplateDraftApi(ctx, editorForm.id, editorForm.revision, payload, controller.signal)
-        : await createTemplateDraftApi(ctx, payload, controller.signal);
+        ? await patchTemplateDraftApi(
+          ctx,
+          editorForm.id,
+          editorForm.revision,
+          currentRoot
+            ? buildLiveDraftPatchPayload(currentRoot, editorForm, streamDefaults)
+            : editorFormToWirePayload(editorForm, streamDefaults),
+          controller.signal,
+        )
+        : await createTemplateDraftApi(ctx, editorFormToWirePayload(editorForm, streamDefaults), controller.signal);
       if (generation !== generationRef.current || controller.signal.aborted) return;
       const syncedForm = liveDtoToForm(saved);
       const syncedDefaults = extractStreamDefaults(saved);

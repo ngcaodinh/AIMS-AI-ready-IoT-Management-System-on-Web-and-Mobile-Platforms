@@ -51,7 +51,9 @@ export function DevicesPage({
   const [errorFocusNonce, setErrorFocusNonce] = useState<number>(0);
 
   const generationRef = useRef<number>(0);
-  const abortRef = useRef<AbortController | null>(null);
+  // Tách riêng controller tải phụ thuộc ban đầu với controller thao tác người dùng để tra cứu serial không hủy việc nạp dropdown.
+  const depsAbortRef = useRef<AbortController | null>(null);
+  const actionAbortRef = useRef<AbortController | null>(null);
   const ctx = useMemo(
     /** Gói ngữ cảnh workspace và phiên hiện hành để dùng cho mọi API thiết bị/credential. */
     () => ({ workspaceId, session }),
@@ -71,9 +73,10 @@ export function DevicesPage({
   /** Hủy request cũ và xóa sạch mọi dữ liệu phụ thuộc khi chuyển sang workspace khác. */
   useEffect(() => {
     generationRef.current += 1;
-    abortRef.current?.abort();
+    depsAbortRef.current?.abort();
+    actionAbortRef.current?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
+    depsAbortRef.current = controller;
     const generation = generationRef.current;
 
     setPublishedVersions([]);
@@ -84,7 +87,11 @@ export function DevicesPage({
 
     if (workspaceRole !== 'ADMIN') {
       setIsLoadingDeps(false);
-      return () => controller.abort();
+      /** Hủy toàn bộ request tải phụ thuộc và thao tác khi rời workspace hoặc unmount. */
+      return () => {
+        controller.abort();
+        actionAbortRef.current?.abort();
+      };
     }
 
     setIsLoadingDeps(true);
@@ -113,16 +120,20 @@ export function DevicesPage({
       }
     }
     void loadDependencies();
-    return () => controller.abort();
+    /** Hủy toàn bộ request tải phụ thuộc và thao tác khi đổi workspace hoặc unmount. */
+    return () => {
+      controller.abort();
+      actionAbortRef.current?.abort();
+    };
   }, [ctx, workspaceRole]);
 
   /** Gửi đăng ký thiết bị mới (`POST /api/v1/devices`) và đối soát `GET /devices?serial=` khi mất ACK 201. */
   async function handleSubmitRegister(input: DeviceCreateInput): Promise<void> {
     if (isSubmitting) return;
     const generation = generationRef.current;
-    abortRef.current?.abort();
+    actionAbortRef.current?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
+    actionAbortRef.current = controller;
     setIsSubmitting(true);
     setOutcome(null);
     setSelectedSetupMethod(null);
@@ -202,9 +213,9 @@ export function DevicesPage({
   async function handleLookupBySerial(serialQuery: string): Promise<void> {
     if (isSubmitting) return;
     const generation = generationRef.current;
-    abortRef.current?.abort();
+    actionAbortRef.current?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
+    actionAbortRef.current = controller;
     setIsSubmitting(true);
     setOutcome(null);
     setSelectedSetupMethod(null);

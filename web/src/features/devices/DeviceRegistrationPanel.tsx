@@ -84,8 +84,12 @@ export function DeviceRegistrationPanel({
   const [localErrors, setLocalErrors] = useState<ApiFieldError[]>([]);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
 
+  const serverValidationMessage = localErrors.length === 0 && outcome?.kind === 'validation_422'
+    ? outcome.message
+    : '';
   const serverFieldErrors = outcome?.kind === 'validation_422' ? outcome.fieldErrors : [];
   const allFieldErrors = localErrors.length > 0 ? localErrors : serverFieldErrors;
+  const hasValidationAlert = allFieldErrors.length > 0 || Boolean(serverValidationMessage);
   const errorMap = new Map<string, string>();
   for (const item of allFieldErrors) {
     if (!errorMap.has(item.path)) {
@@ -93,12 +97,12 @@ export function DeviceRegistrationPanel({
     }
   }
 
-  /** Đưa tiêu điểm vào tóm tắt lỗi khi có lỗi validation phát sinh từ local hoặc server 422. */
+  /** Đưa tiêu điểm vào tóm tắt lỗi khi có lỗi validation (kể cả lỗi nghiệp vụ 422 không kèm fieldErrors). */
   useEffect(() => {
-    if (errorFocusNonce > 0 && allFieldErrors.length > 0) {
+    if (errorFocusNonce > 0 && hasValidationAlert) {
       errorSummaryRef.current?.focus();
     }
-  }, [errorFocusNonce, allFieldErrors.length]);
+  }, [errorFocusNonce, hasValidationAlert]);
 
   /** Đồng bộ mã `model` chính xác từ snapshot `TemplateVersion` đã công bố khi người dùng chọn pin. */
   function handleVersionChange(event: ChangeEvent<HTMLSelectElement>): void {
@@ -186,24 +190,34 @@ export function DeviceRegistrationPanel({
           </div>
         </div>
 
-        {allFieldErrors.length > 0 ? (
+        {hasValidationAlert ? (
           <div id="dev-error-summary" ref={errorSummaryRef} tabIndex={-1} role="alert" className="dev-error-summary">
-            <strong>Không thể đăng ký thiết bị: có {allFieldErrors.length} lỗi cần kiểm tra</strong>
-            <ul>
-              {allFieldErrors.map(
-                /** Liên kết lỗi về đúng control nhập liệu trong form D4. */
-                (item, idx) => {
-                  const targetId = deviceFieldPathToId(item.path);
-                  return (
-                    <li key={`${item.path}-${item.code}-${idx}`}>
-                      <a href={`#${targetId}`} data-target-id={targetId} onClick={handleErrorLinkClick}>
-                        <span className="dev-mono">{item.path}</span> ({item.code})
-                      </a>
-                    </li>
-                  );
-                },
-              )}
-            </ul>
+            <strong>
+              {allFieldErrors.length > 0
+                ? (serverValidationMessage || `Không thể đăng ký thiết bị: có ${allFieldErrors.length} lỗi cần kiểm tra`)
+                : serverValidationMessage}
+            </strong>
+            {allFieldErrors.length > 0 ? (
+              <ul>
+                {allFieldErrors.map(
+                  /** Liên kết lỗi về đúng control nhập liệu trong form D4. */
+                  (item, idx) => {
+                    const targetId = deviceFieldPathToId(item.path);
+                    return (
+                      <li key={`${item.path}-${item.code}-${idx}`}>
+                        <a href={`#${targetId}`} data-target-id={targetId} onClick={handleErrorLinkClick}>
+                          <span className="dev-mono">{item.path}</span> ({item.code})
+                        </a>
+                      </li>
+                    );
+                  },
+                )}
+              </ul>
+            ) : (
+              <p className="dev-hint">
+                Kiểm tra lại trạng thái thành viên chủ sở hữu (ACTIVE), phiên bản template đã công bố và mã model khớp trước khi thử lại.
+              </p>
+            )}
           </div>
         ) : null}
 

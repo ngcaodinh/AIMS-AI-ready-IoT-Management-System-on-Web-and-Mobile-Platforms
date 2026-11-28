@@ -552,3 +552,52 @@ test('recoverPublishBySourceRevisionApi never matches historical null provenance
     assert.equal(recoveryExact.matchedVersion?.sourceRevision, 3);
   },
 );
+
+test('patchTemplateDraftApi supports name-only PATCH and parseTemplateDto preserves numeric enumValues and whitespace default',
+  /** Kiểm tra PATCH chỉ đổi tên không gửi streams/commands, và parser giữ nguyên ENUM số lẫn default toàn khoảng trắng. */
+  async () => {
+    let capturedPatchBody = null;
+    const storedDraft = {
+      id: TEMPLATE_ID,
+      workspaceId: WORKSPACE_ID,
+      status: 'DRAFT',
+      schemaVersion: 1,
+      revision: 2,
+      latestPublishedVersionId: null,
+      name: 'Quạt đổi tên',
+      model: 'SYNTHETIC-ROOM',
+      streams: [
+        {
+          key: 'fan_level',
+          type: 'ENUM',
+          channelKind: 'STATE',
+          direction: 'READ_WRITE',
+          enumValues: [1, 2, 3],
+        },
+        {
+          key: 'room_note',
+          type: 'STRING',
+          channelKind: 'STATE',
+          direction: 'READ',
+          default: '   ',
+        },
+      ],
+      commands: [{ type: 'SET_VALUE', stream: 'fan_level', safeValue: 1 }],
+      createdAt: '2026-11-27T04:00:00Z',
+      updatedAt: '2026-11-27T05:00:00Z',
+    };
+
+    globalThis.window = { setTimeout, clearTimeout };
+    globalThis.fetch = async (url, init) => {
+      assert.equal(init.method, 'PATCH');
+      assert.ok(url.endsWith(`/templates/${TEMPLATE_ID}`));
+      capturedPatchBody = JSON.parse(init.body);
+      return jsonResponse(storedDraft, 200);
+    };
+
+    const patched = await patchTemplateDraftApi(CTX, TEMPLATE_ID, 1, { name: '  Quạt đổi tên  ' });
+    assert.deepEqual(capturedPatchBody, { name: 'Quạt đổi tên' });
+    assert.deepEqual(patched.streams[0].enumValues, [1, 2, 3]);
+    assert.equal(patched.streams[1].default, '   ');
+  },
+);

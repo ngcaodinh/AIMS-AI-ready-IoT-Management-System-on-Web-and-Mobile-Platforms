@@ -16,6 +16,8 @@ import {
 import {
   claimUsbCredentialApi,
   issueDeviceCredentialApi,
+  listActiveOwnersForRegistrationApi,
+  listPublishedVersionsForRegistrationApi,
   pollProvisioningOperationApi,
   recoverDeviceBySerialApi,
   registerDeviceApi,
@@ -533,5 +535,102 @@ test('USB credential and device modules never persist secrets in storage or log 
         relPath,
       );
     }
+  },
+);
+
+test('registration dependency loaders follow cursor pagination across later pages for versions and active owners',
+  /** Hồi quy INT-0508-REG-PAGINATION: tải hết các trang cursor cho TemplateVersion đã công bố và thành viên ACTIVE. */
+  async () => {
+    const TPL_PAGE_1 = '00000000-0000-4000-8000-000000000011';
+    const TPL_PAGE_2 = '00000000-0000-4000-8000-000000000012';
+    const VER_P1 = '00000000-0000-4000-8000-000000000021';
+    const VER_P2 = '00000000-0000-4000-8000-000000000022';
+    const OWNER_P2 = '00000000-0000-4000-8000-000000000032';
+
+    const makeTpl = (id, name, versionId) => ({
+      id,
+      workspaceId: WORKSPACE_ID,
+      status: 'PUBLISHED',
+      schemaVersion: 1,
+      revision: 2,
+      latestPublishedVersionId: versionId,
+      name,
+      model: 'SYNTHETIC-ROOM',
+      streams: [{ key: 't', type: 'NUMBER', channelKind: 'TELEMETRY', direction: 'READ' }],
+      commands: [],
+      createdAt: '2026-11-27T04:00:00Z',
+      updatedAt: '2026-11-27T04:00:00Z',
+    });
+
+    const makeVer = (id, tplId, version) => ({
+      id,
+      workspaceId: WORKSPACE_ID,
+      templateId: tplId,
+      version,
+      schemaVersion: 1,
+      status: 'PUBLISHED',
+      name: `Tpl v${version}`,
+      model: 'SYNTHETIC-ROOM',
+      streams: [{ key: 't', type: 'NUMBER', channelKind: 'TELEMETRY', direction: 'READ' }],
+      commands: [],
+      sourceRevision: 1,
+      publishedAt: '2026-11-27T04:00:00Z',
+    });
+
+    globalThis.window = { setTimeout, clearTimeout };
+    globalThis.fetch = async (url) => {
+      if (url === '/api/v1/templates?limit=100') {
+        return jsonResponse({ items: [makeTpl(TPL_PAGE_1, 'One', VER_P1)], nextCursor: 'tpl-c2' }, 200);
+      }
+      if (url === '/api/v1/templates?cursor=tpl-c2&limit=100') {
+        return jsonResponse({ items: [makeTpl(TPL_PAGE_2, 'Two', VER_P2)], nextCursor: null }, 200);
+      }
+      if (url === `/api/v1/templates/${TPL_PAGE_1}/versions?limit=100`) {
+        return jsonResponse({ items: [makeVer(VER_P1, TPL_PAGE_1, 1)], nextCursor: 'ver-c2' }, 200);
+      }
+      if (url === `/api/v1/templates/${TPL_PAGE_1}/versions?cursor=ver-c2&limit=100`) {
+        return jsonResponse({ items: [makeVer(VER_P2, TPL_PAGE_1, 2)], nextCursor: null }, 200);
+      }
+      if (url === `/api/v1/templates/${TPL_PAGE_2}/versions?limit=100`) {
+        return jsonResponse({ items: [], nextCursor: null }, 200);
+      }
+      if (url === `/api/v1/workspaces/${WORKSPACE_ID}/members?status=ACTIVE&limit=100`) {
+        return jsonResponse({
+          items: [{
+            workspaceId: WORKSPACE_ID,
+            userId: OWNER_UUID,
+            email: 'owner1@example.test',
+            alias: 'Owner 1',
+            role: 'ADMIN',
+            status: 'ACTIVE',
+            authzVersion: 1,
+            revision: 1,
+          }],
+          nextCursor: 'mem-c2',
+        }, 200);
+      }
+      if (url === `/api/v1/workspaces/${WORKSPACE_ID}/members?status=ACTIVE&limit=100&cursor=mem-c2`) {
+        return jsonResponse({
+          items: [{
+            workspaceId: WORKSPACE_ID,
+            userId: OWNER_P2,
+            email: 'owner2@example.test',
+            alias: 'Owner 2',
+            role: 'USER',
+            status: 'ACTIVE',
+            authzVersion: 1,
+            revision: 1,
+          }],
+          nextCursor: null,
+        }, 200);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+
+    const versions = await listPublishedVersionsForRegistrationApi(CTX);
+    assert.deepEqual(versions.map((v) => v.id), [VER_P1, VER_P2]);
+
+    const owners = await listActiveOwnersForRegistrationApi(CTX);
+    assert.deepEqual(owners.map((o) => o.userId), [OWNER_UUID, OWNER_P2]);
   },
 );

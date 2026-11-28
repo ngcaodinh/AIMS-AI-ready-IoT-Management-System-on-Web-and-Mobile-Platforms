@@ -644,3 +644,244 @@ test(
     await expect(page.getByRole('button', { name: 'Mở bản nháp mới từ v1' })).toBeVisible();
   },
 );
+
+test(
+  'INT-0508-RENAME-DATA-PRESERVATION: name-only rename preserves numeric ENUM values and whitespace-only default',
+  /** Kiểm tra đổi tên draft chỉ gửi field thay đổi trên PATCH (giữ nguyên ENUM số và default chỉ có khoảng trắng), và sửa kênh vẫn giữ whitespace default. */
+  async ({ page }) => {
+    const tracker = await installG1MockApi(page);
+
+    // Chèn route mock draft có ENUM số [1, 2] và STRING default toàn khoảng trắng "   ".
+    let serverDraft = {
+      id: TEMPLATE_ID,
+      workspaceId: WORKSPACE_ID,
+      name: 'Cảm biến gốc',
+      model: 'FAN_LAB_V1',
+      status: 'DRAFT',
+      schemaVersion: 1,
+      revision: 1,
+      latestPublishedVersionId: null,
+      streams: [
+        {
+          key: 'fan_mode',
+          type: 'ENUM',
+          channelKind: 'STATE',
+          direction: 'READ_WRITE',
+          enumValues: [1, 2],
+        },
+        {
+          key: 'blank_label',
+          type: 'STRING',
+          channelKind: 'STATE',
+          direction: 'READ',
+          default: '   ',
+        },
+      ],
+      commands: [{ type: 'SET_VALUE', stream: 'fan_mode', safeValue: 1 }],
+      createdAt: '2026-11-26T00:00:00Z',
+      updatedAt: '2026-11-26T01:00:00Z',
+    };
+
+    const capturedPatches = [];
+    await page.route(`**/api/v1/templates/${TEMPLATE_ID}`,
+      /** Phục vụ GET/PATCH với numeric ENUM và whitespace-only default cho ca hồi quy đổi tên. */
+      async (route) => {
+        const req = route.request();
+        if (req.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json', etag: `"${serverDraft.revision}"` },
+            body: JSON.stringify(serverDraft),
+          });
+          return;
+        }
+        if (req.method() === 'PATCH') {
+          const patchBody = req.postDataJSON();
+          capturedPatches.push(patchBody);
+          serverDraft = {
+            ...serverDraft,
+            name: patchBody.name ?? serverDraft.name,
+            model: patchBody.model ?? serverDraft.model,
+            streams: patchBody.streams ?? serverDraft.streams,
+            commands: patchBody.commands ?? serverDraft.commands,
+            revision: serverDraft.revision + 1,
+          };
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json', etag: `"${serverDraft.revision}"` },
+            body: JSON.stringify(serverDraft),
+          });
+          return;
+        }
+        await route.fallback();
+      },
+    );
+
+    await page.goto('/login');
+    await page.locator('#email').fill('admin@nexa.local');
+    await page.locator('#password').fill('TestPassword123!');
+    await page.getByRole('button', { name: 'Đăng nhập' }).click();
+    await page.getByRole('button', { name: /Chọn workspace Lab Alpha/i }).click();
+    await page.getByRole('button', { name: 'Templates (WB-03)' }).click();
+    await page.getByRole('button', { name: 'Mở bản nháp' }).click();
+
+    await expect(page.locator('#tpl-stream-1-default')).toHaveValue('   ');
+
+    // 1. Đổi tên thuần túy -> PATCH chỉ gửi { name }, giữ nguyên numeric ENUM [1, 2] và default "   "
+    await page.locator('#tpl-field-name').fill('Cảm biến đã đổi tên');
+    await page.getByRole('button', { name: 'Lưu cập nhật nháp' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Đã lưu bản nháp trên máy chủ.' })).toContainText('Revision #2');
+
+    expect(capturedPatches).toHaveLength(1);
+    expect(capturedPatches[0]).toEqual({ name: 'Cảm biến đã đổi tên' });
+    expect(serverDraft.streams[0].enumValues).toEqual([1, 2]);
+    expect(serverDraft.streams[1].default).toBe('   ');
+
+    // 2. Sửa một trường stream (STRING -> đổi key) vẫn giữ nguyên default toàn khoảng trắng "   " của kênh STRING
+    await page.locator('#tpl-stream-1-key').fill('blank_label_v2');
+    await page.getByRole('button', { name: 'Lưu cập nhật nháp' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Đã lưu bản nháp trên máy chủ.' })).toContainText('Revision #3');
+
+    expect(capturedPatches).toHaveLength(2);
+    expect(capturedPatches[1].streams[1].default).toBe('   ');
+  },
+);
+
+test(
+  'INT-0508-REG-PAGINATION + LOOKUP_RACE + ERROR_FEEDBACK: paginates deps across cursors, survives lookup race, and renders 422 without fieldErrors',
+  /** Hồi quy 3 lỗi WB-04: nạp đủ nhiều trang version/owner, tra cứu serial song song không hủy load phụ thuộc, và hiển thị lỗi 422 OWNER_INVALID không có details.fieldErrors. */
+  async ({ page }) => {
+    await installG1MockApi(page, {
+      initialStatus: 'PUBLISHED',
+      initialLatestPublishedVersionId: VERSION_V1_ID,
+    });
+
+    const VERSION_V2_ID = 'cccccccc-cccc-4ccc-8ccc-ccccccccccc2';
+    const OWNER_P2_ID = '33333333-3333-4333-8333-333333333334';
+    let releaseMembersPage2;
+    const membersPage2Gate = new Promise((resolve) => {
+      releaseMembersPage2 = resolve;
+    });
+
+    await page.route(`**/api/v1/templates/${TEMPLATE_ID}/versions**`,
+      /** Phân trang 2 trang cho danh sách TemplateVersion đã công bố. */
+      async (route) => {
+        const url = new URL(route.request().url());
+        const cursor = url.searchParams.get('cursor');
+        if (!cursor) {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ items: [makeVersionV1()], nextCursor: 'ver-next-page' }),
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            items: [{ ...makeVersionV1(), id: VERSION_V2_ID, version: 2, name: 'Quạt Lab Trang 2', sourceRevision: 2 }],
+            nextCursor: null,
+          }),
+        });
+      },
+    );
+
+    await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/members**`,
+      /** Phân trang 2 trang cho thành viên ACTIVE và tạm giữ trang 2 để kích hoạt race với lookup serial. */
+      async (route) => {
+        const url = new URL(route.request().url());
+        const cursor = url.searchParams.get('cursor');
+        if (!cursor) {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              items: [{
+                workspaceId: WORKSPACE_ID,
+                userId: OWNER_ID,
+                email: 'operator@nexa.local',
+                alias: 'Kỹ thuật viên A',
+                role: 'USER',
+                status: 'ACTIVE',
+                updatedAt: '2026-11-26T00:00:00Z',
+              }],
+              nextCursor: 'mem-next-page',
+            }),
+          });
+          return;
+        }
+        await membersPage2Gate;
+        await route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            items: [{
+              workspaceId: WORKSPACE_ID,
+              userId: OWNER_P2_ID,
+              email: 'owner2@nexa.local',
+              alias: 'Quản trị Trang 2',
+              role: 'ADMIN',
+              status: 'ACTIVE',
+              updatedAt: '2026-11-26T00:00:00Z',
+            }],
+            nextCursor: null,
+          }),
+        });
+      },
+    );
+
+    await page.route('**/api/v1/devices',
+      /** Trả 422 OWNER_INVALID không kèm fieldErrors cho POST đăng ký thiết bị. */
+      async (route) => {
+        if (route.request().method() === 'POST') {
+          await route.fulfill({
+            status: 422,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              error: {
+                code: 'OWNER_INVALID',
+                message: 'Owner is not active in this workspace.',
+                details: {},
+                correlationId: 'corr-owner-invalid-422',
+              },
+            }),
+          });
+          return;
+        }
+        await route.fallback();
+      },
+    );
+
+    await page.goto('/login');
+    await page.locator('#email').fill('admin@nexa.local');
+    await page.locator('#password').fill('TestPassword123!');
+    await page.getByRole('button', { name: 'Đăng nhập' }).click();
+    await page.getByRole('button', { name: /Chọn workspace Lab Alpha/i }).click();
+    await page.getByRole('button', { name: 'Thiết bị & USB (WB-04)' }).click();
+
+    // Khi trang 2 members vẫn đang tải, thực hiện tra cứu serial song song (race).
+    await expect(page.locator('#dev-field-owner')).toBeDisabled();
+    await page.locator('#dev-lookup-serial').fill('missing-serial-01');
+    await page.getByRole('button', { name: 'Tra cứu theo serial' }).click();
+    await expect(page.getByText('Không tìm thấy thiết bị có serial này trong workspace hiện tại.')).toBeVisible();
+
+    // Mở cổng cho trang 2 members hoàn tất -> đăng ký không bị treo disabled và có đủ item trang 2.
+    releaseMembersPage2();
+    await expect(page.locator('#dev-field-version')).toBeEnabled();
+    await expect(page.locator('#dev-field-owner')).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Đăng ký thiết bị' })).toBeEnabled();
+
+    await page.locator('#dev-field-serial').fill('synthetic-room-page2');
+    await page.locator('#dev-field-name').fill('Thiết bị trang 2');
+    await page.locator('#dev-field-version').selectOption(VERSION_V2_ID);
+    await page.locator('#dev-field-owner').selectOption(OWNER_P2_ID);
+    await page.getByRole('button', { name: 'Đăng ký thiết bị' }).click();
+
+    // Lỗi nghiệp vụ 422 OWNER_INVALID không có details.fieldErrors vẫn phải hiển thị rõ ràng và nhận focus.
+    const alertSummary = page.locator('#dev-error-summary');
+    await expect(alertSummary).toBeVisible();
+    await expect(alertSummary).toContainText('Đăng ký bị từ chối (OWNER_INVALID).');
+    await expect(alertSummary).toBeFocused();
+  },
+);

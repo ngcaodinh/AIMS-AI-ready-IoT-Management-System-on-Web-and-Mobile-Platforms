@@ -25,61 +25,127 @@ export interface LiveDeviceContext {
   session: SessionMetadata;
 }
 
+// Giới hạn số trang tối đa khi tự động thu thập danh sách phân trang bằng keyset cursor để tránh vòng lặp vô hạn.
+const MAX_REGISTRATION_PAGES = 100;
+
 /**
  * Tải toàn bộ danh sách phiên bản template đã công bố (`PUBLISHED`) trong workspace hiện tại
- * để form đăng ký thiết bị D4 chỉ chọn được đúng `templateVersionId` UUID bất biến, không bao giờ chọn draft.
+ * qua tất cả các trang cursor của template và version để form đăng ký thiết bị D4 không bỏ sót bản ở trang sau.
  * Input
  * Param: ctx — ngữ cảnh workspace và metadata phiên.
  * Param: signal — tín hiệu hủy khi người dùng đổi workspace.
- * Output: danh sách `TemplateVersionDto` đã công bố kèm tên template cha.
+ * Output: danh sách `TemplateVersionDto` đã công bố kèm tên template cha trên mọi trang.
  */
 export async function listPublishedVersionsForRegistrationApi(
   ctx: LiveDeviceContext,
   signal?: AbortSignal,
 ): Promise<TemplateVersionDto[]> {
-  const templatesPage = await listTemplatesApi(ctx, { limit: 100, signal });
-  const versionPages = await Promise.all(
-    templatesPage.items
-      .filter(
-        /** Chỉ truy vấn version cho các template đã từng công bố để giảm request thừa. */
-        (tpl) => tpl.latestPublishedVersionId !== null,
-      )
-      .map(
-        /** Tải các phiên bản đã công bố của từng template family trong phạm vi workspace. */
-        (tpl) => listTemplateVersionsApi(ctx, tpl.id, { limit: 100, signal }),
-      ),
+  const templatesWithVersions: string[] = [];
+  const seenTemplateCursors = new Set<string>();
+  let templateCursor: string | null = null;
+
+  for (let pageIndex = 0; pageIndex < MAX_REGISTRATION_PAGES; pageIndex += 1) {
+    const templatesPage = await listTemplatesApi(ctx, {
+      limit: 100,
+      cursor: templateCursor,
+      signal,
+    });
+    for (const tpl of templatesPage.items) {
+      if (tpl.latestPublishedVersionId !== null) {
+        templatesWithVersions.push(tpl.id);
+      }
+    }
+    if (!templatesPage.nextCursor || seenTemplateCursors.has(templatesPage.nextCursor)) {
+      break;
+    }
+    seenTemplateCursors.add(templatesPage.nextCursor);
+    templateCursor = templatesPage.nextCursor;
+  }
+
+  const versionLists = await Promise.all(
+    templatesWithVersions.map(
+      /** Tải qua tất cả trang cursor các phiên bản đã công bố của từng template family. */
+      async (templateId): Promise<TemplateVersionDto[]> => {
+        const items: TemplateVersionDto[] = [];
+        const seenVersionCursors = new Set<string>();
+        let versionCursor: string | null = null;
+
+        for (let pageIndex = 0; pageIndex < MAX_REGISTRATION_PAGES; pageIndex += 1) {
+          const page = await listTemplateVersionsApi(ctx, templateId, {
+            limit: 100,
+            cursor: versionCursor,
+            signal,
+          });
+          items.push(...page.items);
+          if (!page.nextCursor || seenVersionCursors.has(page.nextCursor)) {
+            break;
+          }
+          seenVersionCursors.add(page.nextCursor);
+          versionCursor = page.nextCursor;
+        }
+        return items;
+      },
+    ),
   );
+
+  const seenVersionIds = new Set<string>();
   const collected: TemplateVersionDto[] = [];
-  for (const page of versionPages) {
-    for (const version of page.items) {
-      collected.push(version);
+  for (const list of versionLists) {
+    for (const version of list) {
+      if (!seenVersionIds.has(version.id)) {
+        seenVersionIds.add(version.id);
+        collected.push(version);
+      }
     }
   }
   return collected;
 }
 
 /**
- * Tải danh sách thành viên `ACTIVE` trong workspace hiện hành (`GET /api/v1/workspaces/{id}/members?status=ACTIVE`)
- * phục vụ chọn `ownerId` khi đăng ký thiết bị.
+ * Tải toàn bộ danh sách thành viên `ACTIVE` qua mọi trang cursor trong workspace hiện hành
+ * (`GET /api/v1/workspaces/{id}/members?status=ACTIVE`) phục vụ chọn `ownerId` khi đăng ký thiết bị.
  * Input
  * Param: ctx — ngữ cảnh workspace và metadata phiên.
  * Param: signal — tín hiệu hủy khi đổi ngữ cảnh.
- * Output: mảng `WorkspaceActiveMemberDto` có trạng thái `ACTIVE`.
+ * Output: mảng `WorkspaceActiveMemberDto` có trạng thái `ACTIVE` trên mọi trang.
  */
 export async function listActiveOwnersForRegistrationApi(
   ctx: LiveDeviceContext,
   signal?: AbortSignal,
 ): Promise<WorkspaceActiveMemberDto[]> {
-  const { body } = await workspaceRequest(
-    `/workspaces/${encodeURIComponent(ctx.workspaceId)}/members?status=ACTIVE&limit=100`,
-    {
-      method: 'GET',
-      workspaceId: ctx.workspaceId,
-      session: ctx.session,
-      signal,
-    },
-  );
-  return parseActiveMembersPageDto(body).items;
+  const members: WorkspaceActiveMemberDto[] = [];
+  const seenOwnerIds = new Set<string>();
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+
+  for (let pageIndex = 0; pageIndex < MAX_REGISTRATION_PAGES; pageIndex += 1) {
+    const query = cursor
+      ? `status=ACTIVE&limit=100&cursor=${encodeURIComponent(cursor)}`
+      : 'status=ACTIVE&limit=100';
+    const { body } = await workspaceRequest(
+      `/workspaces/${encodeURIComponent(ctx.workspaceId)}/members?${query}`,
+      {
+        method: 'GET',
+        workspaceId: ctx.workspaceId,
+        session: ctx.session,
+        signal,
+      },
+    );
+    const page = parseActiveMembersPageDto(body);
+    for (const member of page.items) {
+      if (!seenOwnerIds.has(member.userId)) {
+        seenOwnerIds.add(member.userId);
+        members.push(member);
+      }
+    }
+    if (!page.nextCursor || seenCursors.has(page.nextCursor)) {
+      break;
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+
+  return members;
 }
 
 /**

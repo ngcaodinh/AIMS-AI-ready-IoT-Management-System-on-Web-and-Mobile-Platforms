@@ -1,0 +1,484 @@
+{
+  "contractVersion": "0.1.0",
+  "schemaVersion": 1,
+  "fixtureKind": "synthetic-contract-example",
+  "schemaRef": "../../schemas/device/device-presence-event.v1.json",
+  "scope": {
+    "slice": "FEAT-TN-009 PRESENCE-1 synthetic WS event schema + fixture",
+    "coverageIds": [
+      "CT-PRESENCE-001",
+      "CT-CONN-001"
+    ],
+    "fullPresenceStatus": {
+      "PRESENCE-1": "PENDING_DEPENDENCY",
+      "PRESENCE-2": "PENDING_DEPENDENCY",
+      "PRESENCE-3": "PENDING_DEPENDENCY",
+      "PRESENCE-4": "PENDING_DEPENDENCY",
+      "PRESENCE-5": "PENDING_DEPENDENCY"
+    },
+    "esp32HardwareStatus": "DEFERRED / NOT RUN"
+  },
+  "scenarios": [
+    {
+      "id": "CT-PRESENCE-001-ONLINE-TO-OFFLINE",
+      "boundary": "websocket-and-rule-adapter",
+      "given": {
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "deviceId": "00000000-0000-4000-8000-000000000201",
+        "deviceLifecycle": "ACTIVE",
+        "deviceConfigRevision": 7,
+        "previousPresenceVersion": 1,
+        "timeoutSecondsThreshold": 30,
+        "elapsedSinceLastSeenSeconds": 31
+      },
+      "internalDomainEvent": {
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "deviceId": "00000000-0000-4000-8000-000000000201",
+        "transitionId": "00000000-0000-4000-8000-000000000401",
+        "presenceVersion": 2,
+        "from": "ONLINE",
+        "to": "OFFLINE",
+        "reason": "NORMAL",
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "lastSeen": "2026-11-28T08:59:29Z",
+        "maintenanceJobId": null
+      },
+      "wsFrame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      },
+      "ruleTriggerInput027": {
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "deviceId": "00000000-0000-4000-8000-000000000201",
+        "connectivityTransitionId": "00000000-0000-4000-8000-000000000401",
+        "presenceVersion": 2,
+        "previous": "ONLINE",
+        "current": "OFFLINE",
+        "reason": "NORMAL",
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "maintenanceJobId": null
+      },
+      "expected": {
+        "wsFrameAccepted": true,
+        "resourceIdSource": "deviceId",
+        "revisionSource": "presenceVersion",
+        "revisionDistinctFromDeviceConfigRevision": true,
+        "ruleMapping027": {
+          "connectivityTransitionIdSource": "transitionId",
+          "previousSource": "from",
+          "currentSource": "to"
+        },
+        "deviceLifecycleAfterTransition": "ACTIVE"
+      },
+      "assertions": [
+        "utc-timestamps",
+        "resource-id-equals-device-id",
+        "revision-equals-presence-version",
+        "rule-027-preserves-transition-id-and-states",
+        "lifecycle-remains-active"
+      ]
+    },
+    {
+      "id": "CT-PRESENCE-001-REPLAY",
+      "boundary": "outbox-redelivery",
+      "given": {
+        "originalScenarioId": "CT-PRESENCE-001-ONLINE-TO-OFFLINE",
+        "redeliveryAttempt": 2,
+        "redeliveryDispatchedAt": "2026-11-28T09:00:12Z",
+        "clientLastAppliedRevision": 2
+      },
+      "internalDomainEvent": {
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "deviceId": "00000000-0000-4000-8000-000000000201",
+        "transitionId": "00000000-0000-4000-8000-000000000401",
+        "presenceVersion": 2,
+        "from": "ONLINE",
+        "to": "OFFLINE",
+        "reason": "NORMAL",
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "lastSeen": "2026-11-28T08:59:29Z",
+        "maintenanceJobId": null
+      },
+      "wsFrame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      },
+      "ruleTriggerInput027": {
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "deviceId": "00000000-0000-4000-8000-000000000201",
+        "connectivityTransitionId": "00000000-0000-4000-8000-000000000401",
+        "presenceVersion": 2,
+        "previous": "ONLINE",
+        "current": "OFFLINE",
+        "reason": "NORMAL",
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "maintenanceJobId": null
+      },
+      "expected": {
+        "wsFrameAccepted": true,
+        "preservesEventId": true,
+        "preservesTransitionId": true,
+        "preservesOccurredAt": true,
+        "preservesLastSeen": true,
+        "preservesRevision": true,
+        "wsClientAction": "DEDUPE_IGNORE_ALREADY_APPLIED",
+        "rule027Action": "IDEMPOTENT_SAME_DECISION_NO_NEW_TRIGGER"
+      },
+      "assertions": [
+        "replay-preserves-ids-and-dates",
+        "replay-does-not-increment-revision",
+        "rule-027-dedupes-on-connectivity-transition-id"
+      ]
+    },
+    {
+      "id": "CT-PRESENCE-001-ORDERING-STALE-AND-GAP",
+      "boundary": "client-ordering-and-gap-resync",
+      "given": {
+        "clientInitialRevision": 1,
+        "committedSequence": [
+          {
+            "eventId": "00000000-0000-4000-8000-000000000301",
+            "type": "device.presence.changed",
+            "workspaceId": "00000000-0000-4000-8000-000000000101",
+            "resourceId": "00000000-0000-4000-8000-000000000201",
+            "revision": 2,
+            "occurredAt": "2026-11-28T09:00:00Z",
+            "data": {
+              "transitionId": "00000000-0000-4000-8000-000000000401",
+              "from": "ONLINE",
+              "to": "OFFLINE",
+              "reason": "NORMAL",
+              "lastSeen": "2026-11-28T08:59:29Z",
+              "maintenanceJobId": null
+            }
+          },
+          {
+            "eventId": "00000000-0000-4000-8000-000000000302",
+            "type": "device.presence.changed",
+            "workspaceId": "00000000-0000-4000-8000-000000000101",
+            "resourceId": "00000000-0000-4000-8000-000000000201",
+            "revision": 3,
+            "occurredAt": "2026-11-28T09:01:05Z",
+            "data": {
+              "transitionId": "00000000-0000-4000-8000-000000000402",
+              "from": "OFFLINE",
+              "to": "ONLINE",
+              "reason": "NORMAL",
+              "lastSeen": "2026-11-28T09:01:05Z",
+              "maintenanceJobId": null
+            }
+          }
+        ],
+        "snapshotRefetchResponse": {
+          "workspaceId": "00000000-0000-4000-8000-000000000101",
+          "deviceId": "00000000-0000-4000-8000-000000000201",
+          "lifecycle": "ACTIVE",
+          "connectivity": "ONLINE",
+          "lastSeen": "2026-11-28T09:01:05Z",
+          "presenceVersion": 3,
+          "snapshotTime": "2026-11-28T09:01:06Z"
+        },
+        "deliveryArrivalRevisions": [3, 2],
+        "deliveryTimeline": [
+          {
+            "step": 1,
+            "kind": "WS_EVENT",
+            "eventRevision": 3,
+            "clientRevisionBefore": 1,
+            "outcome": "GAP_DETECTED_REFETCH_SNAPSHOT",
+            "clientRevisionAfter": 1
+          },
+          {
+            "step": 2,
+            "kind": "SNAPSHOT_REFETCH",
+            "snapshotPresenceVersion": 3,
+            "snapshotTime": "2026-11-28T09:01:06Z",
+            "clientRevisionBefore": 1,
+            "outcome": "SNAPSHOT_APPLIED",
+            "clientRevisionAfter": 3,
+            "connectivityAfter": "ONLINE"
+          },
+          {
+            "step": 3,
+            "kind": "WS_EVENT",
+            "eventRevision": 2,
+            "clientRevisionBefore": 3,
+            "outcome": "STALE_DROPPED_NO_DOWNGRADE",
+            "clientRevisionAfter": 3,
+            "connectivityAfter": "ONLINE"
+          }
+        ]
+      },
+      "expected": {
+        "onArrivalRevision3From1": "GAP_DETECTED_REFETCH_SNAPSHOT",
+        "onSnapshotRefetchRevision3": "SNAPSHOT_APPLIED",
+        "onArrivalRevision2After3": "STALE_DROPPED_NO_DOWNGRADE",
+        "finalAppliedRevision": 3,
+        "finalConnectivity": "ONLINE",
+        "finalLastSeen": "2026-11-28T09:01:05Z"
+      },
+      "assertions": [
+        "strictly-increasing-revision-and-occurred-at",
+        "revision-gap-requires-snapshot-refetch",
+        "snapshot-revision-3-applied-before-stale-drop",
+        "stale-revision-never-rolls-back-state"
+      ]
+    },
+    {
+      "id": "CT-PRESENCE-001-AUTHZ-WORKSPACE-ISOLATION",
+      "boundary": "ws-emit-authorization",
+      "given": {
+        "eventWorkspaceId": "00000000-0000-4000-8000-000000000101",
+        "subscriberWorkspaceId": "00000000-0000-4000-8000-000000000102",
+        "subscriberContextGeneration": 8,
+        "membershipActiveAtEmit": false
+      },
+      "wsFrame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      },
+      "expected": {
+        "deliverToConnection": false,
+        "reason": "WORKSPACE_SCOPE_MISMATCH_OR_MEMBERSHIP_REVOKED"
+      },
+      "assertions": [
+        "no-cross-workspace-ws-emit",
+        "recheck-authorization-at-emit"
+      ]
+    }
+  ],
+  "rejectedWsFrames": [
+    {
+      "id": "REJECT-FLAT-DOMAIN-PAYLOAD-AS-WS-FRAME",
+      "reason": "FEAT-TN-009 §8.5 forbids emitting the flat internal domain payload directly as a WebSocket frame; it must be wrapped in the FEAT-TN-067 envelope.",
+      "frame": {
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "deviceId": "00000000-0000-4000-8000-000000000201",
+        "transitionId": "00000000-0000-4000-8000-000000000401",
+        "presenceVersion": 2,
+        "from": "ONLINE",
+        "to": "OFFLINE",
+        "reason": "NORMAL",
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "lastSeen": "2026-11-28T08:59:29Z",
+        "maintenanceJobId": null
+      }
+    },
+    {
+      "id": "REJECT-MISSING-EVENT-ID",
+      "reason": "Missing stable outbox occurrence eventId required by FEAT-TN-067 §8.4.",
+      "frame": {
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-WRONG-EVENT-TYPE-WEBHOOK-NAME",
+      "reason": "WS frame must use device.presence.changed, not webhook projection name device.connectivity.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.connectivity",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-NON-UTC-OCCURRED-AT",
+      "reason": "Timestamps must be UTC RFC3339 ending with Z.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T16:00:00+07:00",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-EXTRA-TOP-LEVEL-DEVICE-ID",
+      "reason": "Envelope disallows undeclared top-level fields such as deviceId alongside resourceId.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "deviceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-INVALID-REVISION-ZERO",
+      "reason": "Presence revision must be an integer >= 1.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 0,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-NOOP-SAME-STATE-TRANSITION",
+      "reason": "Repeated OFFLINE -> OFFLINE observation must not emit a connectivity transition event.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "OFFLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-TRAILING-NEWLINE-EVENT-ID",
+      "reason": "UUID fields must reject trailing newline characters under strict absolute-end pattern matching.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301\n",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-TRAILING-NEWLINE-OCCURRED-AT",
+      "reason": "UTC timestamp fields must reject trailing newline characters under strict absolute-end pattern matching.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z\n",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z",
+          "maintenanceJobId": null
+        }
+      }
+    },
+    {
+      "id": "REJECT-TRAILING-NEWLINE-LAST-SEEN",
+      "reason": "Nested data.lastSeen must reject trailing newline characters under strict absolute-end pattern matching.",
+      "frame": {
+        "eventId": "00000000-0000-4000-8000-000000000301",
+        "type": "device.presence.changed",
+        "workspaceId": "00000000-0000-4000-8000-000000000101",
+        "resourceId": "00000000-0000-4000-8000-000000000201",
+        "revision": 2,
+        "occurredAt": "2026-11-28T09:00:00Z",
+        "data": {
+          "transitionId": "00000000-0000-4000-8000-000000000401",
+          "from": "ONLINE",
+          "to": "OFFLINE",
+          "reason": "NORMAL",
+          "lastSeen": "2026-11-28T08:59:29Z\n",
+          "maintenanceJobId": null
+        }
+      }
+    }
+  ]
+}

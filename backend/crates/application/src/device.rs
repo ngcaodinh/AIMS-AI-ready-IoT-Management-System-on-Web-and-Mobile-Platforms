@@ -92,7 +92,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let principal =
             locked
                 .session
-                .authorize(&locked.account, proof, locked.observed_at, false)?;
+                .authorize_actor(&locked.account, proof, locked.observed_at, false)?;
         transaction
             .lock_device_scope(workspace_id, principal.user_id())
             .await?
@@ -106,9 +106,33 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         {
             return Err(ApplicationError::DeviceOwnerInvalid);
         }
-        let schema = transaction
+        let schema = match transaction
             .registration_schema(workspace_id, draft.template_version_id)
-            .await?;
+            .await
+        {
+            Ok(schema) => schema,
+            Err(failure) => {
+                // Lỗi schema (draft nội tenant, not-found) có thể đến sau lúc chờ khóa root;
+                // lỗi đọc clock trên kết quả không thuộc storage phải fail-closed để tránh lộ draft cho phiên hết hạn.
+                match transaction.device_now().await {
+                    Ok(now) => {
+                        locked
+                            .session
+                            .authorize_actor(&locked.account, proof, now, false)?;
+                    }
+                    Err(clock_error)
+                        if !matches!(
+                            failure,
+                            ApplicationError::Unavailable | ApplicationError::Conflict
+                        ) =>
+                    {
+                        return Err(clock_error);
+                    }
+                    Err(_) => {}
+                }
+                return Err(failure);
+            }
+        };
         self.verify_digest(&schema)?;
         self.models
             .validate(&draft.model, &schema.content.draft().model)?;
@@ -116,7 +140,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let now = transaction.device_now().await?;
         locked
             .session
-            .authorize(&locked.account, proof, now, false)?;
+            .authorize_actor(&locked.account, proof, now, false)?;
         let device_id = Uuid::new_v4();
         let receipt = transaction
             .insert_registered_device(workspace_id, device_id, &draft, now)
@@ -126,7 +150,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let now = transaction.device_now().await?;
         let principal = locked
             .session
-            .authorize(&locked.account, proof, now, false)?;
+            .authorize_actor(&locked.account, proof, now, false)?;
         transaction
             .append_device_audit(AuditRecord {
                 workspace_id: Some(workspace_id),
@@ -166,7 +190,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let principal =
             locked
                 .session
-                .authorize(&locked.account, proof, locked.observed_at, false)?;
+                .authorize_actor(&locked.account, proof, locked.observed_at, false)?;
         let admission = transaction
             .lock_device_scope(workspace_id, principal.user_id())
             .await?
@@ -182,7 +206,7 @@ impl<S: DeviceStore, C: TemplateDigest> DeviceService<S, C> {
         let now = transaction.device_now().await?;
         locked
             .session
-            .authorize(&locked.account, proof, now, false)?;
+            .authorize_actor(&locked.account, proof, now, false)?;
         transaction.commit_device().await?;
         Ok(schema)
     }

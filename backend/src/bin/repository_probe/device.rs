@@ -17,6 +17,9 @@ use iot_platform_backend::{
 };
 use uuid::Uuid;
 
+#[path = "device_authority.rs"]
+mod authority;
+
 type Service = DeviceService<PgIdentityStore, CryptoService>;
 
 /**
@@ -703,11 +706,13 @@ impl DeviceProbe<'_> {
  * Input
  * Param: config — transport/identity synthetic của launcher qua stdin kín.
  * Param: checks — evidence tên invariant không PII/secret.
+ * Param: authority_only — chỉ chạy ca tranh khóa IAM và draft selector.
  * Output: workflow registry/schema và pool đã đóng; Errors: invariant/storage được lọc.
  */
 pub(super) async fn verify(
     config: ProbeConfig,
     checks: &mut Vec<&'static str>,
+    authority_only: bool,
 ) -> Result<(), ApplicationError> {
     let pool = connect_local_probe(config.port, &config.username, &config.password).await?;
     let other = connect_local_probe(config.port, &config.username, &config.password).await?;
@@ -740,6 +745,12 @@ pub(super) async fn verify(
         foreign_workspace: scopes[1],
     };
     let version = context.publish(false, true).await?;
+    if authority_only {
+        let result = context.authority_checks(&version, checks).await;
+        pool.close().await;
+        other.close().await;
+        return result;
+    }
     let foreign_version = context.publish(true, true).await?;
     let winner = context.serial_race(&version).await?;
     checks.push("PASS: two-pool registry serial race has one device, UNKNOWN runtime, unreported actuator and redacted required audit");

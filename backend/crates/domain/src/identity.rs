@@ -81,6 +81,13 @@ pub struct AccountSnapshot {
     pub must_change_password: bool,
 }
 
+/// Trạng thái account dưới User fence dùng để kiểm quyền session.
+pub struct ActorAccountSnapshot {
+    pub user_id: Uuid,
+    pub status: AccountStatus,
+    pub must_change_password: bool,
+}
+
 /// Selector chưa xác thực; digest không tự cấp quyền, `expected_context` chỉ chống nhầm phiên Web.
 pub struct SessionProof {
     pub token_digest: [u8; 32],
@@ -167,6 +174,34 @@ impl SessionSnapshot {
     pub fn authorize(
         &self,
         account: &AccountSnapshot,
+        proof: &SessionProof,
+        now: DateTime<Utc>,
+        allow_limited: bool,
+    ) -> Result<Principal, AccessFailure> {
+        self.authorize_actor(
+            &ActorAccountSnapshot {
+                user_id: account.user_id,
+                status: account.status,
+                must_change_password: account.must_change_password,
+            },
+            proof,
+            now,
+            allow_limited,
+        )
+    }
+
+    /**
+     * Kiểm quyền session bằng trạng thái actor đọc dưới User fence.
+     * Input
+     * Param: account — trạng thái và identity actor dưới User fence.
+     * Param: proof — context phiên cần đối chiếu cho Web.
+     * Param: now — clock đọc sau khóa hoặc sau khi chờ ghi.
+     * Param: allow_limited — cho phép session limited trong use case phục hồi.
+     * Output: principal đã xác thực hoặc lý do từ chối theo policy session.
+     */
+    pub fn authorize_actor(
+        &self,
+        account: &ActorAccountSnapshot,
         proof: &SessionProof,
         now: DateTime<Utc>,
         allow_limited: bool,

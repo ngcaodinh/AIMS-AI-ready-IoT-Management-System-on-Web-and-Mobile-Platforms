@@ -3,15 +3,14 @@
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use iot_application::{
     device::DeviceService,
-    device_ports::{DeviceStore, DeviceTransaction},
+    device_ports::{DeviceStore, DeviceTransaction, LockedActorSession},
     error::ApplicationError,
-    ports::LockedSession,
     template_ports::TemplateDigest,
 };
 use iot_domain::{
     device::{ApprovedDeviceModels, DeviceDraft, DevicePin, RegisteredDevice},
     identity::{
-        AccountSnapshot, AccountStatus, AuditRecord, ClientType, SecretString, SessionProof,
+        AccessFailure, AccountStatus, ActorAccountSnapshot, AuditRecord, ClientType, SessionProof,
         SessionSnapshot,
     },
     template_snapshot::TemplateVersionSnapshot,
@@ -40,6 +39,87 @@ fn run<F: Future>(future: F) -> F::Output {
 /// Clock cố định để mọi session spy còn hạn, tránh denial vì expiry che lỗi membership guard.
 fn now() -> DateTime<Utc> {
     Utc.timestamp_opt(1_700_000_000, 0).unwrap()
+}
+
+/** Giữ thứ tự lỗi của session khi device chỉ nhận trạng thái actor. */
+#[test]
+fn credential_free_actor_admission_preserves_error_precedence() {
+    let observed_at = now();
+    let auth_context_id = Uuid::from_u128(5);
+    let session_id = Uuid::from_u128(4);
+    let mut account = ActorAccountSnapshot {
+        user_id: USER_ID,
+        status: AccountStatus::Disabled,
+        must_change_password: true,
+    };
+    let mut session = SessionSnapshot {
+        session_id,
+        user_id: USER_ID,
+        auth_context_id,
+        client_type: ClientType::Web,
+        limited: true,
+        expires_at: observed_at,
+        revoked_at: Some(observed_at),
+    };
+    let mut proof = SessionProof {
+        token_digest: [0; 32],
+        expected_context: None,
+    };
+    let decide =
+        |session: &SessionSnapshot, account: &ActorAccountSnapshot, proof: &SessionProof| {
+            session
+                .authorize_actor(account, proof, observed_at, false)
+                .map(|principal| {
+                    (
+                        principal.user_id(),
+                        principal.session_id(),
+                        principal.client_type(),
+                    )
+                })
+        };
+
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Err(AccessFailure::SessionInvalid)
+    );
+    account.status = AccountStatus::Active;
+    account.user_id = Uuid::from_u128(6);
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Err(AccessFailure::SessionInvalid)
+    );
+    account.user_id = USER_ID;
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Err(AccessFailure::SessionRevoked)
+    );
+    session.revoked_at = None;
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Err(AccessFailure::SessionExpired)
+    );
+    session.expires_at += Duration::seconds(1);
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Err(AccessFailure::ContextMismatch)
+    );
+    proof.expected_context = Some(auth_context_id);
+    account.must_change_password = false;
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Err(AccessFailure::PasswordChangeRequired)
+    );
+    session.limited = false;
+    account.must_change_password = true;
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Err(AccessFailure::PasswordChangeRequired)
+    );
+    account.must_change_password = false;
+    assert_eq!(
+        decide(&session, &account, &proof),
+        Ok((USER_ID, session_id, ClientType::Web))
+    );
 }
 
 #[derive(Default)]
@@ -80,12 +160,11 @@ impl DeviceTransaction for SpyTransaction {
         &mut self,
         _proof: &SessionProof,
         owner: Option<Uuid>,
-    ) -> Result<LockedSession, ApplicationError> {
+    ) -> Result<LockedActorSession, ApplicationError> {
         assert!(owner.is_none());
-        Ok(LockedSession {
-            account: AccountSnapshot {
+        Ok(LockedActorSession {
+            account: ActorAccountSnapshot {
                 user_id: USER_ID,
-                password_verifier: SecretString::new("synthetic-unused-verifier".into()),
                 status: AccountStatus::Active,
                 must_change_password: false,
             },

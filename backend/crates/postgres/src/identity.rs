@@ -4,12 +4,13 @@ use crate::{PgIdentityStore, PgUnitOfWork, commit_error, complete_auth_stage, st
 use chrono::{DateTime, Utc};
 use iot_application::{
     auth_diagnostics::{AuthTimingOutcome, AuthTimingSpan, AuthTimingStage},
+    device_ports::LockedActorSession,
     error::ApplicationError,
     ports::{IdentityStore, IdentityTransaction, LockedSession},
 };
 use iot_domain::identity::{
-    AccountSnapshot, AccountStatus, AuditRecord, ClientType, LoginWindow, NewSession, SecretString,
-    SessionProof, SessionSnapshot,
+    AccountSnapshot, AccountStatus, ActorAccountSnapshot, AuditRecord, ClientType, LoginWindow,
+    NewSession, SecretString, SessionProof, SessionSnapshot,
 };
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
@@ -69,13 +70,108 @@ fn account_snapshot(row: &PgRow) -> Result<AccountSnapshot, ApplicationError> {
     Ok(AccountSnapshot {
         user_id: row.try_get("user_id").map_err(storage_error)?,
         password_verifier: SecretString::new(row.try_get("password_hash").map_err(storage_error)?),
-        status: match status.as_str() {
-            "ACTIVE" => AccountStatus::Active,
-            "DISABLED" => AccountStatus::Disabled,
-            _ => return Err(ApplicationError::Unavailable),
-        },
+        status: parse_account_status(&status)?,
         must_change_password: row.try_get("must_change_password").map_err(storage_error)?,
     })
+}
+
+/** Decode trạng thái account với đúng literal schema; trạng thái lạ trả unavailable. */
+fn parse_account_status(status: &str) -> Result<AccountStatus, ApplicationError> {
+    match status {
+        "ACTIVE" => Ok(AccountStatus::Active),
+        "DISABLED" => Ok(AccountStatus::Disabled),
+        _ => Err(ApplicationError::Unavailable),
+    }
+}
+
+/** Decode session đã khóa bằng enum transport lưu trong PostgreSQL. */
+fn session_snapshot(session: &PgRow) -> Result<SessionSnapshot, ApplicationError> {
+    Ok(SessionSnapshot {
+        session_id: session.try_get("session_id").map_err(storage_error)?,
+        user_id: session.try_get("user_id").map_err(storage_error)?,
+        auth_context_id: session.try_get("auth_context_id").map_err(storage_error)?,
+        client_type: parse_client(
+            &session
+                .try_get::<String, _>("client_type")
+                .map_err(storage_error)?,
+        )?,
+        limited: session.try_get("limited").map_err(storage_error)?,
+        expires_at: session.try_get("expires_at").map_err(storage_error)?,
+        revoked_at: session.try_get("revoked_at").map_err(storage_error)?,
+    })
+}
+
+impl PgUnitOfWork {
+    /**
+     * Khóa phiên actor cho registry và chỉ lấy cột account dùng để kiểm quyền.
+     * Input
+     * Param: proof — digest/context của phiên do application cung cấp.
+     * Output: trạng thái actor, session đã khóa và clock quan sát sau khóa.
+     */
+    pub(crate) async fn lock_actor_session(
+        &mut self,
+        proof: &SessionProof,
+    ) -> Result<LockedActorSession, ApplicationError> {
+        let (account, session, observed_at) = self
+            .lock_session_rows(
+                proof,
+                "SELECT user_id,account_status,must_change_password FROM users WHERE user_id=$1 FOR UPDATE",
+            )
+            .await?;
+        let status: String = account.try_get("account_status").map_err(storage_error)?;
+        Ok(LockedActorSession {
+            account: ActorAccountSnapshot {
+                user_id: account.try_get("user_id").map_err(storage_error)?,
+                status: parse_account_status(&status)?,
+                must_change_password: account
+                    .try_get("must_change_password")
+                    .map_err(storage_error)?,
+            },
+            session: session_snapshot(&session)?,
+            observed_at,
+        })
+    }
+
+    /**
+     * Đọc User rồi Session trong cùng transaction, lấy clock sau khi đã nhận khóa.
+     * Input
+     * Param: proof — lookup digest, chưa cấp quyền từ kết quả tìm thấy.
+     * Param: account_sql — câu SELECT tĩnh theo projection của caller, luôn khóa đúng User.
+     * Output: hai hàng đã khóa và clock quan sát để adapter decode.
+     */
+    async fn lock_session_rows(
+        &mut self,
+        proof: &SessionProof,
+        account_sql: &'static str,
+    ) -> Result<(PgRow, PgRow, DateTime<Utc>), ApplicationError> {
+        // Lookup đầu không cấp authority; đọc lại toàn bộ trạng thái sau khóa để tránh TOCTOU.
+        let user_id: Uuid =
+            sqlx::query_scalar("SELECT user_id FROM sessions WHERE token_digest=$1")
+                .bind(proof.token_digest.as_slice())
+                .fetch_optional(&mut *self.transaction)
+                .await
+                .map_err(storage_error)?
+                .ok_or(ApplicationError::SessionInvalid)?;
+        let account = sqlx::query(account_sql)
+            .bind(user_id)
+            .fetch_one(&mut *self.transaction)
+            .await
+            .map_err(storage_error)?;
+        let session = sqlx::query(
+            "SELECT session_id,user_id,auth_context_id,limited,client_type,revoked_at,expires_at FROM sessions WHERE token_digest=$1 AND user_id=$2 FOR UPDATE",
+        )
+        .bind(proof.token_digest.as_slice())
+        .bind(user_id)
+        .fetch_one(&mut *self.transaction)
+        .await
+        .map_err(storage_error)?;
+        // SELECT expression có thể chạy trước khi nhận row lock; clock phải là statement riêng sau FOR UPDATE.
+        let observed_at = sqlx::query_scalar("SELECT clock_timestamp()")
+            .fetch_one(&mut *self.transaction)
+            .await
+            .map_err(storage_error)?;
+        Ok((account, session, observed_at))
+    }
 }
 
 impl IdentityStore for PgIdentityStore {
@@ -222,38 +318,15 @@ impl IdentityTransaction for PgUnitOfWork {
         &mut self,
         proof: &SessionProof,
     ) -> Result<LockedSession, ApplicationError> {
-        // Lookup đầu không cấp authority; đọc lại toàn bộ trạng thái sau khóa để tránh TOCTOU.
-        let user_id: Uuid =
-            sqlx::query_scalar("SELECT user_id FROM sessions WHERE token_digest=$1")
-                .bind(proof.token_digest.as_slice())
-                .fetch_optional(&mut *self.transaction)
-                .await
-                .map_err(storage_error)?
-                .ok_or(ApplicationError::SessionInvalid)?;
-        let account=sqlx::query("SELECT user_id,password_hash,account_status,must_change_password FROM users WHERE user_id=$1 FOR UPDATE")
-            .bind(user_id).fetch_one(&mut *self.transaction).await.map_err(storage_error)?;
-        let session=sqlx::query("SELECT session_id,user_id,auth_context_id,limited,client_type,revoked_at,expires_at FROM sessions WHERE token_digest=$1 AND user_id=$2 FOR UPDATE")
-            .bind(proof.token_digest.as_slice()).bind(user_id).fetch_one(&mut *self.transaction).await.map_err(storage_error)?;
-        // SELECT expression có thể chạy trước khi nhận row lock; clock phải là statement riêng sau FOR UPDATE.
-        let observed_at = sqlx::query_scalar("SELECT clock_timestamp()")
-            .fetch_one(&mut *self.transaction)
-            .await
-            .map_err(storage_error)?;
+        let (account, session, observed_at) = self
+            .lock_session_rows(
+                proof,
+                "SELECT user_id,password_hash,account_status,must_change_password FROM users WHERE user_id=$1 FOR UPDATE",
+            )
+            .await?;
         Ok(LockedSession {
             account: account_snapshot(&account)?,
-            session: SessionSnapshot {
-                session_id: session.try_get("session_id").map_err(storage_error)?,
-                user_id: session.try_get("user_id").map_err(storage_error)?,
-                auth_context_id: session.try_get("auth_context_id").map_err(storage_error)?,
-                client_type: parse_client(
-                    &session
-                        .try_get::<String, _>("client_type")
-                        .map_err(storage_error)?,
-                )?,
-                limited: session.try_get("limited").map_err(storage_error)?,
-                expires_at: session.try_get("expires_at").map_err(storage_error)?,
-                revoked_at: session.try_get("revoked_at").map_err(storage_error)?,
-            },
+            session: session_snapshot(&session)?,
             observed_at,
         })
     }

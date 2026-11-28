@@ -1,15 +1,22 @@
 //! Ports registry giữ auth, published pin, runtime, actuator và audit trong một unit of work.
 
-use crate::{error::ApplicationError, ports::LockedSession};
+use crate::error::ApplicationError;
 use chrono::{DateTime, Utc};
 use iot_domain::{
     device::{DeviceDraft, DevicePin, RegisteredDevice},
-    identity::{AuditRecord, SessionProof},
+    identity::{ActorAccountSnapshot, AuditRecord, SessionProof, SessionSnapshot},
     template_snapshot::TemplateVersionSnapshot,
     workspace::WorkspaceSnapshot,
 };
 use std::future::Future;
 use uuid::Uuid;
+
+/// Snapshot khóa cho registry gồm trạng thái actor, session và clock sau khóa.
+pub struct LockedActorSession {
+    pub account: ActorAccountSnapshot,
+    pub session: SessionSnapshot,
+    pub observed_at: DateTime<Utc>,
+}
 
 /// Boundary riêng cho registry, không nhận pool, password, broker hoặc handle transaction vật lý.
 pub trait DeviceTransaction: Send {
@@ -24,7 +31,7 @@ pub trait DeviceTransaction: Send {
         &mut self,
         proof: &SessionProof,
         owner: Option<Uuid>,
-    ) -> impl Future<Output = Result<LockedSession, ApplicationError>> + Send;
+    ) -> impl Future<Output = Result<LockedActorSession, ApplicationError>> + Send;
     /**
      * Khóa scope sau User để membership/grant không đổi giữa authorization và truy cập device.
      * Input

@@ -53,6 +53,7 @@ enum ProbePhase {
     Outbox,
     Template,
     Device,
+    DeviceAuthority,
     AuditFailure,
     Retention,
     RetentionFailure,
@@ -1263,7 +1264,8 @@ async fn main() {
         }
         ProbePhase::Outbox => outbox_probe::verify(config, &mut checks).await,
         ProbePhase::Template => template_probe::verify(config, &mut checks).await,
-        ProbePhase::Device => device_probe::verify(config, &mut checks).await,
+        ProbePhase::Device => device_probe::verify(config, &mut checks, false).await,
+        ProbePhase::DeviceAuthority => device_probe::verify(config, &mut checks, true).await,
         ProbePhase::Retention => audit_retention_probe::verify(config, &mut checks).await,
         ProbePhase::RetentionFailure => {
             audit_retention_probe::verify_failure(config, &mut checks).await

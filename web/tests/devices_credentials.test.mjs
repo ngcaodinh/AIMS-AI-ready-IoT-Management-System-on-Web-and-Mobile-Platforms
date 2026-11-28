@@ -538,19 +538,23 @@ test('USB credential and device modules never persist secrets in storage or log 
   },
 );
 
-test('registration dependency loaders follow cursor pagination across later pages for versions and active owners',
-  /** Hồi quy INT-0508-REG-PAGINATION: tải hết các trang cursor cho TemplateVersion đã công bố và thành viên ACTIVE. */
+test('registration dependency loaders follow cursor pagination across later pages and exclude ARCHIVED roots while keeping DRAFT-root pins',
+  /** Hồi quy INT-0508-REG-PAGINATION + INT-0508-REG-ARCHIVED-PIN: phân trang hết mọi trang cursor, bỏ qua root ARCHIVED và giữ pin lịch sử của root DRAFT/PUBLISHED. */
   async () => {
     const TPL_PAGE_1 = '00000000-0000-4000-8000-000000000011';
-    const TPL_PAGE_2 = '00000000-0000-4000-8000-000000000012';
+    const TPL_ARCHIVED = '00000000-0000-4000-8000-000000000012';
+    const TPL_DRAFT_PIN = '00000000-0000-4000-8000-000000000013';
+    const TPL_UNPUBLISHED_DRAFT = '00000000-0000-4000-8000-000000000014';
     const VER_P1 = '00000000-0000-4000-8000-000000000021';
     const VER_P2 = '00000000-0000-4000-8000-000000000022';
+    const VER_ARCHIVED = '00000000-0000-4000-8000-000000000023';
+    const VER_DRAFT_HIST = '00000000-0000-4000-8000-000000000024';
     const OWNER_P2 = '00000000-0000-4000-8000-000000000032';
 
-    const makeTpl = (id, name, versionId) => ({
+    const makeTpl = (id, name, status, versionId) => ({
       id,
       workspaceId: WORKSPACE_ID,
-      status: 'PUBLISHED',
+      status,
       schemaVersion: 1,
       revision: 2,
       latestPublishedVersionId: versionId,
@@ -580,10 +584,22 @@ test('registration dependency loaders follow cursor pagination across later page
     globalThis.window = { setTimeout, clearTimeout };
     globalThis.fetch = async (url) => {
       if (url === '/api/v1/templates?limit=100') {
-        return jsonResponse({ items: [makeTpl(TPL_PAGE_1, 'One', VER_P1)], nextCursor: 'tpl-c2' }, 200);
+        return jsonResponse({
+          items: [
+            makeTpl(TPL_PAGE_1, 'One', 'PUBLISHED', VER_P1),
+            makeTpl(TPL_ARCHIVED, 'Archived Family', 'ARCHIVED', VER_ARCHIVED),
+          ],
+          nextCursor: 'tpl-c2',
+        }, 200);
       }
       if (url === '/api/v1/templates?cursor=tpl-c2&limit=100') {
-        return jsonResponse({ items: [makeTpl(TPL_PAGE_2, 'Two', VER_P2)], nextCursor: null }, 200);
+        return jsonResponse({
+          items: [
+            makeTpl(TPL_DRAFT_PIN, 'Draft With Pin', 'DRAFT', VER_DRAFT_HIST),
+            makeTpl(TPL_UNPUBLISHED_DRAFT, 'Draft Only', 'DRAFT', null),
+          ],
+          nextCursor: null,
+        }, 200);
       }
       if (url === `/api/v1/templates/${TPL_PAGE_1}/versions?limit=100`) {
         return jsonResponse({ items: [makeVer(VER_P1, TPL_PAGE_1, 1)], nextCursor: 'ver-c2' }, 200);
@@ -591,8 +607,11 @@ test('registration dependency loaders follow cursor pagination across later page
       if (url === `/api/v1/templates/${TPL_PAGE_1}/versions?cursor=ver-c2&limit=100`) {
         return jsonResponse({ items: [makeVer(VER_P2, TPL_PAGE_1, 2)], nextCursor: null }, 200);
       }
-      if (url === `/api/v1/templates/${TPL_PAGE_2}/versions?limit=100`) {
-        return jsonResponse({ items: [], nextCursor: null }, 200);
+      if (url === `/api/v1/templates/${TPL_DRAFT_PIN}/versions?limit=100`) {
+        return jsonResponse({ items: [makeVer(VER_DRAFT_HIST, TPL_DRAFT_PIN, 1)], nextCursor: null }, 200);
+      }
+      if (url.includes(TPL_ARCHIVED) || url.includes(TPL_UNPUBLISHED_DRAFT)) {
+        throw new Error(`Must not fetch versions for ARCHIVED or unpublished template: ${url}`);
       }
       if (url === `/api/v1/workspaces/${WORKSPACE_ID}/members?status=ACTIVE&limit=100`) {
         return jsonResponse({
@@ -628,7 +647,7 @@ test('registration dependency loaders follow cursor pagination across later page
     };
 
     const versions = await listPublishedVersionsForRegistrationApi(CTX);
-    assert.deepEqual(versions.map((v) => v.id), [VER_P1, VER_P2]);
+    assert.deepEqual(versions.map((v) => v.id), [VER_P1, VER_P2, VER_DRAFT_HIST]);
 
     const owners = await listActiveOwnersForRegistrationApi(CTX);
     assert.deepEqual(owners.map((o) => o.userId), [OWNER_UUID, OWNER_P2]);

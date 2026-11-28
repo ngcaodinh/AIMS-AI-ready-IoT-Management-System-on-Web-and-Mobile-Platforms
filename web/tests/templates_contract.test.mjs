@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  attachExactDefaultNumberToken,
+  attachExactSafeValueNumberToken,
   buildTemplateCreatePayload,
   computeTemplateSchemaDiff,
+  getCommandSafeValueDescriptor,
+  getStreamDefaultDescriptor,
+  getStreamEnumDescriptors,
+  hasLegacyNumericEnum,
   normalizeStreamInput,
   parseTemplateDto,
   parseTemplatePublishedDto,
@@ -12,7 +18,9 @@ import {
 import {
   cloneTemplateDraftApi,
   createTemplateDraftApi,
+  getTemplateApi,
   getTemplateVersionApi,
+  listTemplatesApi,
   listTemplateVersionsApi,
   patchTemplateDraftApi,
   publishTemplateApi,
@@ -599,5 +607,138 @@ test('patchTemplateDraftApi supports name-only PATCH and parseTemplateDto preser
     assert.deepEqual(capturedPatchBody, { name: 'Quạt đổi tên' });
     assert.deepEqual(patched.streams[0].enumValues, [1, 2, 3]);
     assert.equal(patched.streams[1].default, '   ');
+  },
+);
+
+test('INT-0508-ENUM-JSON-PRECISION: token-aware template decode preserves 2^53 vs 2^53+1, typed distinctness, rejects true decimal duplicates, and keeps writable tokens lossless',
+  /** Hồi quy #150: đọc token số JSON trước khi JS Number làm tròn trên list/detail/version, phân biệt chuỗi với số, từ chối trùng decimal thực và ghi nguyên bản token writable. */
+  async () => {
+    const rawDraftJson = `{
+      "id": "${TEMPLATE_ID}",
+      "workspaceId": "${WORKSPACE_ID}",
+      "status": "DRAFT",
+      "schemaVersion": 1,
+      "revision": 1,
+      "latestPublishedVersionId": "${VERSION_V1_ID}",
+      "name": "Precision Draft",
+      "model": "G1_TEST_MODEL",
+      "streams": [
+        {
+          "key": "enum_big",
+          "type": "ENUM",
+          "channelKind": "STATE",
+          "direction": "READ_WRITE",
+          "enumValues": [9007199254740992, 9007199254740993, "9007199254740992", "1", 1],
+          "default": 9007199254740993
+        }
+      ],
+      "commands": [
+        { "type": "SET_VALUE", "stream": "enum_big", "safeValue": 9007199254740993 }
+      ],
+      "createdAt": "2026-11-27T04:00:00Z",
+      "updatedAt": "2026-11-27T05:00:00Z"
+    }`;
+    const rawVersionJson = `{
+      "id": "${VERSION_V1_ID}",
+      "workspaceId": "${WORKSPACE_ID}",
+      "templateId": "${TEMPLATE_ID}",
+      "version": 1,
+      "schemaVersion": 1,
+      "status": "PUBLISHED",
+      "name": "Precision Draft",
+      "model": "G1_TEST_MODEL",
+      "streams": [
+        {
+          "key": "enum_big",
+          "type": "ENUM",
+          "channelKind": "STATE",
+          "direction": "READ_WRITE",
+          "enumValues": [9007199254740992, 9007199254740993],
+          "default": 9007199254740992
+        }
+      ],
+      "commands": [
+        { "type": "SET_VALUE", "stream": "enum_big", "safeValue": 9007199254740992 }
+      ],
+      "sourceRevision": null,
+      "publishedAt": "2026-11-27T04:30:00Z"
+    }`;
+
+    globalThis.window = { setTimeout, clearTimeout };
+    globalThis.fetch = async (url) => {
+      if (url === '/api/v1/templates') {
+        return new Response(`{"items":[${rawDraftJson}],"nextCursor":null}`, { status: 200 });
+      }
+      if (url === `/api/v1/templates/${TEMPLATE_ID}`) {
+        return new Response(rawDraftJson, { status: 200 });
+      }
+      if (url === `/api/v1/templates/${TEMPLATE_ID}/versions`) {
+        return new Response(`{"items":[${rawVersionJson}],"nextCursor":null}`, { status: 200 });
+      }
+      if (url === `/api/v1/templates/${TEMPLATE_ID}/versions/${VERSION_V1_ID}`) {
+        return new Response(rawVersionJson, { status: 200 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+
+    const page = await listTemplatesApi(CTX);
+    const detail = await getTemplateApi(CTX, TEMPLATE_ID);
+    const versionsPage = await listTemplateVersionsApi(CTX, TEMPLATE_ID);
+    const versionDetail = await getTemplateVersionApi(CTX, TEMPLATE_ID, VERSION_V1_ID);
+
+    for (const tpl of [page.items[0], detail]) {
+      assert.equal(hasLegacyNumericEnum(tpl), true);
+      const descs = getStreamEnumDescriptors(tpl.streams[0]);
+      assert.deepEqual(descs.map((d) => d.display), ['9007199254740992', '9007199254740993', '9007199254740992', '1', '1']);
+      assert.deepEqual(descs.map((d) => d.kind), ['number', 'number', 'string', 'string', 'number']);
+      assert.equal(getStreamDefaultDescriptor(tpl.streams[0])?.display, '9007199254740993');
+      assert.equal(getCommandSafeValueDescriptor(tpl.commands[0]).display, '9007199254740993');
+    }
+    for (const ver of [versionsPage.items[0], versionDetail]) {
+      assert.deepEqual(getStreamEnumDescriptors(ver.streams[0]).map((d) => d.display), ['9007199254740992', '9007199254740993']);
+    }
+
+    const diff = computeTemplateSchemaDiff(versionDetail, detail);
+    assert.equal(diff.hasChanges, true);
+    assert.match(diff.streamChanges[0].details.join(' '), /9007199254740992 → 9007199254740993/);
+    assert.match(diff.commandChanges[0].details.join(' '), /9007199254740992 → 9007199254740993/);
+
+    // Các bản trùng giá trị decimal thực ([1, 1.0], [0, -0], [100, 1e2], [2^53, 2^53]) phải bị từ chối với PROTOCOL_ERROR.
+    for (const dupArray of ['[1, 1.0]', '[0, -0]', '[100, 1e2]', '[9007199254740992, 9007199254740992]']) {
+      globalThis.fetch = async () => new Response(
+        rawDraftJson.replace('[9007199254740992, 9007199254740993, "9007199254740992", "1", 1]', dupArray),
+        { status: 200 },
+      );
+      await assert.rejects(
+        () => listTemplatesApi(CTX),
+        (err) => err instanceof WorkspaceApiError && err.code === 'PROTOCOL_ERROR',
+      );
+      await assert.rejects(
+        () => getTemplateApi(CTX, TEMPLATE_ID),
+        (err) => err instanceof WorkspaceApiError && err.code === 'PROTOCOL_ERROR',
+      );
+    }
+
+    // Ghi dữ liệu writable NUMBER mang 9007199254740993 qua rawJsonBody không bị float64 làm tròn.
+    let capturedRawPatch = '';
+    globalThis.fetch = async (_url, init) => {
+      capturedRawPatch = init.body;
+      return new Response(rawDraftJson, { status: 200 });
+    };
+    const streamOut = {
+      key: 'big_num',
+      type: 'NUMBER',
+      channelKind: 'STATE',
+      direction: 'READ_WRITE',
+      min: 0,
+      max: 1e20,
+      default: 9007199254740993,
+    };
+    attachExactDefaultNumberToken(streamOut, '9007199254740993');
+    const cmdOut = { type: 'SET_VALUE', stream: 'big_num', safeValue: 9007199254740993 };
+    attachExactSafeValueNumberToken(cmdOut, '9007199254740993');
+    await patchTemplateDraftApi(CTX, TEMPLATE_ID, 1, { streams: [streamOut], commands: [cmdOut] });
+    assert.equal(capturedRawPatch.includes('"default":9007199254740993'), true);
+    assert.equal(capturedRawPatch.includes('"safeValue":9007199254740993'), true);
   },
 );

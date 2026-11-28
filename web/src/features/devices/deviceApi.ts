@@ -40,6 +40,7 @@ export async function listPublishedVersionsForRegistrationApi(
   ctx: LiveDeviceContext,
   signal?: AbortSignal,
 ): Promise<TemplateVersionDto[]> {
+  const seenTemplateIds = new Set<string>();
   const templatesWithVersions: string[] = [];
   const seenTemplateCursors = new Set<string>();
   let templateCursor: string | null = null;
@@ -51,7 +52,10 @@ export async function listPublishedVersionsForRegistrationApi(
       signal,
     });
     for (const tpl of templatesPage.items) {
-      if (tpl.latestPublishedVersionId !== null) {
+      // Loại bỏ root ARCHIVED (provider từ chối pin mới), nhưng giữ cả PUBLISHED lẫn DRAFT từng công bố version lịch sử.
+      const isEligibleRoot = tpl.status === 'PUBLISHED' || tpl.status === 'DRAFT';
+      if (isEligibleRoot && tpl.latestPublishedVersionId !== null && !seenTemplateIds.has(tpl.id)) {
+        seenTemplateIds.add(tpl.id);
         templatesWithVersions.push(tpl.id);
       }
     }

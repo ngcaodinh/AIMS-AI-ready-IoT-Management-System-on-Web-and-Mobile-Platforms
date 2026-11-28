@@ -1,6 +1,8 @@
 import type { ChangeEvent, MouseEvent } from 'react';
 import {
   computeTemplateSchemaDiff,
+  getStreamDefaultDescriptor,
+  getStreamEnumDescriptors,
   type TemplateDto,
   type TemplatePublishedDto,
   type TemplateSchemaDiff,
@@ -273,6 +275,26 @@ export function TemplatePublishPanel({
                   </span>
                   <span>Công bố lúc: {selectedVersion.publishedAt}</span>
                 </div>
+
+                <ul className="tpl-hint tpl-g1-notes" aria-label="Chi tiết datastream của phiên bản đã chọn">
+                  {selectedVersion.streams.map(
+                    /** Hiển thị exact token của enumValues và default trên snapshot đã chọn. */
+                    (stream) => {
+                      const enumLabels = getStreamEnumDescriptors(stream).map(
+                        /** Phản ánh rõ kiểu chuỗi vs số và giữ nguyên token decimal lớn. */
+                        (d) => (d.kind === 'string' ? JSON.stringify(d.value) : d.display),
+                      );
+                      const defaultDesc = getStreamDefaultDescriptor(stream);
+                      return (
+                        <li key={stream.key}>
+                          <span className="tpl-mono">{stream.key}</span> ({stream.type} · {stream.channelKind}/{stream.direction})
+                          {enumLabels.length > 0 ? <> · enum=[<span className="tpl-mono">{enumLabels.join(', ')}</span>]</> : null}
+                          {defaultDesc !== undefined ? <> · default=<span className="tpl-mono">{defaultDesc.kind === 'string' ? JSON.stringify(defaultDesc.value) : defaultDesc.display}</span></> : null}
+                        </li>
+                      );
+                    },
+                  )}
+                </ul>
 
                 {template.status === 'PUBLISHED' ? (
                   <div className="tpl-actions-row">

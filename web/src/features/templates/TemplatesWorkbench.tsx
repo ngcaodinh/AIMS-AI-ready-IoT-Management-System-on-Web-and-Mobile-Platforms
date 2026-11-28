@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { SessionMetadata } from '../auth/api.ts';
 import { WorkspaceApiError } from '../workspace/workspaceApi.ts';
-import { TemplateEditor } from './TemplateEditor.tsx';
+import { TemplateEditor, type StreamDefaultInputState } from './TemplateEditor.tsx';
 import { TemplatePublishPanel, type PublishOutcomeState } from './TemplatePublishPanel.tsx';
 import {
   createTemplateDraftApi,
@@ -13,13 +13,19 @@ import {
   recoverPublishBySourceRevisionApi,
   cloneTemplateDraftApi,
 } from './templateApi.ts';
-import type {
-  StreamInputDto,
-  StreamScalarValue,
-  TemplateCommandDto,
-  TemplateDto as LiveTemplateDto,
-  TemplatePatchInput,
-  TemplateVersionDto,
+import {
+  attachExactDefaultNumberToken,
+  attachExactSafeValueNumberToken,
+  canonicalDecimalIdentity,
+  getCommandSafeValueDescriptor,
+  getStreamDefaultDescriptor,
+  getStreamEnumDescriptors,
+  hasLegacyNumericEnum,
+  type StreamInputDto,
+  type TemplateCommandDto,
+  type TemplateDto as LiveTemplateDto,
+  type TemplatePatchInput,
+  type TemplateVersionDto,
 } from './templateContract.ts';
 import {
   createEmptyTemplateForm,
@@ -70,7 +76,7 @@ function liveTemplateToEditorDto(dto: LiveTemplateDto): EditorTemplateDto {
         unit: stream.unit ?? null,
         min: stream.min ?? null,
         max: stream.max ?? null,
-        enumValues: (stream.enumValues ?? []).map(String),
+        enumValues: getStreamEnumDescriptors(stream).map((desc) => desc.display),
       }),
     ),
     commands: dto.commands.map(
@@ -82,15 +88,16 @@ function liveTemplateToEditorDto(dto: LiveTemplateDto): EditorTemplateDto {
 
 /**
  * Chuyển dữ liệu đang nhập trong `TemplateDraftForm` và bảng `streamDefaults` sang payload
- * `StreamInputDto[]` và `TemplateCommandDto[]` theo đúng hợp đồng G1 (`channelKind` và `direction` độc lập, `default`, `safeValue`).
+ * `StreamInputDto[]` và `TemplateCommandDto[]` theo đúng hợp đồng G1 (`channelKind` và `direction` độc lập, `default`, `safeValue`),
+ * bảo toàn cả `default: ""` / toàn khoảng trắng lẫn token số nguyên thủy của trường ghi được.
  * Input
  * Param: form — dữ liệu biểu mẫu người dùng đang sửa.
- * Param: streamDefaults — bảng giá trị mặc định scalar thô theo `localId`.
+ * Param: streamDefaults — bảng trạng thái `{ present, text }` của giá trị mặc định theo `localId`.
  * Output: danh sách streams và commands sẵn sàng gửi POST/PATCH lên backend.
  */
 function editorFormToWirePayload(
   form: TemplateDraftForm,
-  streamDefaults: Readonly<Record<string, string>>,
+  streamDefaults: Readonly<Record<string, StreamDefaultInputState>>,
 ): {
   name: string;
   model: string;
@@ -115,22 +122,31 @@ function editorFormToWirePayload(
       if (stream.type === 'ENUM') {
         next.enumValues = [...stream.enumValues];
       }
-      const rawDefault = streamDefaults[stream.localId] ?? '';
-      const hasDefaultValue = (stream.type === 'STRING' || stream.type === 'ENUM')
-        ? rawDefault !== ''
-        : rawDefault.trim() !== '';
-      if (hasDefaultValue) {
-        let parsedDefault: StreamScalarValue = rawDefault;
-        if (stream.type === 'NUMBER') {
-          const parsed = Number(rawDefault.trim());
-          parsedDefault = Number.isFinite(parsed) ? parsed : rawDefault.trim();
+      const defaultState = streamDefaults[stream.localId] ?? { present: false, text: '' };
+      if (defaultState.present) {
+        if (stream.type === 'STRING') {
+          next.default = defaultState.text;
+        } else if (stream.type === 'ENUM') {
+          if (defaultState.text !== '') next.default = defaultState.text;
+        } else if (stream.type === 'NUMBER') {
+          const trimmedDefault = defaultState.text.trim();
+          if (trimmedDefault !== '') {
+            const parsed = Number(trimmedDefault);
+            if (canonicalDecimalIdentity(trimmedDefault) !== null && Number.isFinite(parsed)) {
+              next.default = Object.is(parsed, -0) ? 0 : parsed;
+              attachExactDefaultNumberToken(next, trimmedDefault);
+            } else {
+              next.default = trimmedDefault;
+            }
+          }
         } else if (stream.type === 'BOOLEAN') {
-          const normalizedBool = rawDefault.trim();
-          if (normalizedBool === 'true') parsedDefault = true;
-          else if (normalizedBool === 'false') parsedDefault = false;
-          else parsedDefault = normalizedBool;
+          const trimmedBool = defaultState.text.trim();
+          if (trimmedBool !== '') {
+            if (trimmedBool === 'true') next.default = true;
+            else if (trimmedBool === 'false') next.default = false;
+            else next.default = trimmedBool;
+          }
         }
-        next.default = parsedDefault;
       }
       return next;
     },
@@ -142,23 +158,32 @@ function editorFormToWirePayload(
     ),
   );
   const commands: TemplateCommandDto[] = form.commands.map(
-    /** Chuyển `safeValueText` thành kiểu scalar JSON khớp kênh đích hoặc giữ chuỗi để server báo 422. */
+    /** Chuyển `safeValueText` thành kiểu scalar JSON khớp kênh đích và giữ nguyên token số chính xác. */
     (cmd) => {
       const targetKey = cmd.stream.trim();
       const targetType = streamTypeByKey.get(targetKey);
       let safeValue: number | boolean | string = cmd.safeValueText;
+      let exactNumToken: string | null = null;
       if (targetType === 'NUMBER' && cmd.safeValueText.trim() !== '') {
-        const parsed = Number(cmd.safeValueText.trim());
-        if (Number.isFinite(parsed)) safeValue = parsed;
+        const trimmedSafe = cmd.safeValueText.trim();
+        const parsed = Number(trimmedSafe);
+        if (canonicalDecimalIdentity(trimmedSafe) !== null && Number.isFinite(parsed)) {
+          safeValue = Object.is(parsed, -0) ? 0 : parsed;
+          exactNumToken = trimmedSafe;
+        }
       } else if (targetType === 'BOOLEAN') {
         if (cmd.safeValueText === 'true') safeValue = true;
         else if (cmd.safeValueText === 'false') safeValue = false;
       }
-      return {
+      const nextCmd: TemplateCommandDto = {
         type: 'SET_VALUE',
         stream: targetKey,
         safeValue,
       };
+      if (exactNumToken !== null) {
+        attachExactSafeValueNumberToken(nextCmd, exactNumToken);
+      }
+      return nextCmd;
     },
   );
   return {
@@ -173,7 +198,7 @@ function editorFormToWirePayload(
  * Chuyển `LiveTemplateDto` thành `TemplateDraftForm` để đưa vào `TemplateEditor`.
  * Input
  * Param: dto — bản ghi template G1 từ API thật.
- * Output: dữ liệu form khớp state của trình chỉnh sửa WB-03.
+ * Output: dữ liệu form khớp state của trình chỉnh sửa WB-03 (giữ nguyên chuỗi số decimal lớn từ token).
  */
 function liveDtoToForm(dto: LiveTemplateDto): TemplateDraftForm {
   return {
@@ -186,7 +211,7 @@ function liveDtoToForm(dto: LiveTemplateDto): TemplateDraftForm {
     publishedVersion: null,
     updatedAt: dto.updatedAt,
     streams: dto.streams.map(
-      /** Giữ `localId` ổn định để chỉnh sửa không mất focus bàn phím. */
+      /** Giữ `localId` ổn định và lấy chuỗi hiển thị không làm tròn cho các thành viên enum. */
       (stream, index) => ({
         localId: `live-stream-${index}-${stream.key}`,
         key: stream.key,
@@ -196,34 +221,39 @@ function liveDtoToForm(dto: LiveTemplateDto): TemplateDraftForm {
         unit: stream.unit ?? '',
         minText: stream.min === undefined ? '' : String(stream.min),
         maxText: stream.max === undefined ? '' : String(stream.max),
-        enumValues: (stream.enumValues ?? []).map(String),
+        enumValues: getStreamEnumDescriptors(stream).map((desc) => desc.display),
       }),
     ),
     commands: dto.commands.map(
-      /** Chuyển capability `SET_VALUE` sang dạng chuỗi điều khiển trên form. */
+      /** Chuyển capability `SET_VALUE` sang chuỗi điều khiển bảo toàn token số nguyên thủy. */
       (cmd, index) => ({
         localId: `live-cmd-${index}-${cmd.stream}`,
         type: 'SET_VALUE',
         stream: cmd.stream,
-        safeValueText: String(cmd.safeValue),
+        safeValueText: getCommandSafeValueDescriptor(cmd).display,
       }),
     ),
   };
 }
 
 /**
- * Trích bảng chuỗi `default` theo `localId` khớp với thứ tự stream của `liveDtoToForm`.
+ * Trích trạng thái `{ present, text }` của `default` theo `localId`,
+ * phân biệt rõ trường vắng mặt (`present: false`) với chuỗi rỗng tường minh `""` (`present: true`).
  * Input
  * Param: dto — bản ghi template G1 từ API thật.
- * Output: đối tượng ánh xạ `localId` sang chuỗi hiển thị của `stream.default`.
+ * Output: bảng `StreamDefaultInputState` theo `localId`.
  */
-function extractStreamDefaults(dto: LiveTemplateDto): Record<string, string> {
-  const next: Record<string, string> = {};
+function extractStreamDefaults(dto: LiveTemplateDto): Record<string, StreamDefaultInputState> {
+  const next: Record<string, StreamDefaultInputState> = {};
   dto.streams.forEach(
-    /** Ghi nhận chuỗi `default` cho các kênh có khai báo giá trị mặc định. */
+    /** Ghi nhận cả trường hợp `default: ""` lẫn giá trị số lớn chính xác. */
     (stream, index) => {
-      if (stream.default !== undefined) {
-        next[`live-stream-${index}-${stream.key}`] = String(stream.default);
+      const desc = getStreamDefaultDescriptor(stream);
+      if (desc !== undefined) {
+        next[`live-stream-${index}-${stream.key}`] = {
+          present: true,
+          text: desc.display,
+        };
       }
     },
   );
@@ -231,30 +261,34 @@ function extractStreamDefaults(dto: LiveTemplateDto): Record<string, string> {
 }
 
 /**
- * Tuần tự hóa trạng thái các kênh và giá trị `default` thô để phát hiện thay đổi phần `streams` khi lưu PATCH.
+ * Tuần tự hóa trạng thái các kênh và giá trị `default` thô (kể cả cờ `present`) để phát hiện thay đổi phần `streams` khi lưu PATCH.
  * Input
  * Param: streams — mảng datastream trên form.
- * Param: defaults — bảng chuỗi `default` theo `localId`.
+ * Param: defaults — bảng trạng thái `{ present, text }` theo `localId`.
  * Output: chuỗi chuẩn phản ánh nguyên trạng các kênh hiện có.
  */
 function serializeStreamsState(
   streams: readonly TemplateStreamDraft[],
-  defaults: Readonly<Record<string, string>>,
+  defaults: Readonly<Record<string, StreamDefaultInputState>>,
 ): string {
   return JSON.stringify(
     streams.map(
-      /** Gom toàn bộ thuộc tính cấu hình kênh kèm chuỗi `default` chưa bị trim. */
-      (stream) => ({
-        key: stream.key,
-        type: stream.type,
-        channelKind: stream.channelKind,
-        direction: stream.direction,
-        unit: stream.unit,
-        minText: stream.minText,
-        maxText: stream.maxText,
-        enumValues: stream.enumValues,
-        defaultText: defaults[stream.localId] ?? '',
-      }),
+      /** Gom toàn bộ thuộc tính cấu hình kênh kèm cờ tường minh và chuỗi `default` chưa bị trim. */
+      (stream) => {
+        const entry = defaults[stream.localId];
+        return {
+          key: stream.key,
+          type: stream.type,
+          channelKind: stream.channelKind,
+          direction: stream.direction,
+          unit: stream.unit,
+          minText: stream.minText,
+          maxText: stream.maxText,
+          enumValues: stream.enumValues,
+          defaultPresent: entry?.present ?? false,
+          defaultText: entry?.text ?? '',
+        };
+      },
     ),
   );
 }
@@ -280,20 +314,23 @@ function serializeCommandsState(commands: readonly TemplateCommandDraft[]): stri
 
 /**
  * Tạo payload PATCH tối thiểu cho bản nháp đã tồn tại trên máy chủ:
- * chỉ gửi các phần (`name`, `model`, `streams`, `commands`) thực sự thay đổi so với `currentRoot`
- * để thao tác đổi tên không ghi đè hoặc ép kiểu lại numeric ENUM hay `default` chỉ chứa khoảng trắng.
+ * chỉ gửi các phần (`name`, `model`, `streams`, `commands`) thực sự thay đổi so với `currentRoot`,
+ * và luôn chỉ gửi `{ name }` đối với draft chứa ENUM số lịch sử.
  * Input
  * Param: currentRoot — bản ghi template gốc đã tải từ server.
  * Param: form — dữ liệu biểu mẫu đang sửa.
- * Param: streamDefaults — bảng giá trị `default` theo `localId`.
- * Output: `TemplatePatchInput` chỉ chứa trường thay đổi (tối thiểu `name` nếu chưa đổi trường nào).
+ * Param: streamDefaults — bảng trạng thái `{ present, text }` theo `localId`.
+ * Output: `TemplatePatchInput` tối thiểu và an toàn dữ liệu.
  */
 function buildLiveDraftPatchPayload(
   currentRoot: LiveTemplateDto,
   form: TemplateDraftForm,
-  streamDefaults: Readonly<Record<string, string>>,
+  streamDefaults: Readonly<Record<string, StreamDefaultInputState>>,
 ): TemplatePatchInput {
   const full = editorFormToWirePayload(form, streamDefaults);
+  if (hasLegacyNumericEnum(currentRoot)) {
+    return { name: full.name };
+  }
   const baselineForm = liveDtoToForm(currentRoot);
   const baselineDefaults = extractStreamDefaults(currentRoot);
 
@@ -323,16 +360,19 @@ function buildLiveDraftPatchPayload(
  * Tạo khóa tuần tự hóa gồm `TemplateDraftForm` và `streamDefaults` để phát hiện `isDirty` chính xác.
  * Input
  * Param: form — dữ liệu form chính.
- * Param: streamDefaults — bảng giá trị mặc định theo `localId`.
+ * Param: streamDefaults — bảng trạng thái `{ present, text }` theo `localId`.
  * Output: chuỗi đại diện trạng thái hiện tại của biểu mẫu live.
  */
 function serializeDraftStateKey(
   form: TemplateDraftForm,
-  streamDefaults: Readonly<Record<string, string>>,
+  streamDefaults: Readonly<Record<string, StreamDefaultInputState>>,
 ): string {
   const defaultsList = form.streams.map(
-    /** Gắn giá trị `default` hiện hành theo đúng thứ tự kênh để bắt mọi thay đổi. */
-    (stream) => [stream.localId, streamDefaults[stream.localId] ?? ''] as const,
+    /** Gắn cờ `present` và chuỗi `default` hiện hành theo đúng thứ tự kênh để bắt mọi thay đổi. */
+    (stream) => {
+      const entry = streamDefaults[stream.localId];
+      return [stream.localId, entry?.present ?? false, entry?.text ?? ''] as const;
+    },
   );
   return JSON.stringify({
     formKey: serializeFormForDirtyCheck(form),
@@ -380,7 +420,7 @@ export function TemplatesWorkbench({
 
   const [currentRoot, setCurrentRoot] = useState<LiveTemplateDto | null>(null);
   const [editorForm, setEditorForm] = useState<TemplateDraftForm>(createEmptyTemplateForm);
-  const [streamDefaults, setStreamDefaults] = useState<Record<string, string>>({});
+  const [streamDefaults, setStreamDefaults] = useState<Record<string, StreamDefaultInputState>>({});
   const [baselineKey, setBaselineKey] = useState<string>(
     () => serializeDraftStateKey(createEmptyTemplateForm(), {}),
   );
@@ -402,6 +442,11 @@ export function TemplatesWorkbench({
     /** Gói cặp `workspaceId` và `session` hiện hành để truyền cho API client. */
     () => ({ workspaceId, session }),
     [workspaceId, session],
+  );
+  const isLegacyNumericEnumDraft = useMemo(
+    /** Khóa sửa schema/capability trên draft có ENUM số lịch sử để không mất hoặc ép kiểu dữ liệu. */
+    () => Boolean(currentRoot && currentRoot.status === 'DRAFT' && hasLegacyNumericEnum(currentRoot)),
+    [currentRoot],
   );
   const isDirty = useMemo(
     /** Xác định form editor đang có chỉnh sửa cục bộ chưa lưu so với mốc đã tải. */
@@ -572,6 +617,28 @@ export function TemplatesWorkbench({
   /** Gửi POST/PATCH bản nháp lên API thật và xử lý 422, 412, 409 hoặc POST unknown theo hợp đồng G1. */
   async function handleSubmitDraft(): Promise<void> {
     if (isSubmitting) return;
+    if (isLegacyNumericEnumDraft && currentRoot) {
+      const baselineForm = liveDtoToForm(currentRoot);
+      const baselineDefaults = extractStreamDefaults(currentRoot);
+      const structuralChanged =
+        editorForm.model.trim() !== currentRoot.model.trim()
+        || serializeStreamsState(editorForm.streams, streamDefaults)
+          !== serializeStreamsState(baselineForm.streams, baselineDefaults)
+        || serializeCommandsState(editorForm.commands) !== serializeCommandsState(baselineForm.commands);
+      if (structuralChanged) {
+        // Ngăn tuyệt đối gửi PATCH mang mảng khi draft chứa ENUM số lịch sử.
+        setSaveOutcome({
+          ok: false,
+          kind: 'validation',
+          status: 422,
+          code: 'LEGACY_NUMERIC_ENUM_READONLY',
+          message: 'Bản nháp chứa ENUM số lịch sử chỉ cho phép đổi tên; thay đổi schema/capability bị chặn để tránh mất kiểu dữ liệu.',
+          fieldErrors: [],
+        });
+        return;
+      }
+    }
+
     const generation = generationRef.current;
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -880,11 +947,16 @@ export function TemplatesWorkbench({
   }
 
   /**
-   * Cập nhật form editor và dọn giá trị `default` mồ côi khi một datastream bị xóa khỏi form.
+   * Cập nhật form editor và dọn giá trị `default` mồ côi khi một datastream bị xóa khỏi form;
+   * khóa mọi thay đổi ngoài `name` nếu bản nháp mang ENUM số lịch sử.
    * Input
    * Param: nextForm — trạng thái biểu mẫu mới từ `TemplateEditor`.
    */
   function handleChangeEditorForm(nextForm: TemplateDraftForm): void {
+    if (isLegacyNumericEnumDraft) {
+      setEditorForm((prev) => ({ ...prev, name: nextForm.name }));
+      return;
+    }
     setEditorForm(nextForm);
     const activeIds = new Set(nextForm.streams.map(
       /** Thu thập `localId` còn tồn tại trên form. */
@@ -892,7 +964,7 @@ export function TemplatesWorkbench({
     ));
     setStreamDefaults((prev) => {
       let removed = false;
-      const next: Record<string, string> = {};
+      const next: Record<string, StreamDefaultInputState> = {};
       for (const [id, value] of Object.entries(prev)) {
         if (activeIds.has(id)) next[id] = value;
         else removed = true;
@@ -902,13 +974,14 @@ export function TemplatesWorkbench({
   }
 
   /**
-   * Cập nhật giá trị mặc định scalar (`default`) của một datastream theo `localId`.
+   * Cập nhật trạng thái giá trị mặc định scalar (`default`) của một datastream theo `localId`.
    * Input
    * Param: localId — mã định danh cục bộ của kênh.
-   * Param: value — chuỗi người dùng nhập cho `default`.
+   * Param: nextState — trạng thái `{ present, text }` cho `default`.
    */
-  function handleChangeStreamDefault(localId: string, value: string): void {
-    setStreamDefaults((prev) => ({ ...prev, [localId]: value }));
+  function handleChangeStreamDefault(localId: string, nextState: StreamDefaultInputState): void {
+    if (isLegacyNumericEnumDraft) return;
+    setStreamDefaults((prev) => ({ ...prev, [localId]: nextState }));
   }
 
   return (
@@ -1035,6 +1108,7 @@ export function TemplatesWorkbench({
           errorFocusNonce={errorFocusNonce}
           headingRef={headingRef}
           mode="live"
+          isSchemaLocked={isLegacyNumericEnumDraft}
           streamDefaults={streamDefaults}
           onChangeStreamDefault={handleChangeStreamDefault}
           onChangeForm={handleChangeEditorForm}

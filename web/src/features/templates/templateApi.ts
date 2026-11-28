@@ -3,10 +3,12 @@ import { isContractUuid, isPositiveInt, workspaceRequest, WorkspaceApiError } fr
 import {
   buildTemplateCreatePayload,
   parseTemplateDto,
+  parseTemplateJsonText,
   parseTemplatePageDto,
   parseTemplatePublishedDto,
   parseTemplateVersionDto,
   parseTemplateVersionPageDto,
+  serializeTemplateRequestJson,
   type TemplateCreateInput,
   type TemplateDto,
   type TemplatePageDto,
@@ -43,6 +45,7 @@ export async function listTemplatesApi(
     method: 'GET',
     workspaceId: ctx.workspaceId,
     session: ctx.session,
+    parseResponseText: parseTemplateJsonText,
     signal: options.signal,
   });
   return parseTemplatePageDto(body);
@@ -69,6 +72,7 @@ export async function getTemplateApi(
     method: 'GET',
     workspaceId: ctx.workspaceId,
     session: ctx.session,
+    parseResponseText: parseTemplateJsonText,
     signal,
   });
   return parseTemplateDto(body);
@@ -93,7 +97,8 @@ export async function createTemplateDraftApi(
     method: 'POST',
     workspaceId: ctx.workspaceId,
     session: ctx.session,
-    body: payload,
+    rawJsonBody: serializeTemplateRequestJson(payload),
+    parseResponseText: parseTemplateJsonText,
     signal,
   });
   return parseTemplateDto(body);
@@ -143,7 +148,8 @@ export async function patchTemplateDraftApi(
     workspaceId: ctx.workspaceId,
     session: ctx.session,
     ifMatchRevision: revision,
-    body: normalizedBody,
+    rawJsonBody: serializeTemplateRequestJson(normalizedBody),
+    parseResponseText: parseTemplateJsonText,
     signal,
   });
   return parseTemplateDto(body);
@@ -174,6 +180,7 @@ export async function publishTemplateApi(
     workspaceId: ctx.workspaceId,
     session: ctx.session,
     ifMatchRevision: revision,
+    parseResponseText: parseTemplateJsonText,
     signal,
   });
   return parseTemplatePublishedDto(body);
@@ -212,6 +219,7 @@ export async function listTemplateVersionsApi(
       method: 'GET',
       workspaceId: ctx.workspaceId,
       session: ctx.session,
+      parseResponseText: parseTemplateJsonText,
       signal: options.signal,
     },
   );
@@ -242,6 +250,7 @@ export async function getTemplateVersionApi(
       method: 'GET',
       workspaceId: ctx.workspaceId,
       session: ctx.session,
+      parseResponseText: parseTemplateJsonText,
       signal,
     },
   );
@@ -275,6 +284,7 @@ export async function cloneTemplateDraftApi(
     session: ctx.session,
     ifMatchRevision: revision,
     body: { sourceVersionId },
+    parseResponseText: parseTemplateJsonText,
     signal,
   });
   return parseTemplateDto(body);

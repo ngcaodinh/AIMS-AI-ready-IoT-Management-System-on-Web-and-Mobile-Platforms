@@ -9,6 +9,8 @@ use axum::{
     routing::post,
 };
 use hmac::{Hmac, Mac};
+#[cfg(feature = "integrated-lab")]
+use iot_platform_backend::domain::device::ApprovedDeviceModels;
 #[cfg(not(feature = "integrated-lab"))]
 use iot_platform_backend::http::auth_router;
 #[cfg(feature = "integrated-lab")]
@@ -65,6 +67,22 @@ fn auth_lab_router(state: HttpState) -> Router {
     {
         auth_router(state)
     }
+}
+
+/**
+ * Apply the single synthetic model fixture only to the explicitly enabled integrated lab.
+ *
+ * # Input
+ * Param: state - loopback state with fail-closed mutation policy by default.
+ *
+ * # Output
+ * State allowing only the G1 model fixture used by the lab workbench tests.
+ */
+#[cfg(feature = "integrated-lab")]
+fn integrated_lab_state(state: HttpState) -> Result<HttpState, ApplicationError> {
+    let models = ApprovedDeviceModels::new(vec!["G1_TEST_MODEL".to_owned()])
+        .map_err(|_| ApplicationError::Unavailable)?;
+    Ok(state.with_approved_device_models(models))
 }
 
 /**
@@ -389,6 +407,8 @@ async fn run() -> Result<(), ApplicationError> {
         diagnostics,
     )
     .await?;
+    #[cfg(feature = "integrated-lab")]
+    let state = integrated_lab_state(state)?;
     if !config.skip_fixture_seed {
         seed_workspaces(&pool, &config).await?;
     }
@@ -506,6 +526,10 @@ mod lab_router_tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "integrated-lab"))]
+#[path = "auth_lab/integrated_policy_tests.rs"]
+mod integrated_policy_tests;
 
 #[cfg(test)]
 mod measurement_tests {

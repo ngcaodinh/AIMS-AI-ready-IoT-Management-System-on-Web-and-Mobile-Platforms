@@ -15,6 +15,450 @@ export type LegacyStreamMode = StreamDirection | ChannelKind;
 export type TemplateStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 export type StreamScalarValue = number | boolean | string;
 
+export type ExactScalarDescriptor =
+  | { kind: 'string'; value: string; identity: string; display: string }
+  | { kind: 'boolean'; value: boolean; identity: string; display: string }
+  | { kind: 'number'; value: number; rawToken: string; identity: string; display: string };
+
+interface ExactStreamMeta {
+  enumDescriptors?: ExactScalarDescriptor[];
+  defaultDescriptor?: ExactScalarDescriptor;
+}
+
+const STREAM_EXACT_META = new WeakMap<StreamOutputDto, ExactStreamMeta>();
+const COMMAND_EXACT_META = new WeakMap<TemplateCommandDto, ExactScalarDescriptor>();
+const EXACT_INPUT_DEFAULT_TOKEN = new WeakMap<object, string>();
+const EXACT_INPUT_SAFE_VALUE_TOKEN = new WeakMap<object, string>();
+
+// Regex khớp chuẩn số JSON theo RFC 8259 dùng cho token-aware parser và serializer.
+const RFC8259_NUMBER_PATTERN = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?$/;
+const RFC8259_NUMBER_PREFIX_PATTERN = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+const MAX_TEMPLATE_JSON_DEPTH = 64;
+
+/**
+ * Bao bọc token số nguyên bản đọc trực tiếp từ JSON text trước khi bị JS `Number` làm tròn.
+ */
+class ExactJsonNumberToken {
+  constructor(
+    public readonly raw: string,
+    public readonly value: number,
+    public readonly canonicalDecimal: string,
+  ) {}
+}
+
+/**
+ * Chuẩn hóa chuỗi JSON number sang danh tính decimal canonical khớp `DecimalLiteral` phía backend
+ * (`-0`/`0.0`/`0` -> `"0"`, `1.0`/`1` -> `"1"`, giữ nguyên khác biệt giữa `2^53` và `2^53 + 1`).
+ * Input
+ * Param: rawToken — token số JSON nguyên bản (không chứa dấu nháy hay khoảng trắng).
+ * Output: chuỗi decimal chuẩn hoặc `null` nếu sai cú pháp RFC 8259 / vượt giới hạn numeric PostgreSQL.
+ */
+export function canonicalDecimalIdentity(rawToken: string): string | null {
+  const match = RFC8259_NUMBER_PATTERN.exec(rawToken);
+  if (!match) return null;
+  const negative = match[1] === '-';
+  const whole = match[2];
+  const fraction = match[3] ?? '';
+  const expInput = match[4] ? Number.parseInt(match[4], 10) : 0;
+  if (!Number.isSafeInteger(expInput)) return null;
+
+  const significant = `${whole}${fraction}`.replace(/^0+/, '');
+  if (significant === '') {
+    return '0';
+  }
+  const digits = significant.replace(/0+$/, '');
+  const trailing = significant.length - digits.length;
+  const exponent = expInput - fraction.length + trailing;
+  const integerDigits = digits.length + exponent;
+  if (!Number.isSafeInteger(exponent) || integerDigits > 131_072 || exponent < -16_383) {
+    return null;
+  }
+  const sign = negative ? '-' : '';
+  return exponent === 0 ? `${sign}${digits}` : `${sign}${digits}e${exponent}`;
+}
+
+/**
+ * Tạo `ExactScalarDescriptor` chuẩn từ giá trị thô (hỗ trợ cả `ExactJsonNumberToken` và primitive JS).
+ * Input
+ * Param: value — scalar hoặc `ExactJsonNumberToken` đọc từ JSON response/object.
+ * Output: descriptor mang đủ giá trị JS, chuỗi hiển thị gốc và khóa danh tính theo kiểu (`s:`/`b:`/`n:`).
+ */
+function toScalarDescriptor(value: unknown): ExactScalarDescriptor | null {
+  if (value instanceof ExactJsonNumberToken) {
+    return {
+      kind: 'number',
+      value: value.value,
+      rawToken: value.raw,
+      identity: `n:${value.canonicalDecimal}`,
+      display: value.raw,
+    };
+  }
+  if (typeof value === 'string') {
+    return {
+      kind: 'string',
+      value,
+      identity: `s:${value}`,
+      display: value,
+    };
+  }
+  if (typeof value === 'boolean') {
+    return {
+      kind: 'boolean',
+      value,
+      identity: `b:${String(value)}`,
+      display: String(value),
+    };
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const raw = Object.is(value, -0) ? '0' : String(value);
+    const canonical = canonicalDecimalIdentity(raw);
+    if (!canonical) return null;
+    return {
+      kind: 'number',
+      value: Object.is(value, -0) ? 0 : value,
+      rawToken: raw,
+      identity: `n:${canonical}`,
+      display: raw,
+    };
+  }
+  return null;
+}
+
+/**
+ * Giải mã JSON response của API template bằng parser RFC 8259 trực tiếp trên chuỗi thô
+ * trước khi `response.json()` / `JSON.parse` làm tròn token số ở `enumValues`, `default` hoặc `safeValue`.
+ * Input
+ * Param: rawText — chuỗi UTF-8 nguyên bản từ HTTP body của response template.
+ * Output: cây dữ liệu kèm `ExactJsonNumberToken` tại các slot scalar cần độ chính xác decimal.
+ * Errors: ném `WorkspaceApiError('PROTOCOL_ERROR')` nếu JSON sai cú pháp, trùng key hoặc vượt độ sâu.
+ */
+export function parseTemplateJsonText(rawText: string): unknown {
+  let pos = 0;
+  const len = rawText.length;
+
+  /** Bỏ qua khoảng trắng hợp lệ theo RFC 8259 (`space`, `tab`, `LF`, `CR`). */
+  function skipWs(): void {
+    while (pos < len) {
+      const ch = rawText.charCodeAt(pos);
+      if (ch === 0x20 || ch === 0x09 || ch === 0x0a || ch === 0x0d) {
+        pos += 1;
+      } else {
+        break;
+      }
+    }
+  }
+
+  /** Đọc và xác thực token chuỗi JSON tại vị trí con trỏ hiện tại. */
+  function readString(): string {
+    const start = pos;
+    pos += 1;
+    while (pos < len) {
+      const ch = rawText.charCodeAt(pos);
+      if (ch === 0x22) {
+        pos += 1;
+        try {
+          return JSON.parse(rawText.slice(start, pos)) as string;
+        } catch {
+          throw new WorkspaceApiError('PROTOCOL_ERROR');
+        }
+      }
+      if (ch === 0x5c) {
+        pos += 2;
+        continue;
+      }
+      if (ch < 0x20) {
+        throw new WorkspaceApiError('PROTOCOL_ERROR');
+      }
+      pos += 1;
+    }
+    throw new WorkspaceApiError('PROTOCOL_ERROR');
+  }
+
+  /** Đọc token số RFC 8259 nguyên bản và giữ `ExactJsonNumberToken` tại các slot scalar của template. */
+  function readNumber(preserveExactToken: boolean): number | ExactJsonNumberToken {
+    RFC8259_NUMBER_PREFIX_PATTERN.lastIndex = pos;
+    const match = RFC8259_NUMBER_PREFIX_PATTERN.exec(rawText);
+    if (!match) {
+      throw new WorkspaceApiError('PROTOCOL_ERROR');
+    }
+    const token = match[0];
+    const nextPos = pos + token.length;
+    if (nextPos < len) {
+      const nextCh = rawText.charCodeAt(nextPos);
+      // Chặn trường hợp số dính liền chữ hoặc dấu chấm thừa không thuộc dấu tách JSON.
+      if (
+        (nextCh >= 0x30 && nextCh <= 0x39)
+        || (nextCh >= 0x41 && nextCh <= 0x5a)
+        || (nextCh >= 0x61 && nextCh <= 0x7a)
+        || nextCh === 0x2e
+        || nextCh === 0x5f
+      ) {
+        throw new WorkspaceApiError('PROTOCOL_ERROR');
+      }
+    }
+    pos = nextPos;
+    const num = Number(token);
+    if (preserveExactToken) {
+      const canonical = canonicalDecimalIdentity(token);
+      if (!canonical || !Number.isFinite(num)) {
+        throw new WorkspaceApiError('PROTOCOL_ERROR');
+      }
+      return new ExactJsonNumberToken(token, Object.is(num, -0) ? 0 : num, canonical);
+    }
+    return num;
+  }
+
+  /** Kiểm tra xem slot số hiện tại có thuộc danh sách đường dẫn scalar cần giữ token exact không. */
+  function shouldPreservePrecision(contextKind: 'root' | 'stream' | 'enumValues' | 'command' | 'other', keyName: string): boolean {
+    if (contextKind === 'enumValues') return true;
+    if (contextKind === 'stream' && keyName === 'default') return true;
+    if (contextKind === 'command' && keyName === 'safeValue') return true;
+    return false;
+  }
+
+  /** Giải mã đệ quy một giá trị JSON theo ngữ cảnh cha để cô lập chính xác phạm vi scalar template. */
+  function parseValue(depth: number, contextKind: 'root' | 'stream' | 'enumValues' | 'command' | 'other', keyName: string): unknown {
+    if (depth > MAX_TEMPLATE_JSON_DEPTH) {
+      throw new WorkspaceApiError('PROTOCOL_ERROR');
+    }
+    skipWs();
+    if (pos >= len) {
+      throw new WorkspaceApiError('PROTOCOL_ERROR');
+    }
+    const ch = rawText.charCodeAt(pos);
+    if (ch === 0x22) {
+      return readString();
+    }
+    if (ch === 0x7b) {
+      pos += 1;
+      skipWs();
+      const obj: Record<string, unknown> = {};
+      if (pos < len && rawText.charCodeAt(pos) === 0x7d) {
+        pos += 1;
+        return obj;
+      }
+      while (pos < len) {
+        skipWs();
+        if (pos >= len || rawText.charCodeAt(pos) !== 0x22) {
+          throw new WorkspaceApiError('PROTOCOL_ERROR');
+        }
+        const propKey = readString();
+        if (Object.prototype.hasOwnProperty.call(obj, propKey)) {
+          throw new WorkspaceApiError('PROTOCOL_ERROR');
+        }
+        skipWs();
+        if (pos >= len || rawText.charCodeAt(pos) !== 0x3a) {
+          throw new WorkspaceApiError('PROTOCOL_ERROR');
+        }
+        pos += 1;
+        const val = parseValue(depth + 1, contextKind, propKey);
+        Object.defineProperty(obj, propKey, {
+          value: val,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+        skipWs();
+        if (pos < len && rawText.charCodeAt(pos) === 0x2c) {
+          pos += 1;
+          continue;
+        }
+        if (pos < len && rawText.charCodeAt(pos) === 0x7d) {
+          pos += 1;
+          return obj;
+        }
+        throw new WorkspaceApiError('PROTOCOL_ERROR');
+      }
+      throw new WorkspaceApiError('PROTOCOL_ERROR');
+    }
+    if (ch === 0x5b) {
+      pos += 1;
+      skipWs();
+      const arr: unknown[] = [];
+      if (pos < len && rawText.charCodeAt(pos) === 0x5d) {
+        pos += 1;
+        return arr;
+      }
+      const elemContext: 'root' | 'stream' | 'enumValues' | 'command' | 'other' =
+        keyName === 'streams'
+          ? 'stream'
+          : keyName === 'commands'
+            ? 'command'
+            : (contextKind === 'stream' && keyName === 'enumValues')
+              ? 'enumValues'
+              : 'other';
+      while (pos < len) {
+        arr.push(parseValue(depth + 1, elemContext, ''));
+        skipWs();
+        if (pos < len && rawText.charCodeAt(pos) === 0x2c) {
+          pos += 1;
+          continue;
+        }
+        if (pos < len && rawText.charCodeAt(pos) === 0x5d) {
+          pos += 1;
+          return arr;
+        }
+        throw new WorkspaceApiError('PROTOCOL_ERROR');
+      }
+      throw new WorkspaceApiError('PROTOCOL_ERROR');
+    }
+    if (ch === 0x74 && rawText.startsWith('true', pos)) {
+      pos += 4;
+      return true;
+    }
+    if (ch === 0x66 && rawText.startsWith('false', pos)) {
+      pos += 5;
+      return false;
+    }
+    if (ch === 0x6e && rawText.startsWith('null', pos)) {
+      pos += 4;
+      return null;
+    }
+    if (ch === 0x2d || (ch >= 0x30 && ch <= 0x39)) {
+      return readNumber(shouldPreservePrecision(contextKind, keyName));
+    }
+    throw new WorkspaceApiError('PROTOCOL_ERROR');
+  }
+
+  const root = parseValue(0, 'root', '');
+  skipWs();
+  if (pos !== len) {
+    throw new WorkspaceApiError('PROTOCOL_ERROR');
+  }
+  return root;
+}
+
+/**
+ * Gắn token số JSON nguyên bản cho `default` trên `StreamInputDto` khi giá trị số vượt độ chính xác float64.
+ * Input
+ * Param: stream — đối tượng `StreamInputDto` chuẩn bị gửi POST/PATCH.
+ * Param: rawToken — chuỗi số hợp lệ theo RFC 8259.
+ * Side effects: lưu ánh xạ nội bộ để `serializeTemplateRequestJson` xuất nguyên văn số khi gửi wire.
+ */
+export function attachExactDefaultNumberToken(stream: StreamInputDto, rawToken: string): void {
+  if (canonicalDecimalIdentity(rawToken) !== null) {
+    EXACT_INPUT_DEFAULT_TOKEN.set(stream, rawToken);
+  }
+}
+
+/**
+ * Gắn token số JSON nguyên bản cho `safeValue` trên `TemplateCommandDto`.
+ * Input
+ * Param: command — đối tượng capability `SET_VALUE` chuẩn bị gửi POST/PATCH.
+ * Param: rawToken — chuỗi số hợp lệ theo RFC 8259.
+ */
+export function attachExactSafeValueNumberToken(command: TemplateCommandDto, rawToken: string): void {
+  if (canonicalDecimalIdentity(rawToken) !== null) {
+    EXACT_INPUT_SAFE_VALUE_TOKEN.set(command, rawToken);
+  }
+}
+
+/**
+ * Tuần tự hóa body JSON cho POST/PATCH template mà giữ nguyên token số decimal exact
+ * ở `streams[*].default` và `commands[*].safeValue` nếu được gắn, tránh `JSON.stringify` làm tròn float64.
+ * Input
+ * Param: payload — object body cần gửi tới `/api/v1/templates` hoặc `/api/v1/templates/{id}`.
+ * Output: chuỗi JSON hợp lệ đã escape đầy đủ chuỗi/key và chèn nguyên bản số exact đã kiểm định.
+ */
+export function serializeTemplateRequestJson(payload: object): string {
+  if ('workspaceId' in payload) {
+    throw new WorkspaceApiError('VALIDATION_ERROR', 422, [{ path: '/workspaceId', code: 'UNKNOWN_FIELD' }]);
+  }
+
+  /** Chuyển đổi đệ quy từng nút JSON, ưu tiên token exact gắn kèm cho `default` / `safeValue`. */
+  function encodeNode(node: unknown): string {
+    if (node === null || typeof node !== 'object') {
+      return JSON.stringify(node);
+    }
+    if (Array.isArray(node)) {
+      return `[${node.map(encodeNode).join(',')}]`;
+    }
+    const record = node as Record<string, unknown>;
+    const exactDefault = EXACT_INPUT_DEFAULT_TOKEN.get(record);
+    const exactSafeValue = EXACT_INPUT_SAFE_VALUE_TOKEN.get(record);
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(record)) {
+      if (v === undefined) continue;
+      if (k === 'default' && exactDefault !== undefined && canonicalDecimalIdentity(exactDefault) !== null) {
+        parts.push(`${JSON.stringify(k)}:${exactDefault}`);
+      } else if (k === 'safeValue' && exactSafeValue !== undefined && canonicalDecimalIdentity(exactSafeValue) !== null) {
+        parts.push(`${JSON.stringify(k)}:${exactSafeValue}`);
+      } else {
+        parts.push(`${JSON.stringify(k)}:${encodeNode(v)}`);
+      }
+    }
+    return `{${parts.join(',')}}`;
+  }
+
+  return encodeNode(payload);
+}
+
+/**
+ * Trả danh sách descriptor bảo toàn độ chính xác decimal cho `enumValues` của một `StreamOutputDto`.
+ * Input
+ * Param: stream — đối tượng kênh xuất ra từ parser template.
+ * Output: mảng `ExactScalarDescriptor` giữ nguyên cả kiểu `string` vs `number` và chuỗi số chưa làm tròn.
+ */
+export function getStreamEnumDescriptors(stream: Pick<StreamOutputDto, 'enumValues'>): ExactScalarDescriptor[] {
+  const stored = STREAM_EXACT_META.get(stream as StreamOutputDto)?.enumDescriptors;
+  if (stored) return stored;
+  const fallback: ExactScalarDescriptor[] = [];
+  for (const item of stream.enumValues ?? []) {
+    const desc = toScalarDescriptor(item);
+    if (desc) fallback.push(desc);
+  }
+  return fallback;
+}
+
+/**
+ * Trả descriptor bảo toàn độ chính xác decimal cho `default` của một `StreamOutputDto` (nếu có).
+ * Input
+ * Param: stream — đối tượng kênh xuất ra từ parser template.
+ * Output: `ExactScalarDescriptor` hoặc `undefined` khi `default` vắng mặt.
+ */
+export function getStreamDefaultDescriptor(stream: Pick<StreamOutputDto, 'default'>): ExactScalarDescriptor | undefined {
+  const stored = STREAM_EXACT_META.get(stream as StreamOutputDto)?.defaultDescriptor;
+  if (stored) return stored;
+  if (stream.default === undefined) return undefined;
+  return toScalarDescriptor(stream.default) ?? undefined;
+}
+
+/**
+ * Trả descriptor bảo toàn độ chính xác decimal cho `safeValue` của một `TemplateCommandDto`.
+ * Input
+ * Param: command — đối tượng capability `SET_VALUE`.
+ * Output: `ExactScalarDescriptor` tương ứng.
+ */
+export function getCommandSafeValueDescriptor(command: TemplateCommandDto): ExactScalarDescriptor {
+  const stored = COMMAND_EXACT_META.get(command);
+  if (stored) return stored;
+  return toScalarDescriptor(command.safeValue) ?? {
+    kind: 'string',
+    value: String(command.safeValue),
+    identity: `s:${String(command.safeValue)}`,
+    display: String(command.safeValue),
+  };
+}
+
+/**
+ * Phát hiện template có chứa phần tử ENUM dạng JSON number lịch sử hay không
+ * để khóa toàn bộ điều khiển sửa schema/capability trên draft và chỉ cho phép đổi tên an toàn.
+ * Input
+ * Param: target — template hoặc danh sách stream từ backend.
+ * Output: true nếu tồn tại ít nhất một kênh `ENUM` có thành viên dạng `number`.
+ */
+export function hasLegacyNumericEnum(
+  target: Pick<TemplateDto, 'streams'> | ReadonlyArray<StreamOutputDto>,
+): boolean {
+  const streams: ReadonlyArray<StreamOutputDto> = Array.isArray(target)
+    ? target
+    : (target as Pick<TemplateDto, 'streams'>).streams;
+  return streams.some(
+    /** Kiểm tra theo descriptor giữ nguyên kiểu nhằm không bỏ sót số hoặc nhầm chuỗi số. */
+    (stream) => stream.type === 'ENUM' && getStreamEnumDescriptors(stream).some((desc) => desc.kind === 'number'),
+  );
+}
+
 export interface StreamOutputDto {
   key: string;
   type: DatastreamType;
@@ -338,6 +782,7 @@ export function normalizeStreamInput(raw: unknown, index: number): StreamInputDt
     normalized.enumValues = values;
   }
 
+  const exactDefaultToken = EXACT_INPUT_DEFAULT_TOKEN.get(raw);
   if ('default' in raw && raw.default !== undefined) {
     normalized.default = assertValidStreamDefault(
       type,
@@ -347,13 +792,16 @@ export function normalizeStreamInput(raw: unknown, index: number): StreamInputDt
       normalized.enumValues,
       index,
     );
+    if (type === 'NUMBER' && exactDefaultToken !== undefined && canonicalDecimalIdentity(exactDefaultToken) !== null) {
+      EXACT_INPUT_DEFAULT_TOKEN.set(normalized, exactDefaultToken);
+    }
   }
 
   return normalized;
 }
 
 /**
- * Parse StreamOutput từ API theo đúng schema G1 (bắt buộc `channelKind`/`direction`, cho phép enum số lịch sử khi đọc).
+ * Parse StreamOutput từ API theo đúng schema G1 (bắt buộc `channelKind`/`direction`, cho phép enum số lịch sử và giữ nguyên token decimal chính xác).
  * Input
  * Param: raw — đối tượng stream từ JSON response server.
  * Output: `StreamOutputDto` đã kiểm chứng nghiêm ngặt.
@@ -379,6 +827,7 @@ export function parseStreamOutput(raw: unknown): StreamOutputDto {
     channelKind: raw.channelKind as ChannelKind,
     direction: raw.direction as StreamDirection,
   };
+  const exactMeta: ExactStreamMeta = {};
 
   if ('unit' in raw && raw.unit !== undefined) {
     if (raw.unit !== null && (typeof raw.unit !== 'string' || countCodePoints(raw.unit) < 1 || countCodePoints(raw.unit) > 32)) {
@@ -404,22 +853,32 @@ export function parseStreamOutput(raw: unknown): StreamOutputDto {
     }
     const seen = new Set<string>();
     const values: Array<string | number> = [];
+    const descriptors: ExactScalarDescriptor[] = [];
     for (const item of raw.enumValues) {
-      if (typeof item !== 'string' && (typeof item !== 'number' || !Number.isFinite(item))) {
+      const descriptor = toScalarDescriptor(item);
+      if (!descriptor || descriptor.kind === 'boolean') {
         throw new WorkspaceApiError('PROTOCOL_ERROR');
       }
-      const typedKey = `${typeof item}:${String(item)}`;
-      if (seen.has(typedKey)) throw new WorkspaceApiError('PROTOCOL_ERROR');
-      seen.add(typedKey);
-      values.push(item);
+      if (seen.has(descriptor.identity)) {
+        throw new WorkspaceApiError('PROTOCOL_ERROR');
+      }
+      seen.add(descriptor.identity);
+      descriptors.push(descriptor);
+      values.push(descriptor.kind === 'number' ? descriptor.value : descriptor.value);
     }
     parsed.enumValues = values;
+    exactMeta.enumDescriptors = descriptors;
   }
   if ('default' in raw && raw.default !== undefined) {
-    if (!isValidScalarValue(raw.default)) {
+    const defaultDescriptor = toScalarDescriptor(raw.default);
+    if (!defaultDescriptor) {
       throw new WorkspaceApiError('PROTOCOL_ERROR');
     }
-    parsed.default = raw.default;
+    parsed.default = defaultDescriptor.kind === 'number' ? defaultDescriptor.value : defaultDescriptor.value;
+    exactMeta.defaultDescriptor = defaultDescriptor;
+  }
+  if (exactMeta.enumDescriptors || exactMeta.defaultDescriptor) {
+    STREAM_EXACT_META.set(parsed, exactMeta);
   }
 
   return parsed;
@@ -429,7 +888,7 @@ export function parseStreamOutput(raw: unknown): StreamOutputDto {
  * Parse một phần tử `Command` từ response hoặc fixture G1.
  * Input
  * Param: raw — đối tượng capability đầu ra `SET_VALUE`.
- * Output: `TemplateCommandDto` đã xác thực schema đóng.
+ * Output: `TemplateCommandDto` đã xác thực schema đóng kèm descriptor giữ nguyên token số.
  * Errors: ném `WorkspaceApiError('PROTOCOL_ERROR')` khi sai type, thiếu safeValue hoặc chứa key lạ.
  */
 export function parseTemplateCommand(raw: unknown): TemplateCommandDto {
@@ -437,19 +896,26 @@ export function parseTemplateCommand(raw: unknown): TemplateCommandDto {
     throw new WorkspaceApiError('PROTOCOL_ERROR');
   }
   assertAllowedKeys(raw, COMMAND_KEYS);
+  const safeValueDescriptor = toScalarDescriptor(raw.safeValue);
   if (
     raw.type !== 'SET_VALUE'
     || typeof raw.stream !== 'string'
     || !STREAM_KEY_PATTERN.test(raw.stream)
-    || !isValidScalarValue(raw.safeValue)
+    || !safeValueDescriptor
   ) {
     throw new WorkspaceApiError('PROTOCOL_ERROR');
   }
-  return {
+  const parsed: TemplateCommandDto = {
     type: 'SET_VALUE',
     stream: raw.stream,
-    safeValue: raw.safeValue,
+    safeValue: safeValueDescriptor.value,
   };
+  COMMAND_EXACT_META.set(parsed, safeValueDescriptor);
+  const exactInputSafeValue = EXACT_INPUT_SAFE_VALUE_TOKEN.get(raw);
+  if (exactInputSafeValue !== undefined && canonicalDecimalIdentity(exactInputSafeValue) !== null) {
+    EXACT_INPUT_SAFE_VALUE_TOKEN.set(parsed, exactInputSafeValue);
+  }
+  return parsed;
 }
 
 /**
@@ -642,6 +1108,18 @@ export function buildTemplateCreatePayload(input: TemplateCreateInput): Template
 }
 
 /**
+ * Định dạng `ExactScalarDescriptor` (phân biệt chuỗi vs số và giữ nguyên token decimal lớn) cho bảng diff.
+ * Input
+ * Param: desc — descriptor cần hiển thị.
+ * Output: chuỗi phân biệt rõ kiểu, ví dụ `"1"` cho chuỗi và `1` / `9007199254740993` cho số.
+ */
+function formatDiffScalar(desc: ExactScalarDescriptor | undefined): string {
+  if (!desc) return '(bỏ qua)';
+  if (desc.kind === 'string') return JSON.stringify(desc.value);
+  return desc.display;
+}
+
+/**
  * Định dạng giá trị trường tùy chọn thành chuỗi ổn định phục vụ so sánh diff.
  * Input
  * Param: value — giá trị cần trình bày trong mô tả thay đổi.
@@ -708,11 +1186,15 @@ export function computeTemplateSchemaDiff(
       if ((prev.unit ?? null) !== (next.unit ?? null)) diffs.push(`unit: ${formatDiffValue(prev.unit ?? null)} → ${formatDiffValue(next.unit ?? null)}`);
       if (prev.min !== next.min) diffs.push(`min: ${formatDiffValue(prev.min)} → ${formatDiffValue(next.min)}`);
       if (prev.max !== next.max) diffs.push(`max: ${formatDiffValue(prev.max)} → ${formatDiffValue(next.max)}`);
-      if (JSON.stringify(prev.enumValues ?? []) !== JSON.stringify(next.enumValues ?? [])) {
-        diffs.push(`enumValues: ${formatDiffValue(prev.enumValues ?? [])} → ${formatDiffValue(next.enumValues ?? [])}`);
+      const prevEnums = getStreamEnumDescriptors(prev);
+      const nextEnums = getStreamEnumDescriptors(next);
+      if (JSON.stringify(prevEnums.map((d) => d.identity)) !== JSON.stringify(nextEnums.map((d) => d.identity))) {
+        diffs.push(`enumValues: [${prevEnums.map(formatDiffScalar).join(', ')}] → [${nextEnums.map(formatDiffScalar).join(', ')}]`);
       }
-      if (prev.default !== next.default) {
-        diffs.push(`default: ${formatDiffValue(prev.default)} → ${formatDiffValue(next.default)}`);
+      const prevDefault = getStreamDefaultDescriptor(prev);
+      const nextDefault = getStreamDefaultDescriptor(next);
+      if (prevDefault?.identity !== nextDefault?.identity) {
+        diffs.push(`default: ${formatDiffScalar(prevDefault)} → ${formatDiffScalar(nextDefault)}`);
       }
       if (diffs.length > 0) {
         streamChanges.push({ key, change: 'modified', details: diffs });
@@ -735,20 +1217,24 @@ export function computeTemplateSchemaDiff(
       commandChanges.push({
         key: stream,
         change: 'added',
-        details: [`Thêm SET_VALUE (safeValue: ${formatDiffValue(next.safeValue)})`],
+        details: [`Thêm SET_VALUE (safeValue: ${formatDiffScalar(getCommandSafeValueDescriptor(next))})`],
       });
     } else if (prev && !next) {
       commandChanges.push({
         key: stream,
         change: 'removed',
-        details: [`Gỡ bỏ SET_VALUE (safeValue cũ: ${formatDiffValue(prev.safeValue)})`],
+        details: [`Gỡ bỏ SET_VALUE (safeValue cũ: ${formatDiffScalar(getCommandSafeValueDescriptor(prev))})`],
       });
-    } else if (prev && next && prev.safeValue !== next.safeValue) {
-      commandChanges.push({
-        key: stream,
-        change: 'modified',
-        details: [`safeValue: ${formatDiffValue(prev.safeValue)} → ${formatDiffValue(next.safeValue)}`],
-      });
+    } else if (prev && next) {
+      const prevSafe = getCommandSafeValueDescriptor(prev);
+      const nextSafe = getCommandSafeValueDescriptor(next);
+      if (prevSafe.identity !== nextSafe.identity) {
+        commandChanges.push({
+          key: stream,
+          change: 'modified',
+          details: [`safeValue: ${formatDiffScalar(prevSafe)} → ${formatDiffScalar(nextSafe)}`],
+        });
+      }
     }
   }
 

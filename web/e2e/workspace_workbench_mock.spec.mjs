@@ -646,70 +646,112 @@ test(
 );
 
 test(
-  'INT-0508-RENAME-DATA-PRESERVATION: name-only rename preserves numeric ENUM values and whitespace-only default',
-  /** Kiểm tra đổi tên draft chỉ gửi field thay đổi trên PATCH (giữ nguyên ENUM số và default chỉ có khoảng trắng), và sửa kênh vẫn giữ whitespace default. */
+  'INT-0508-RENAME-DATA-PRESERVATION + INT-0508-ENUM-JSON-PRECISION: locks legacy numeric ENUM schema read-only, preserves 2^53 vs 2^53+1 on list/detail/versions, and allows name-only PATCH',
+  /** Hồi quy #150 cho bản nháp có ENUM số lịch sử: đọc raw token 2^53 vs 2^53+1 trên danh sách/chi tiết/snapshot lịch sử, khóa nút sửa schema/capability và chỉ cho PATCH đổi tên. */
   async ({ page }) => {
-    const tracker = await installG1MockApi(page);
+    await installG1MockApi(page);
 
-    // Chèn route mock draft có ENUM số [1, 2] và STRING default toàn khoảng trắng "   ".
-    let serverDraft = {
-      id: TEMPLATE_ID,
-      workspaceId: WORKSPACE_ID,
-      name: 'Cảm biến gốc',
-      model: 'FAN_LAB_V1',
-      status: 'DRAFT',
-      schemaVersion: 1,
-      revision: 1,
-      latestPublishedVersionId: null,
-      streams: [
+    let draftName = 'Cảm biến gốc';
+    let draftRevision = 1;
+    const makeRawLegacyDraft = () => `{
+      "id": "${TEMPLATE_ID}",
+      "workspaceId": "${WORKSPACE_ID}",
+      "status": "DRAFT",
+      "schemaVersion": 1,
+      "revision": ${draftRevision},
+      "latestPublishedVersionId": "${VERSION_V1_ID}",
+      "name": ${JSON.stringify(draftName)},
+      "model": "FAN_LAB_V1",
+      "streams": [
         {
-          key: 'fan_mode',
-          type: 'ENUM',
-          channelKind: 'STATE',
-          direction: 'READ_WRITE',
-          enumValues: [1, 2],
-        },
-        {
-          key: 'blank_label',
-          type: 'STRING',
-          channelKind: 'STATE',
-          direction: 'READ',
-          default: '   ',
-        },
+          "key": "fan_mode",
+          "type": "ENUM",
+          "channelKind": "STATE",
+          "direction": "READ_WRITE",
+          "enumValues": [9007199254740992, 9007199254740993, "1", 1],
+          "default": 9007199254740993
+        }
       ],
-      commands: [{ type: 'SET_VALUE', stream: 'fan_mode', safeValue: 1 }],
-      createdAt: '2026-11-26T00:00:00Z',
-      updatedAt: '2026-11-26T01:00:00Z',
-    };
+      "commands": [
+        { "type": "SET_VALUE", "stream": "fan_mode", "safeValue": 9007199254740993 }
+      ],
+      "createdAt": "2026-11-26T00:00:00Z",
+      "updatedAt": "2026-11-26T01:00:00Z"
+    }`;
+
+    const rawHistoricalVersion = `{
+      "id": "${VERSION_V1_ID}",
+      "workspaceId": "${WORKSPACE_ID}",
+      "templateId": "${TEMPLATE_ID}",
+      "version": 1,
+      "schemaVersion": 1,
+      "status": "PUBLISHED",
+      "name": "Cảm biến gốc",
+      "model": "FAN_LAB_V1",
+      "streams": [
+        {
+          "key": "fan_mode",
+          "type": "ENUM",
+          "channelKind": "STATE",
+          "direction": "READ_WRITE",
+          "enumValues": [9007199254740992, 9007199254740993],
+          "default": 9007199254740992
+        }
+      ],
+      "commands": [
+        { "type": "SET_VALUE", "stream": "fan_mode", "safeValue": 9007199254740992 }
+      ],
+      "sourceRevision": null,
+      "publishedAt": "2026-11-26T02:00:00Z"
+    }`;
 
     const capturedPatches = [];
-    await page.route(`**/api/v1/templates/${TEMPLATE_ID}`,
-      /** Phục vụ GET/PATCH với numeric ENUM và whitespace-only default cho ca hồi quy đổi tên. */
+    await page.route('**/api/v1/templates**',
+      /** Phục vụ danh sách, chi tiết và snapshot lịch sử bằng chuỗi JSON thô giữ nguyên số 2^53 và 2^53+1. */
       async (route) => {
         const req = route.request();
-        if (req.method() === 'GET') {
+        const url = new URL(req.url());
+        if (url.pathname === '/api/v1/templates' && req.method() === 'GET') {
           await route.fulfill({
             status: 200,
-            headers: { 'content-type': 'application/json', etag: `"${serverDraft.revision}"` },
-            body: JSON.stringify(serverDraft),
+            headers: { 'content-type': 'application/json' },
+            body: `{"items":[${makeRawLegacyDraft()}],"nextCursor":null}`,
           });
           return;
         }
-        if (req.method() === 'PATCH') {
-          const patchBody = req.postDataJSON();
-          capturedPatches.push(patchBody);
-          serverDraft = {
-            ...serverDraft,
-            name: patchBody.name ?? serverDraft.name,
-            model: patchBody.model ?? serverDraft.model,
-            streams: patchBody.streams ?? serverDraft.streams,
-            commands: patchBody.commands ?? serverDraft.commands,
-            revision: serverDraft.revision + 1,
-          };
+        if (url.pathname === `/api/v1/templates/${TEMPLATE_ID}` && req.method() === 'GET') {
           await route.fulfill({
             status: 200,
-            headers: { 'content-type': 'application/json', etag: `"${serverDraft.revision}"` },
-            body: JSON.stringify(serverDraft),
+            headers: { 'content-type': 'application/json', etag: `"${draftRevision}"` },
+            body: makeRawLegacyDraft(),
+          });
+          return;
+        }
+        if (url.pathname === `/api/v1/templates/${TEMPLATE_ID}` && req.method() === 'PATCH') {
+          const patchBody = req.postDataJSON();
+          capturedPatches.push({ headers: req.headers(), body: patchBody });
+          draftName = patchBody.name ?? draftName;
+          draftRevision += 1;
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json', etag: `"${draftRevision}"` },
+            body: makeRawLegacyDraft(),
+          });
+          return;
+        }
+        if (url.pathname === `/api/v1/templates/${TEMPLATE_ID}/versions` && req.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: `{"items":[${rawHistoricalVersion}],"nextCursor":null}`,
+          });
+          return;
+        }
+        if (url.pathname === `/api/v1/templates/${TEMPLATE_ID}/versions/${VERSION_V1_ID}` && req.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: rawHistoricalVersion,
           });
           return;
         }
@@ -725,25 +767,176 @@ test(
     await page.getByRole('button', { name: 'Templates (WB-03)' }).click();
     await page.getByRole('button', { name: 'Mở bản nháp' }).click();
 
-    await expect(page.locator('#tpl-stream-1-default')).toHaveValue('   ');
+    // 1. Bảo toàn độ chính xác 2^53 vs 2^53 + 1 trên form và snapshot lịch sử V4.
+    await expect(page.locator('#tpl-stream-0-enumValues-0')).toHaveValue('9007199254740992');
+    await expect(page.locator('#tpl-stream-0-enumValues-1')).toHaveValue('9007199254740993');
+    await expect(page.locator('#tpl-stream-0-default')).toHaveValue('9007199254740993');
+    await expect(page.locator('.tpl-version-detail')).toContainText('9007199254740992, 9007199254740993');
+    await expect(page.locator('#tpl-legacy-enum-lock-notice')).toBeVisible();
 
-    // 1. Đổi tên thuần túy -> PATCH chỉ gửi { name }, giữ nguyên numeric ENUM [1, 2] và default "   "
+    // 2. Điều khiển sửa model, schema và capability đều bị khóa chỉ đọc, còn tên template vẫn sửa được.
+    await expect(page.locator('#tpl-field-name')).toBeEditable();
+    await expect(page.locator('#tpl-field-model')).not.toBeEditable();
+    await expect(page.locator('#tpl-streams-add')).toBeDisabled();
+    await expect(page.locator('#tpl-stream-0-key')).not.toBeEditable();
+    await expect(page.locator('#tpl-stream-0-type')).toBeDisabled();
+    await expect(page.locator('#tpl-stream-0-enumValues-add')).toBeDisabled();
+    await expect(page.locator('#tpl-stream-0-enumValues-0')).not.toBeEditable();
+    await expect(page.locator('#tpl-stream-0-default')).toBeDisabled();
+    await expect(page.locator('#tpl-commands-add')).toBeDisabled();
+
+    // 3. Đổi tên thuần túy chỉ gửi { name } với If-Match, không gửi mảng streams/commands.
     await page.locator('#tpl-field-name').fill('Cảm biến đã đổi tên');
     await page.getByRole('button', { name: 'Lưu cập nhật nháp' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Đã lưu bản nháp trên máy chủ.' })).toContainText('Revision #2');
 
     expect(capturedPatches).toHaveLength(1);
-    expect(capturedPatches[0]).toEqual({ name: 'Cảm biến đã đổi tên' });
-    expect(serverDraft.streams[0].enumValues).toEqual([1, 2]);
-    expect(serverDraft.streams[1].default).toBe('   ');
+    expect(capturedPatches[0].headers['if-match']).toBe('"1"');
+    expect(capturedPatches[0].body).toEqual({ name: 'Cảm biến đã đổi tên' });
+    await expect(page.locator('#tpl-stream-0-enumValues-1')).toHaveValue('9007199254740993');
+  },
+);
 
-    // 2. Sửa một trường stream (STRING -> đổi key) vẫn giữ nguyên default toàn khoảng trắng "   " của kênh STRING
-    await page.locator('#tpl-stream-1-key').fill('blank_label_v2');
+test(
+  'INT-0508-RENAME-DATA-PRESERVATION (writable): fresh explicit empty "", whitespace "   ", absent default, and exact untouched 2^53+1 scalars survive across other-stream edit',
+  /** Hồi quy #150 cho bản nháp có thể ghi: mở mới bản nháp mang default "", default "   ", default vắng mặt và số 2^53+1, sửa một kênh khác nhưng giữ nguyên toàn bộ giá trị không đụng tới. */
+  async ({ page }) => {
+    await installG1MockApi(page);
+
+    let savedRevision = 1;
+    let currentWritableJson = `{
+      "id": "${TEMPLATE_ID}",
+      "workspaceId": "${WORKSPACE_ID}",
+      "status": "DRAFT",
+      "schemaVersion": 1,
+      "revision": 1,
+      "latestPublishedVersionId": null,
+      "name": "Writable Precision Draft",
+      "model": "FAN_LAB_V1",
+      "streams": [
+        { "key": "empty_note", "type": "STRING", "channelKind": "STATE", "direction": "READ", "default": "" },
+        { "key": "blank_note", "type": "STRING", "channelKind": "STATE", "direction": "READ", "default": "   " },
+        { "key": "counter", "type": "NUMBER", "channelKind": "STATE", "direction": "READ_WRITE", "unit": "cnt", "min": 0, "max": 1e20, "default": 9007199254740993 },
+        { "key": "absent_note", "type": "STRING", "channelKind": "STATE", "direction": "READ" }
+      ],
+      "commands": [
+        { "type": "SET_VALUE", "stream": "counter", "safeValue": 9007199254740993 }
+      ],
+      "createdAt": "2026-11-26T00:00:00Z",
+      "updatedAt": "2026-11-26T01:00:00Z"
+    }`;
+
+    const capturedRawPatches = [];
+    await page.route('**/api/v1/templates**',
+      /** Trả JSON thô và bắt nguyên văn chuỗi PATCH body do trình duyệt gửi. */
+      async (route) => {
+        const req = route.request();
+        const url = new URL(req.url());
+        if (url.pathname === '/api/v1/templates' && req.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: `{"items":[${currentWritableJson}],"nextCursor":null}`,
+          });
+          return;
+        }
+        if (url.pathname === `/api/v1/templates/${TEMPLATE_ID}` && req.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json', etag: `"${savedRevision}"` },
+            body: currentWritableJson,
+          });
+          return;
+        }
+        if (url.pathname === `/api/v1/templates/${TEMPLATE_ID}` && req.method() === 'PATCH') {
+          const rawBody = req.postData() ?? '';
+          const patchBody = req.postDataJSON();
+          capturedRawPatches.push(rawBody);
+          savedRevision += 1;
+          const prevParsed = JSON.parse(
+            currentWritableJson.replace(/:\s*9007199254740993/g, ':"__EXACT_2P53P1__"'),
+          );
+          const nextStreams = patchBody.streams
+            ? JSON.parse(rawBody.replace(/:\s*9007199254740993/g, ':"__EXACT_2P53P1__"')).streams
+            : prevParsed.streams;
+          const nextCommands = patchBody.commands
+            ? JSON.parse(rawBody.replace(/:\s*9007199254740993/g, ':"__EXACT_2P53P1__"')).commands
+            : prevParsed.commands;
+          currentWritableJson = `{
+            "id": "${TEMPLATE_ID}",
+            "workspaceId": "${WORKSPACE_ID}",
+            "status": "DRAFT",
+            "schemaVersion": 1,
+            "revision": ${savedRevision},
+            "latestPublishedVersionId": null,
+            "name": ${JSON.stringify(patchBody.name ?? prevParsed.name)},
+            "model": ${JSON.stringify(patchBody.model ?? prevParsed.model)},
+            "streams": ${JSON.stringify(nextStreams).replace(/"__EXACT_2P53P1__"/g, '9007199254740993')},
+            "commands": ${JSON.stringify(nextCommands).replace(/"__EXACT_2P53P1__"/g, '9007199254740993')},
+            "createdAt": "2026-11-26T00:00:00Z",
+            "updatedAt": "2026-11-26T01:00:00Z"
+          }`;
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json', etag: `"${savedRevision}"` },
+            body: currentWritableJson,
+          });
+          return;
+        }
+        if (url.pathname === `/api/v1/templates/${TEMPLATE_ID}/versions` && req.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: '{"items":[],"nextCursor":null}',
+          });
+          return;
+        }
+        await route.fallback();
+      },
+    );
+
+    await page.goto('/login');
+    await page.locator('#email').fill('admin@nexa.local');
+    await page.locator('#password').fill('TestPassword123!');
+    await page.getByRole('button', { name: 'Đăng nhập' }).click();
+    await page.getByRole('button', { name: /Chọn workspace Lab Alpha/i }).click();
+    await page.getByRole('button', { name: 'Templates (WB-03)' }).click();
+    await page.getByRole('button', { name: 'Mở bản nháp' }).click();
+
+    await expect(page.locator('#tpl-stream-0-default')).toHaveValue('');
+    await expect(page.locator('#tpl-stream-0-default-present')).toBeChecked();
+    await expect(page.locator('#tpl-stream-1-default')).toHaveValue('   ');
+    await expect(page.locator('#tpl-stream-2-default')).toHaveValue('9007199254740993');
+    await expect(page.locator('#tpl-stream-3-default-present')).not.toBeChecked();
+
+    // 1. Chỉ sửa key của kênh thứ 4 (absent_note); các kênh 0/1/2 và command giữ nguyên không chạm tới.
+    await page.locator('#tpl-stream-3-key').fill('absent_note_v2');
+    await page.getByRole('button', { name: 'Lưu cập nhật nháp' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Đã lưu bản nháp trên máy chủ.' })).toContainText('Revision #2');
+
+    expect(capturedRawPatches).toHaveLength(1);
+    const rawPatch1 = capturedRawPatches[0];
+    expect(rawPatch1).toContain('"key":"empty_note"');
+    expect(rawPatch1).toContain('"default":""');
+    expect(rawPatch1).toContain('"default":"   "');
+    expect(rawPatch1).toContain('"default":9007199254740993');
+    const parsedPatch1 = JSON.parse(rawPatch1);
+    expect(Object.hasOwn(parsedPatch1.streams[3], 'default')).toBe(false);
+    expect(parsedPatch1.commands).toBeUndefined();
+    await expect(page.locator('#tpl-command-0-safeValue')).toHaveValue('9007199254740993');
+
+    // 2. Thêm kênh + capability mới mà không sửa command 0 -> mảng commands gửi lên vẫn giữ nguyên safeValue 9007199254740993.
+    await page.locator('#tpl-streams-add').click();
+    await page.locator('#tpl-stream-4-key').fill('led');
+    await page.locator('#tpl-stream-4-type').selectOption('BOOLEAN');
+    await page.locator('#tpl-stream-4-direction').selectOption('WRITE');
+    await page.getByRole('button', { name: /Tạo SET_VALUE cho/i }).click();
+    await page.locator('#tpl-command-1-safeValue').selectOption('false');
     await page.getByRole('button', { name: 'Lưu cập nhật nháp' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Đã lưu bản nháp trên máy chủ.' })).toContainText('Revision #3');
 
-    expect(capturedPatches).toHaveLength(2);
-    expect(capturedPatches[1].streams[1].default).toBe('   ');
+    expect(capturedRawPatches).toHaveLength(2);
+    expect(capturedRawPatches[1]).toContain('"safeValue":9007199254740993');
   },
 );
 
@@ -883,5 +1076,133 @@ test(
     await expect(alertSummary).toBeVisible();
     await expect(alertSummary).toContainText('Đăng ký bị từ chối (OWNER_INVALID).');
     await expect(alertSummary).toBeFocused();
+  },
+);
+
+test(
+  'INT-0508-REG-ARCHIVED-PIN: excludes ARCHIVED family pins while retaining PUBLISHED and DRAFT-root historical pins across pages',
+  /** Kiểm tra picker #dev-field-version loại bỏ template ARCHIVED, không gọi /versions của family ARCHIVED, nhưng giữ nguyên version của family PUBLISHED và DRAFT có bản công bố cũ. */
+  async ({ page }) => {
+    await installG1MockApi(page, {
+      initialStatus: 'PUBLISHED',
+      initialLatestPublishedVersionId: VERSION_V1_ID,
+    });
+
+    const TEMPLATE_ARCHIVED_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3';
+    const TEMPLATE_DRAFT_PIN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4';
+    const VER_ARCHIVED_ID = 'cccccccc-cccc-4ccc-8ccc-ccccccccccc3';
+    const VER_DRAFT_HIST_ID = 'cccccccc-cccc-4ccc-8ccc-ccccccccccc4';
+    const fetchedVersionPaths = [];
+
+    await page.route('**/api/v1/templates**',
+      /** Mô phỏng phân trang danh sách template gồm PUBLISHED, ARCHIVED và DRAFT từng công bố version. */
+      async (route) => {
+        const req = route.request();
+        const url = new URL(req.url());
+        if (url.pathname === '/api/v1/templates' && req.method() === 'GET') {
+          const cursor = url.searchParams.get('cursor');
+          if (!cursor) {
+            await route.fulfill({
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                items: [
+                  {
+                    id: TEMPLATE_ID,
+                    workspaceId: WORKSPACE_ID,
+                    name: 'Quạt Lab Chuẩn',
+                    model: 'FAN_LAB_V1',
+                    status: 'PUBLISHED',
+                    schemaVersion: 1,
+                    revision: 1,
+                    latestPublishedVersionId: VERSION_V1_ID,
+                    streams: [BASE_STREAM],
+                    commands: [BASE_COMMAND],
+                    createdAt: '2026-11-26T00:00:00Z',
+                    updatedAt: '2026-11-26T01:00:00Z',
+                  },
+                  {
+                    id: TEMPLATE_ARCHIVED_ID,
+                    workspaceId: WORKSPACE_ID,
+                    name: 'Cảm biến đã lưu trữ',
+                    model: 'FAN_ARCHIVED',
+                    status: 'ARCHIVED',
+                    schemaVersion: 1,
+                    revision: 2,
+                    latestPublishedVersionId: VER_ARCHIVED_ID,
+                    streams: [BASE_STREAM],
+                    commands: [BASE_COMMAND],
+                    createdAt: '2026-11-26T00:00:00Z',
+                    updatedAt: '2026-11-26T01:00:00Z',
+                  },
+                ],
+                nextCursor: 'tpl-page-2',
+              }),
+            });
+            return;
+          }
+          await route.fulfill({
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              items: [
+                {
+                  id: TEMPLATE_DRAFT_PIN_ID,
+                  workspaceId: WORKSPACE_ID,
+                  name: 'Quạt Lab Draft Mới',
+                  model: 'FAN_DRAFT_HIST',
+                  status: 'DRAFT',
+                  schemaVersion: 1,
+                  revision: 3,
+                  latestPublishedVersionId: VER_DRAFT_HIST_ID,
+                  streams: [BASE_STREAM],
+                  commands: [BASE_COMMAND],
+                  createdAt: '2026-11-26T00:00:00Z',
+                  updatedAt: '2026-11-26T01:00:00Z',
+                },
+              ],
+              nextCursor: null,
+            }),
+          });
+          return;
+        }
+        if (url.pathname.endsWith('/versions') && req.method() === 'GET') {
+          fetchedVersionPaths.push(url.pathname);
+          if (url.pathname === `/api/v1/templates/${TEMPLATE_DRAFT_PIN_ID}/versions`) {
+            await route.fulfill({
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                items: [{
+                  ...makeVersionV1(),
+                  id: VER_DRAFT_HIST_ID,
+                  templateId: TEMPLATE_DRAFT_PIN_ID,
+                  version: 1,
+                  name: 'Quạt Lab Draft Mới',
+                  model: 'FAN_DRAFT_HIST',
+                }],
+                nextCursor: null,
+              }),
+            });
+            return;
+          }
+        }
+        await route.fallback();
+      },
+    );
+
+    await page.goto('/login');
+    await page.locator('#email').fill('admin@nexa.local');
+    await page.locator('#password').fill('TestPassword123!');
+    await page.getByRole('button', { name: 'Đăng nhập' }).click();
+    await page.getByRole('button', { name: /Chọn workspace Lab Alpha/i }).click();
+    await page.getByRole('button', { name: 'Thiết bị & USB (WB-04)' }).click();
+
+    const versionSelect = page.locator('#dev-field-version');
+    await expect(versionSelect).toBeEnabled();
+    await expect(versionSelect.locator(`option[value="${VERSION_V1_ID}"]`)).toHaveCount(1);
+    await expect(versionSelect.locator(`option[value="${VER_DRAFT_HIST_ID}"]`)).toHaveCount(1);
+    await expect(versionSelect.locator(`option[value="${VER_ARCHIVED_ID}"]`)).toHaveCount(0);
+    expect(fetchedVersionPaths).not.toContain(`/api/v1/templates/${TEMPLATE_ARCHIVED_ID}/versions`);
   },
 );

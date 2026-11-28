@@ -28,6 +28,8 @@ export interface WorkspaceRequestOptions {
   ifMatchRevision?: number;
   idempotencyKey?: string;
   body?: unknown;
+  rawJsonBody?: string;
+  parseResponseText?: (rawText: string) => unknown;
   signal?: AbortSignal;
 }
 
@@ -206,7 +208,13 @@ export async function workspaceRequest(
   }
 
   let serializedBody: string | undefined;
-  if (options.body !== undefined) {
+  if (options.rawJsonBody !== undefined) {
+    serializedBody = options.rawJsonBody;
+    if (new TextEncoder().encode(serializedBody).length > MAX_REST_BODY_BYTES) {
+      throw new WorkspaceApiError('VALIDATION_ERROR', 413);
+    }
+    headers['Content-Type'] = 'application/json';
+  } else if (options.body !== undefined) {
     // Từ chối nếu caller cố gắn workspaceId vào body vì backend cấm ghi đè scope từ payload.
     if (isJsonRecord(options.body) && 'workspaceId' in options.body) {
       throw new WorkspaceApiError('VALIDATION_ERROR', 422, [{ path: '/workspaceId', code: 'UNKNOWN_FIELD' }]);
@@ -248,17 +256,29 @@ export async function workspaceRequest(
     if (response.status === 204) {
       return { status: 204, body: null };
     }
+    if (!response.ok) {
+      let errorBody: unknown;
+      try {
+        errorBody = await response.json();
+      } catch {
+        if (response.status >= 500) {
+          throw new WorkspaceApiError('SERVICE_UNAVAILABLE', response.status);
+        }
+        throw new WorkspaceApiError('PROTOCOL_ERROR', response.status);
+      }
+      throw parseErrorEnvelope(response.status, errorBody);
+    }
     let parsedBody: unknown;
     try {
-      parsedBody = await response.json();
-    } catch {
-      if (!response.ok && response.status >= 500) {
-        throw new WorkspaceApiError('SERVICE_UNAVAILABLE', response.status);
+      if (options.parseResponseText) {
+        const rawText = await response.text();
+        parsedBody = options.parseResponseText(rawText);
+      } else {
+        parsedBody = await response.json();
       }
+    } catch (parseError) {
+      if (parseError instanceof WorkspaceApiError) throw parseError;
       throw new WorkspaceApiError('PROTOCOL_ERROR', response.status);
-    }
-    if (!response.ok) {
-      throw parseErrorEnvelope(response.status, parsedBody);
     }
     return { status: response.status, body: parsedBody };
   } catch (error) {

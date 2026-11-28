@@ -179,6 +179,24 @@ class TemplatesDevicesContractTests(unittest.TestCase):
             self.assertTrue(matches_schema(versions, self.schema["SupportedTemplateVersions"], SCHEMA_PATH))
             self.assertEqual(pin in versions, case["compatible"])
 
+    def test_manifest_rejects_malformed_supported_template_versions(self):
+        """Kiểm tra field manifest từ chối kiểu sai, UUID sai và UUID có xuống dòng cuối."""
+        invalid_cases = self.fixture["manifestCompatibility"]["invalidCases"]
+        openapi_field = self.openapi["components"]["schemas"]["SupportedTemplateVersions"]
+        self.assertEqual(
+            [case["supportedTemplateVersions"] for case in invalid_cases],
+            [[1], ["1"], ["not-a-uuid"], ["00000000-0000-4000-8000-000000000003\n"]],
+        )
+        for case in invalid_cases:
+            with self.subTest(case=case["name"]):
+                self.assertFalse(
+                    matches_schema(
+                        case["supportedTemplateVersions"],
+                        openapi_field,
+                        OPENAPI_PATH,
+                    )
+                )
+
     def test_snapshot_provenance_unknown_is_read_only(self):
         """Cho phép đọc snapshot legacy theo UUID, giữ provenance bắt buộc khi publish mới."""
         legacy = self.cases["CT-PUBLISH-LEGACY-PROVENANCE"]["response"]["body"]

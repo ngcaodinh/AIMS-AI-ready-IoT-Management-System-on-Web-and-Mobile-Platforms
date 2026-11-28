@@ -591,7 +591,8 @@
     "SupportedTemplateVersions": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/Uuid"
+        "$ref": "#/$defs/Uuid",
+        "maxLength": 36
       },
       "minItems": 1,
       "maxItems": 64,
